@@ -131,6 +131,38 @@ net start OpenLabStats
 # Uninstall
 net stop OpenLabStats
 .\openlabstats-agent.exe uninstall
+
+## MSI Installer
+
+The agent can be deployed via MSI with full support for silent installation and remote configuration.
+
+### Public Properties
+
+| Property | Description | Default |
+|----------|-------------|---------|
+| `SERVERADDRESS` | URL of the central management server | `""` |
+| `PORT` | Prometheus metrics scrape port | `9183` |
+| `BUILDING` | Lab building name for auto-assignment | `""` |
+| `ROOM` | Lab room number for auto-assignment | `""` |
+| `INSTALLDIR` | Custom installation path | `C:\Program Files\OpenLabStats` |
+
+### Silent Install Examples
+
+```powershell
+# Standard install with server enrollment
+msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="http://openlabstats.campus.edu:8080"
+
+# Install with automatic lab and room assignment
+msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="http://server:8080" BUILDING="Science Hall" ROOM="302"
+```
+
+### Auto-Registration Logic
+
+When an agent registers with the server:
+1. It sends the `BUILDING` and `ROOM` configured during installation.
+2. The server looks for a lab matching that building and room.
+3. If a match is found, the agent is automatically assigned to that lab.
+4. If no match is found, the server **automatically creates a new lab** and assigns the agent to it.
 ```
 
 ## Metrics Endpoint

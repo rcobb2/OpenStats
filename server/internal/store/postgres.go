@@ -89,6 +89,20 @@ func (s *Store) migrate(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_mappings_exe ON software_mappings(exe_name);
 
 	ALTER TABLE labs ADD COLUMN IF NOT EXISTS room TEXT NOT NULL DEFAULT '';
+
+	CREATE TABLE IF NOT EXISTS settings (
+		key         TEXT PRIMARY KEY,
+		value       TEXT NOT NULL,
+		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	-- Initialize default settings if they don't exist
+	INSERT INTO settings (key, value) VALUES ('heartbeat_interval_seconds', '120') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('update_interval_seconds', '3600') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('stale_timeout_days', '90') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.0') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('maintenance_window_start', '22:00') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('maintenance_window_end', '04:00') ON CONFLICT DO NOTHING;
 	`
 	_, err := s.pool.Exec(ctx, schema)
 	if err != nil {
@@ -108,6 +122,8 @@ type Agent struct {
 	LabID        *string   `json:"labId,omitempty"`
 	Port         int       `json:"port"`
 	Status       string    `json:"status"`
+	Building     string    `json:"building"`
+	Room         string    `json:"room"`
 	LastSeen     time.Time `json:"lastSeen"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -115,18 +131,37 @@ type Agent struct {
 
 // UpsertAgent registers or updates an agent (idempotent on hostname).
 func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
+	// If building/room are provided, try to find or create a matching lab.
+	if a.Building != "" && a.Room != "" {
+		var labID string
+		err := s.pool.QueryRow(ctx, `SELECT id FROM labs WHERE building = $1 AND room = $2`, a.Building, a.Room).Scan(&labID)
+		if err != nil {
+			// Create new lab if not found.
+			labID = fmt.Sprintf("%s-%s", a.Building, a.Room)
+			labName := fmt.Sprintf("%s %s", a.Building, a.Room)
+			_ = s.CreateLab(ctx, &Lab{
+				ID:       labID,
+				Name:     labName,
+				Building: a.Building,
+				Room:     a.Room,
+			})
+		}
+		a.LabID = &labID
+	}
+
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO agents (id, hostname, ip_address, os_version, agent_version, port, status, last_seen)
-		VALUES ($1, $2, $3, $4, $5, $6, 'online', NOW())
+		INSERT INTO agents (id, hostname, ip_address, os_version, agent_version, port, status, last_seen, lab_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
 		ON CONFLICT (id) DO UPDATE SET
 			ip_address = EXCLUDED.ip_address,
 			os_version = EXCLUDED.os_version,
 			agent_version = EXCLUDED.agent_version,
 			port = EXCLUDED.port,
-			status = 'online',
+			status = EXCLUDED.status,
 			last_seen = NOW(),
-			updated_at = NOW()`,
-		a.ID, a.Hostname, a.IPAddress, a.OSVersion, a.AgentVersion, a.Port,
+			updated_at = NOW(),
+			lab_id = COALESCE(agents.lab_id, EXCLUDED.lab_id)`, // Don't overwrite existing lab assignment if already set manually
+		a.ID, a.Hostname, a.IPAddress, a.OSVersion, a.AgentVersion, a.Port, a.Status, a.LabID,
 	)
 	return err
 }
@@ -183,6 +218,15 @@ func (s *Store) MarkStaleAgents(ctx context.Context, threshold time.Duration) er
 		UPDATE agents SET status = 'offline', updated_at = NOW()
 		WHERE status = 'online' AND last_seen < NOW() - $1::interval`,
 		threshold.String(),
+	)
+	return err
+}
+
+func (s *Store) DeleteStaleAgents(ctx context.Context, days int) error {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM agents
+		WHERE last_seen < NOW() - ($1 || ' days')::interval`,
+		fmt.Sprintf("%d", days),
 	)
 	return err
 }
@@ -385,4 +429,85 @@ func (s *Store) GetPrometheusTargets(ctx context.Context) ([]AgentTarget, error)
 		})
 	}
 	return targets, rows.Err()
+}
+// --- System settings ---
+
+type SystemSettings struct {
+	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds"`
+	UpdateIntervalSeconds    int    `json:"updateIntervalSeconds"`
+	StaleTimeoutDays         int    `json:"staleTimeoutDays"`
+	MinAgentVersion          string `json:"minAgentVersion"`
+	MaintenanceWindowStart   string `json:"maintenanceWindowStart"` // HH:mm
+	MaintenanceWindowEnd     string `json:"maintenanceWindowEnd"`   // HH:mm
+}
+
+func (s *Store) GetSettings(ctx context.Context) (*SystemSettings, error) {
+	rows, err := s.pool.Query(ctx, `SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := &SystemSettings{
+		HeartbeatIntervalSeconds: 120,
+		UpdateIntervalSeconds:    3600,
+		StaleTimeoutDays:         90,
+		MinAgentVersion:          "0.1.0",
+		MaintenanceWindowStart:   "22:00",
+		MaintenanceWindowEnd:     "04:00",
+	}
+
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		switch key {
+		case "heartbeat_interval_seconds":
+			fmt.Sscanf(value, "%d", &settings.HeartbeatIntervalSeconds)
+		case "update_interval_seconds":
+			fmt.Sscanf(value, "%d", &settings.UpdateIntervalSeconds)
+		case "stale_timeout_days":
+			fmt.Sscanf(value, "%d", &settings.StaleTimeoutDays)
+		case "min_agent_version":
+			settings.MinAgentVersion = value
+		case "maintenance_window_start":
+			settings.MaintenanceWindowStart = value
+		case "maintenance_window_end":
+			settings.MaintenanceWindowEnd = value
+		}
+	}
+	return settings, rows.Err()
+}
+
+func (s *Store) UpdateSettings(ctx context.Context, settings *SystemSettings) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	upsert := `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`
+
+	updates := map[string]string{
+		"heartbeat_interval_seconds": fmt.Sprintf("%d", settings.HeartbeatIntervalSeconds),
+		"update_interval_seconds":    fmt.Sprintf("%d", settings.UpdateIntervalSeconds),
+		"stale_timeout_days":         fmt.Sprintf("%d", settings.StaleTimeoutDays),
+		"min_agent_version":          settings.MinAgentVersion,
+		"maintenance_window_start":   settings.MaintenanceWindowStart,
+		"maintenance_window_end":     settings.MaintenanceWindowEnd,
+	}
+
+	for k, v := range updates {
+		if _, err := tx.Exec(ctx, upsert, k, v); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+func (s *Store) GetLatestInstaller(ctx context.Context) (string, error) {
+	var filename string
+	err := s.pool.QueryRow(ctx, `SELECT filename FROM installer_builds ORDER BY created_at DESC LIMIT 1`).Scan(&filename)
+	return filename, err
 }

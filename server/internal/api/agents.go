@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -16,6 +18,14 @@ type RegisterAgentRequest struct {
 	OSVersion    string `json:"osVersion"`
 	AgentVersion string `json:"agentVersion"`
 	Port         int    `json:"port"`
+	Building     string `json:"building"`
+	Room         string `json:"room"`
+}
+
+type RegisterAgentResponse struct {
+	Agent     *store.Agent          `json:"agent"`
+	Settings  *store.SystemSettings `json:"settings"`
+	UpdateURL string                `json:"updateUrl,omitempty"`
 }
 
 // RegisterAgent godoc
@@ -51,6 +61,15 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		req.ID = req.Hostname
 	}
 
+	// Determine status based on version.
+	status := "online"
+	settings, _ := s.store.GetSettings(r.Context())
+	if settings != nil && settings.MinAgentVersion != "" {
+		if isVersionBelow(req.AgentVersion, settings.MinAgentVersion) {
+			status = "outdated"
+		}
+	}
+
 	agent := &store.Agent{
 		ID:           req.ID,
 		Hostname:     req.Hostname,
@@ -58,6 +77,9 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		OSVersion:    req.OSVersion,
 		AgentVersion: req.AgentVersion,
 		Port:         req.Port,
+		Status:       status,
+		Building:     req.Building,
+		Room:         req.Room,
 	}
 
 	if err := s.store.UpsertAgent(r.Context(), agent); err != nil {
@@ -72,7 +94,20 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("agent registered", "hostname", req.Hostname, "ip", req.IPAddress)
-	writeJSON(w, http.StatusOK, agent)
+
+	// If outdated, check for an update URL.
+	updateURL := ""
+	if status == "outdated" {
+		if filename, err := s.store.GetLatestInstaller(r.Context()); err == nil {
+			updateURL = "/api/v1/installers/download/" + filename
+		}
+	}
+
+	writeJSON(w, http.StatusOK, RegisterAgentResponse{
+		Agent:     agent,
+		Settings:  settings,
+		UpdateURL: updateURL,
+	})
 }
 
 // ListAgents godoc
@@ -175,4 +210,21 @@ func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func isVersionBelow(current, target string) bool {
+	cParts := strings.Split(current, ".")
+	tParts := strings.Split(target, ".")
+
+	for i := 0; i < len(cParts) && i < len(tParts); i++ {
+		cv, _ := strconv.Atoi(cParts[i])
+		tv, _ := strconv.Atoi(tParts[i])
+		if cv < tv {
+			return true
+		}
+		if cv > tv {
+			return false
+		}
+	}
+	return len(cParts) < len(tParts)
 }

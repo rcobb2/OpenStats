@@ -112,7 +112,7 @@ Write-Host "  Output:  $MsiOutput" -ForegroundColor White
 Write-Host "  Version: $Version" -ForegroundColor White
 Write-Host ""
 Write-Host "  Install (silent):" -ForegroundColor Gray
-Write-Host "    msiexec /i `"$MsiOutput`" /qn SERVERADDRESS=server.campus.edu" -ForegroundColor Gray
+Write-Host "    msiexec /i `"$MsiOutput`" /qn SERVERADDRESS=http://server:8080 BUILDING=Library ROOM=101" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Install (with logging):" -ForegroundColor Gray
-Write-Host "    msiexec /i `"$MsiOutput`" /qn /l*v install.log SERVERADDRESS=server.campus.edu PORT=9183" -ForegroundColor Gray
+Write-Host "    msiexec /i `"$MsiOutput`" /qn /l*v install.log SERVERADDRESS=http://server:8080 BUILDING=Library ROOM=101 PORT=9183" -ForegroundColor Gray

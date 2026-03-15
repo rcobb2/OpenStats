@@ -13,6 +13,8 @@ monitor:
   reconcileInterval: 30s
   # Minimum process lifetime to track (filters transient system processes)
   minLifetime: 2s
+  building: ""
+  room: ""
   # Process name patterns to exclude from tracking (regex)
   excludePatterns:
     - "(?i)^svchost\\.exe$"

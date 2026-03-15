@@ -67,7 +67,9 @@ getActiveUsers()
 // Installers
 generateInstaller(data)
 
+// Settings
 getSettings()
+updateSettings(data)
 ```
 
 Base URL: `/api/v1` (proxied by server)
@@ -85,13 +87,25 @@ Base URL: `/api/v1` (proxied by server)
 - Create/edit/delete labs
 - Fields: name, building, room, description
 
-### Agents (`pages/Agents.jsx`)
+### Agents
+
+#### Monitor (`pages/agents/AgentsList.jsx`)
 - List all registered agents
 - Show status (online/offline)
 - Assign to lab
 - Delete agent
 - Columns: hostname, IP, OS, version, lab, status, last seen
 
+#### Installers (`pages/agents/Installer.jsx`)
+- Generate customized agent installer
+- Configure: server address, agent port, default building/room
+- Shows silent deployment commands
+
+#### Settings (`pages/agents/Settings.jsx`)
+- Fleet-wide configuration
+- Heartbeat interval
+- Force agent version updates
+- Stale agent cleanup threshold
 ### Mappings (`pages/Mappings.jsx`)
 - List software name mappings
 - Create/edit/delete mappings
@@ -103,10 +117,6 @@ Base URL: `/api/v1` (proxied by server)
 - Active users
 - Time range selector (24h, 7d, 30d)
 
-### Installer (`pages/Installer.jsx`)
-- Generate customized agent installer
-- Configure: server address, agent port
-- Download generated installer
 
 ## Components
 
@@ -129,11 +139,12 @@ Uses React Router:
 <Routes>
   <Route path="/" element={<Layout />}>
     <Route index element={<Dashboard />} />
+    <Route path="agents" element={<AgentsList />} />
+    <Route path="agents/installers" element={<Installer />} />
+    <Route path="agents/settings" element={<Settings />} />
     <Route path="labs" element={<Labs />} />
-    <Route path="agents" element={<Agents />} />
     <Route path="mappings" element={<Mappings />} />
     <Route path="reports" element={<Reports />} />
-    <Route path="installer" element={<Installer />} />
   </Route>
 </Routes>
 ```

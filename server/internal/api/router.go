@@ -102,7 +102,10 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		})
 
 		// Settings
-		r.Get("/settings", s.GetSettings)
+		r.Route("/settings", func(r chi.Router) {
+			r.Get("/", s.GetSettings)
+			r.Put("/", s.UpdateSettings)
+		})
 	})
 
 	// SPA frontend

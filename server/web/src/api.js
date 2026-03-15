@@ -43,3 +43,4 @@ export const generateInstaller = (data) =>
 
 // Settings
 export const getSettings = () => request('/settings');
+export const updateSettings = (data) => request('/settings', { method: 'PUT', body: JSON.stringify(data) });

@@ -58,28 +58,6 @@ func (s *Server) GenerateInstaller(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// GetSettings godoc
-// @Summary      Get server settings
-// @Description  Returns the current server configuration (non-sensitive fields).
-// @Tags         settings
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}
-// @Router       /api/v1/settings [get]
-func (s *Server) GetSettings(w http.ResponseWriter, r *http.Request) {
-	settings := map[string]interface{}{
-		"server": map[string]interface{}{
-			"port": s.cfg.Server.Port,
-		},
-		"prometheus": map[string]interface{}{
-			"url": s.cfg.Prom.URL,
-		},
-		"fileSD": map[string]interface{}{
-			"outputPath": s.cfg.FileSD.OutputPath,
-		},
-	}
-	writeJSON(w, http.StatusOK, settings)
-}
-
 func intToStr(i int) string {
 	return fmt.Sprintf("%d", i)
 }

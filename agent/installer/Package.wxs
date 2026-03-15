@@ -10,6 +10,8 @@
        Properties:
          SERVERADDRESS  - Central management server URL (optional)
          PORT           - Prometheus metrics port (default: 9183)
+         BUILDING       - Lab building name (optional)
+         ROOM           - Lab room number (optional)
          INSTALLDIR     - Installation directory (default: C:\Program Files\OpenLabStats)
        ================================================================ -->
 
@@ -30,6 +32,8 @@
          ============================================================ -->
     <Property Id="SERVERADDRESS" Value="" Secure="yes" />
     <Property Id="PORT" Value="9183" Secure="yes" />
+    <Property Id="BUILDING" Value="" Secure="yes" />
+    <Property Id="ROOM" Value="" Secure="yes" />
 
     <!-- ============================================================
          Directory structure
@@ -134,13 +138,13 @@
     <!-- Simpler approach: use a deferred CA to do string replacement in agent.yaml -->
     <CustomAction Id="ConfigureAgent"
                   Directory="INSTALLDIR"
-                  ExeCommand="[SystemFolder]cmd.exe /c powershell -NoProfile -Command &quot;$c = Get-Content '[ConfigDir]agent.yaml' -Raw; $c = $c -replace 'reportURL:\s*&quot;&quot;', 'reportURL: &quot;[SERVERADDRESS]&quot;'; $c = $c -replace 'port:\s*9183', 'port: [PORT]'; Set-Content '[ConfigDir]agent.yaml' $c -NoNewline&quot;"
+                  ExeCommand="[SystemFolder]cmd.exe /c powershell -NoProfile -Command &quot;$c = Get-Content '[ConfigDir]agent.yaml' -Raw; $c = $c -replace 'reportURL:\s*&quot;&quot;', 'reportURL: &quot;[SERVERADDRESS]&quot;'; $c = $c -replace 'port:\s*9183', 'port: [PORT]'; $c = $c -replace 'building:\s*&quot;&quot;', 'building: &quot;[BUILDING]&quot;'; $c = $c -replace 'room:\s*&quot;&quot;', 'room: &quot;[ROOM]&quot;'; Set-Content '[ConfigDir]agent.yaml' $c -NoNewline&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />
 
     <InstallExecuteSequence>
-      <Custom Action="ConfigureAgent" After="InstallFiles" Condition="SERVERADDRESS OR (PORT &lt;&gt; &quot;9183&quot;)" />
+      <Custom Action="ConfigureAgent" After="InstallFiles" Condition="SERVERADDRESS OR (PORT &lt;&gt; &quot;9183&quot;) OR BUILDING OR ROOM" />
     </InstallExecuteSequence>
 
     <!-- ============================================================

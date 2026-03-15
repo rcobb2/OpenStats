@@ -56,7 +56,7 @@ WindowsLabStats/
 
 ### Agent → Server
 - **Registration**: `POST http://server:8080/api/v1/agents/register`
-- **Payload**: `{ id, hostname, ipAddress, osVersion, agentVersion, port }`
+- **Payload**: `{ id, hostname, ipAddress, osVersion, agentVersion, port, building, room }`
 - **Heartbeat**: Every 2 minutes
 
 ### Server → Prometheus
@@ -227,3 +227,26 @@ When updating versions:
 - Agent metrics: `http://localhost:9183/metrics`
 - Agent health: `http://localhost:9183/health`
 - Docker logs: `docker-compose logs -f`
+
+## Fleet Management & Auto-Registration
+
+### Central Fleet Settings
+
+The server maintains global configuration settings that are pushed to agents during heartbeat registration:
+
+- **Heartbeat Interval**: How often agents report status (default 120s). Agents will adjust their own timers dynamically based on this value.
+- **Update Interval**: How often agents refresh software mappings and inventory (default 1h).
+- **Min Agent Version**: Used to track which agents need forced upgrades.
+- **Stale Timeout**: Number of days of no contact before an agent is automatically purged from the database.
+
+Settings are managed via **Agents > Settings** in the Web Portal.
+
+### MSI Installer Customization
+
+Installers can be pre-configured with the following properties:
+
+- `SERVERADDRESS`: The full URL of the central server.
+- `BUILDING`: Default building name for auto-lab assignment.
+- `ROOM`: Default room number for auto-lab assignment.
+
+If `BUILDING` and `ROOM` are provided, the server will automatically create the lab if it doesn't exist upon initial registration.

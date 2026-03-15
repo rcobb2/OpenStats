@@ -29,6 +29,8 @@ type MonitorConfig struct {
 	ReconcileInterval time.Duration `yaml:"reconcileInterval"`
 	MinLifetime       time.Duration `yaml:"minLifetime"`
 	ExcludePatterns   []string      `yaml:"excludePatterns"`
+	Building          string        `yaml:"building"`
+	Room              string        `yaml:"room"`
 }
 
 type NormalizerConfig struct {

@@ -98,18 +98,40 @@ func main() {
 // runStaleChecker periodically marks agents that haven't checked in as offline
 // and refreshes Prometheus targets.
 func runStaleChecker(db *store.Store, disc *discovery.FileSD, logger *slog.Logger) {
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := db.MarkStaleAgents(ctx, 5*time.Minute); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		
+		settings, err := db.GetSettings(ctx)
+		if err != nil {
+			logger.Error("failed to get settings for stale check", "error", err)
+			cancel()
+			continue
+		}
+
+		// Mark as offline if no check-in for 2.5x heartbeat interval (min 5m).
+		offlineThreshold := time.Duration(settings.HeartbeatIntervalSeconds*25/10) * time.Second
+		if offlineThreshold < 5*time.Minute {
+			offlineThreshold = 5 * time.Minute
+		}
+
+		if err := db.MarkStaleAgents(ctx, offlineThreshold); err != nil {
 			logger.Error("failed to mark stale agents", "error", err)
 		} else {
 			if err := disc.Refresh(ctx, db); err != nil {
 				logger.Error("failed to refresh targets after stale check", "error", err)
 			}
 		}
+
+		// Hard delete if above threshold days.
+		if settings.StaleTimeoutDays > 0 {
+			if err := db.DeleteStaleAgents(ctx, settings.StaleTimeoutDays); err != nil {
+				logger.Error("failed to delete stale agents", "error", err)
+			}
+		}
+
 		cancel()
 	}
 }

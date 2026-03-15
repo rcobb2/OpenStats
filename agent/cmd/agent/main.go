@@ -239,7 +239,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 
 		// Start enrollment heartbeat if a central server is configured.
 		if cfg.Server.ReportURL != "" {
-			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, logger)
+			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger)
 			go enrollClient.RunHeartbeat(ctx, 2*time.Minute)
 		}
 
