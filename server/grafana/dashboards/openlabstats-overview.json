@@ -1,0 +1,546 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Fleet Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Agents Online",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count(up{job=\"openlabstats\"} == 1)",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "orange", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Agents Offline",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count(up{job=\"openlabstats\"} == 0) OR vector(0)",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Active User Sessions",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count(openlabstats_user_session_active == 1) OR vector(0)",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "purple", "value": null }]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Unique Apps (24h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count(count by (app) (increase(openlabstats_app_launches_total[24h]) > 0))",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Total Launches (24h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_app_launches_total[24h]))",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "yellow", "value": null }]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Total Usage Time (24h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_app_usage_seconds_total[24h]))",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "title": "Software Usage",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "id": 10,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "barWidth": 0.8
+      },
+      "title": "Top 15 Applications by Usage Time",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "topk(15, sum by (app) (increase(openlabstats_app_usage_seconds_total[$__range])))",
+          "legendFormat": "{{ app }}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "id": 11,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "barWidth": 0.8
+      },
+      "title": "Top 15 Applications by Launch Count",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "topk(15, sum by (app) (increase(openlabstats_app_launches_total[$__range])))",
+          "legendFormat": "{{ app }}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 16 },
+      "id": 12,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "pieType": "donut",
+        "legend": { "displayMode": "table", "placement": "right" }
+      },
+      "title": "Usage by Category",
+      "type": "piechart",
+      "targets": [
+        {
+          "expr": "sum by (category) (increase(openlabstats_app_usage_seconds_total[$__range]))",
+          "legendFormat": "{{ category }}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "spanNulls": true,
+            "stacking": { "mode": "normal" }
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 16 },
+      "id": 13,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Application Usage Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk(10, sum by (app) (rate(openlabstats_app_usage_seconds_total[5m])))",
+          "legendFormat": "{{ app }}"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "id": 102,
+      "title": "Per-Lab Breakdown",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "id": 20,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      },
+      "title": "Usage by Lab/Room",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "sum by (lab) (increase(openlabstats_app_usage_seconds_total[$__range]))",
+          "legendFormat": "{{ lab }}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "id": 21,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      },
+      "title": "Launches by Lab/Room",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "sum by (lab) (increase(openlabstats_app_launches_total[$__range]))",
+          "legendFormat": "{{ lab }}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "id": 103,
+      "title": "Software Inventory",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 36 },
+      "id": 30,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      },
+      "title": "Installed Software Count by Device",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "count by (hostname) (openlabstats_installed_software_info)",
+          "legendFormat": "{{ hostname }}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 36 },
+      "id": 31,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "name", "desc": false }],
+        "footer": { "show": true, "reducer": ["count"] }
+      },
+      "title": "Software Inventory",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "openlabstats_installed_software_info",
+          "legendFormat": "",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "Value": true,
+              "instance": true,
+              "job": true,
+              "lab": true
+            },
+            "renameByName": {
+              "hostname": "Device",
+              "name": "Software",
+              "publisher": "Publisher",
+              "version": "Version"
+            },
+            "indexByName": {
+              "name": 0,
+              "version": 1,
+              "publisher": 2,
+              "hostname": 3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 44 },
+      "id": 104,
+      "title": "Agent Health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "custom": {
+            "align": "center",
+            "displayMode": "color-background-solid"
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 45 },
+      "id": 40,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "instance", "desc": false }]
+      },
+      "title": "Agent Status",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "up{job=\"openlabstats\"}",
+          "legendFormat": "",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true
+            },
+            "renameByName": {
+              "instance": "Agent",
+              "lab": "Lab",
+              "Value": "Status"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["openlabstats", "higher-ed", "software-usage"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 2,
+        "includeAll": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(up{job=\"openlabstats\"}, lab)",
+        "includeAll": true,
+        "multi": true,
+        "name": "lab",
+        "query": { "query": "label_values(up{job=\"openlabstats\"}, lab)" },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query",
+        "label": "Lab"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "OpenLabStats Overview",
+  "uid": "openlabstats-overview",
+  "version": 1
+}

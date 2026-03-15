@@ -1,0 +1,331 @@
+{
+  "_comment": "Community-curated software name mappings. The central server can push updates to this file.",
+  "_version": "0.1.0",
+  "mappings": {
+    "EXCEL.EXE": {
+      "displayName": "Microsoft Excel",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "WINWORD.EXE": {
+      "displayName": "Microsoft Word",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "POWERPNT.EXE": {
+      "displayName": "Microsoft PowerPoint",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "OUTLOOK.EXE": {
+      "displayName": "Microsoft Outlook",
+      "category": "Communication",
+      "publisher": "Microsoft Corporation"
+    },
+    "MSACCESS.EXE": {
+      "displayName": "Microsoft Access",
+      "category": "Database",
+      "publisher": "Microsoft Corporation"
+    },
+    "Teams.exe": {
+      "displayName": "Microsoft Teams",
+      "category": "Communication",
+      "publisher": "Microsoft Corporation",
+      "family": "teams"
+    },
+    "ms-teams.exe": {
+      "displayName": "Microsoft Teams",
+      "category": "Communication",
+      "publisher": "Microsoft Corporation",
+      "family": "teams"
+    },
+    "Code.exe": {
+      "displayName": "Visual Studio Code",
+      "category": "Development",
+      "publisher": "Microsoft Corporation",
+      "family": "vscode"
+    },
+    "devenv.exe": {
+      "displayName": "Visual Studio",
+      "category": "Development",
+      "publisher": "Microsoft Corporation",
+      "family": "visualstudio"
+    },
+    "MSBuild.exe": {
+      "displayName": "Visual Studio",
+      "category": "Development",
+      "publisher": "Microsoft Corporation",
+      "family": "visualstudio"
+    },
+    "ServiceHub.Host.dotnet.x64.exe": {
+      "displayName": "Visual Studio",
+      "category": "Development",
+      "publisher": "Microsoft Corporation",
+      "family": "visualstudio"
+    },
+    "chrome.exe": {
+      "displayName": "Google Chrome",
+      "category": "Web Browser",
+      "publisher": "Google LLC",
+      "family": "chrome"
+    },
+    "firefox.exe": {
+      "displayName": "Mozilla Firefox",
+      "category": "Web Browser",
+      "publisher": "Mozilla Corporation",
+      "family": "firefox"
+    },
+    "msedge.exe": {
+      "displayName": "Microsoft Edge",
+      "category": "Web Browser",
+      "publisher": "Microsoft Corporation",
+      "family": "edge"
+    },
+    "Docker Desktop.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "com.docker.backend.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "com.docker.proxy.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "com.docker.build.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "com.docker.dev-envs.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "dockerd.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "docker.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "com.docker.service.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "vpnkit.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "containerd.exe": {
+      "displayName": "Docker",
+      "category": "Development",
+      "publisher": "Docker Inc.",
+      "family": "docker"
+    },
+    "slack.exe": {
+      "displayName": "Slack",
+      "category": "Communication",
+      "publisher": "Salesforce",
+      "family": "slack"
+    },
+    "AcroRd32.exe": {
+      "displayName": "Adobe Acrobat Reader",
+      "category": "Document Viewer",
+      "publisher": "Adobe Inc."
+    },
+    "Acrobat.exe": {
+      "displayName": "Adobe Acrobat",
+      "category": "Document Editor",
+      "publisher": "Adobe Inc."
+    },
+    "Photoshop.exe": {
+      "displayName": "Adobe Photoshop",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "Illustrator.exe": {
+      "displayName": "Adobe Illustrator",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "AfterFX.exe": {
+      "displayName": "Adobe After Effects",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "Premiere Pro.exe": {
+      "displayName": "Adobe Premiere Pro",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "InDesign.exe": {
+      "displayName": "Adobe InDesign",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "MATLAB.exe": {
+      "displayName": "MATLAB",
+      "category": "Scientific Computing",
+      "publisher": "MathWorks"
+    },
+    "acad.exe": {
+      "displayName": "AutoCAD",
+      "category": "CAD/Engineering",
+      "publisher": "Autodesk"
+    },
+    "revit.exe": {
+      "displayName": "Autodesk Revit",
+      "category": "CAD/Engineering",
+      "publisher": "Autodesk"
+    },
+    "SLDWORKS.exe": {
+      "displayName": "SOLIDWORKS",
+      "category": "CAD/Engineering",
+      "publisher": "Dassault Systèmes"
+    },
+    "stats.exe": {
+      "displayName": "IBM SPSS Statistics",
+      "category": "Statistical Analysis",
+      "publisher": "IBM"
+    },
+    "Mathematica.exe": {
+      "displayName": "Wolfram Mathematica",
+      "category": "Scientific Computing",
+      "publisher": "Wolfram Research"
+    },
+    "RStudio.exe": {
+      "displayName": "RStudio",
+      "category": "Statistical Analysis",
+      "publisher": "Posit PBC"
+    },
+    "notepad++.exe": {
+      "displayName": "Notepad++",
+      "category": "Text Editor",
+      "publisher": "Don Ho"
+    },
+    "Zoom.exe": {
+      "displayName": "Zoom",
+      "category": "Communication",
+      "publisher": "Zoom Video Communications"
+    },
+    "explorer.exe": {
+      "displayName": "Windows Explorer",
+      "category": "System",
+      "publisher": "Microsoft Corporation"
+    },
+    "notepad.exe": {
+      "displayName": "Notepad",
+      "category": "Text Editor",
+      "publisher": "Microsoft Corporation"
+    },
+    "mspaint.exe": {
+      "displayName": "Microsoft Paint",
+      "category": "Creative",
+      "publisher": "Microsoft Corporation"
+    },
+    "SnippingTool.exe": {
+      "displayName": "Snipping Tool",
+      "category": "Utility",
+      "publisher": "Microsoft Corporation"
+    },
+    "calc.exe": {
+      "displayName": "Calculator",
+      "category": "Utility",
+      "publisher": "Microsoft Corporation"
+    },
+    "WindowsTerminal.exe": {
+      "displayName": "Windows Terminal",
+      "category": "Development",
+      "publisher": "Microsoft Corporation"
+    },
+    "powershell.exe": {
+      "displayName": "Windows PowerShell",
+      "category": "Development",
+      "publisher": "Microsoft Corporation"
+    },
+    "pwsh.exe": {
+      "displayName": "PowerShell",
+      "category": "Development",
+      "publisher": "Microsoft Corporation"
+    },
+    "cmd.exe": {
+      "displayName": "Command Prompt",
+      "category": "Development",
+      "publisher": "Microsoft Corporation"
+    },
+    "python.exe": {
+      "displayName": "Python",
+      "category": "Development",
+      "publisher": "Python Software Foundation"
+    },
+    "java.exe": {
+      "displayName": "Java",
+      "category": "Development",
+      "publisher": "Oracle Corporation"
+    },
+    "javaw.exe": {
+      "displayName": "Java (GUI)",
+      "category": "Development",
+      "publisher": "Oracle Corporation"
+    },
+    "git.exe": {
+      "displayName": "Git",
+      "category": "Development",
+      "publisher": "Git Project",
+      "family": "git"
+    },
+    "git-remote-https.exe": {
+      "displayName": "Git",
+      "category": "Development",
+      "publisher": "Git Project",
+      "family": "git"
+    },
+    "git-upload-pack.exe": {
+      "displayName": "Git",
+      "category": "Development",
+      "publisher": "Git Project",
+      "family": "git"
+    },
+    "git-receive-pack.exe": {
+      "displayName": "Git",
+      "category": "Development",
+      "publisher": "Git Project",
+      "family": "git"
+    },
+    "git-rev-list.exe": {
+      "displayName": "Git",
+      "category": "Development",
+      "publisher": "Git Project",
+      "family": "git"
+    },
+    "git-credential-manager.exe": {
+      "displayName": "Git Credential Manager",
+      "category": "Development",
+      "publisher": "Git Project"
+    },
+    "ssh.exe": {
+      "displayName": "OpenSSH",
+      "category": "Utility",
+      "publisher": "OpenSSH Project"
+    }
+  }
+}

@@ -1,0 +1,94 @@
+services:
+  # ---------------------------------------------------------------
+  # PostgreSQL - persistent storage for the management server
+  # ---------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    container_name: openlabstats-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: openlabstats
+      POSTGRES_PASSWORD: openlabstats
+      POSTGRES_DB: openlabstats
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - openlabstats
+
+  # ---------------------------------------------------------------
+  # OpenLabStats Server - central management API
+  # ---------------------------------------------------------------
+  openlabstats-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openlabstats-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config/server.yaml:/etc/openlabstats/server.yaml:ro
+      - file_sd_data:/etc/prometheus/file_sd
+    depends_on:
+      - postgres
+      - prometheus
+    networks:
+      - openlabstats
+
+  # ---------------------------------------------------------------
+  # Prometheus - time-series metrics store
+  # ---------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: openlabstats-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - file_sd_data:/etc/prometheus/file_sd
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=365d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - openlabstats
+
+  # ---------------------------------------------------------------
+  # Grafana - dashboards for power users / PromQL exploration
+  # ---------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: openlabstats-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=openlabstats
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/openlabstats-overview.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - openlabstats
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  file_sd_data:
+
+networks:
+  openlabstats:
+    driver: bridge

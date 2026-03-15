@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  # Scrape Prometheus itself for health monitoring.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ---------------------------------------------------------------
+  # OpenLabStats Agents (auto-discovered via server)
+  # ---------------------------------------------------------------
+  # Agents register with the management server, which writes
+  # file_sd_configs JSON. Prometheus watches this file automatically.
+  - job_name: 'openlabstats'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/openlabstats.json
+        refresh_interval: 30s
+
+    # Fallback: static targets for development or pre-server setups.
+    static_configs:
+      - targets: ['host.docker.internal:9183']
+        labels:
+          lab: 'development'
+
+    # Relabel: keep the agent-reported hostname as a label.
+    metric_relabel_configs:
+      - source_labels: [hostname]
+        target_label: agent_hostname
+        action: replace

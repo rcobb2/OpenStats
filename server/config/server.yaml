@@ -1,0 +1,22 @@
+# OpenLabStats Server Configuration
+
+server:
+  port: 8080
+  host: ""
+
+database:
+  host: postgres
+  port: 5432
+  user: openlabstats
+  password: openlabstats
+  dbName: openlabstats
+  sslMode: disable
+
+prometheus:
+  url: http://prometheus:9090
+
+# Prometheus file-based service discovery.
+# The server writes this file whenever agents register/deregister.
+# Prometheus watches it via file_sd_configs.
+fileSD:
+  outputPath: /etc/prometheus/file_sd/openlabstats.json

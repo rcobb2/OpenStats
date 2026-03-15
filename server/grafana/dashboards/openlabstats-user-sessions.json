@@ -1,0 +1,498 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "User Session KPIs",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "blue", "value": null }]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Total Time Signed In",
+      "description": "Cumulative time all users have been signed in during the selected period.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_user_session_seconds_total[$__range]))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Total Sign-Ins",
+      "description": "Number of user login sessions during the selected period.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_user_session_logins_total[$__range]))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "purple", "value": null }]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Unique Users",
+      "description": "Number of distinct users who signed in during the selected period.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count(count by (user) (increase(openlabstats_user_session_logins_total[$__range]) > 0))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [{ "color": "orange", "value": null }]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 15, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Avg Session Length",
+      "description": "Average duration of a user login session during the selected period.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_user_session_seconds_total[$__range])) / sum(increase(openlabstats_user_session_logins_total[$__range]))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Active Now",
+      "description": "Users currently signed in across all machines.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count(openlabstats_user_session_active == 1) OR vector(0)",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 101,
+      "title": "Top Users",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "Logins",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "showPoints": "never"
+          }
+        }
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 7 },
+      "id": 10,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "barWidth": 0.7,
+        "groupWidth": 0.7,
+        "xTickLabelRotation": 0,
+        "legend": { "displayMode": "hidden" }
+      },
+      "title": "Top 10 Most Frequent Users (by logins)",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "topk(10, sum by (user) (increase(openlabstats_user_session_logins_total[$__range])))",
+          "legendFormat": "{{ user }}",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": { "user": "User", "Value": "Logins" }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "Time",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "showPoints": "never"
+          }
+        }
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 7 },
+      "id": 11,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "barWidth": 0.7,
+        "groupWidth": 0.7,
+        "xTickLabelRotation": 0,
+        "legend": { "displayMode": "hidden" }
+      },
+      "title": "Top 10 Users by Time Signed In",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "topk(10, sum by (user) (increase(openlabstats_user_session_seconds_total[$__range])))",
+          "legendFormat": "{{ user }}",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": { "user": "User", "Value": "Time" }
+          }
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "id": 102,
+      "title": "Session Trends",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "Logins",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "mode": "none" }
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "id": 20,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "title": "Sign-Ins Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_user_session_logins_total[1h]))",
+          "legendFormat": "Total Logins",
+          "refId": "A"
+        },
+        {
+          "expr": "count(count by (user) (increase(openlabstats_user_session_logins_total[1h]) > 0))",
+          "legendFormat": "Unique Users",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "Duration",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "mode": "none" }
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "id": 21,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "title": "Avg Session Length Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_user_session_seconds_total[1h])) / sum(increase(openlabstats_user_session_logins_total[1h]))",
+          "legendFormat": "Avg Session",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "id": 103,
+      "title": "User Detail",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true,
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Logins" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Total Time" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.width", "value": 140 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Avg Session" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.width", "value": 140 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Apps Used" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.width", "value": 100 }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
+      "id": 30,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Logins", "desc": true }],
+        "footer": { "show": true, "reducer": ["sum"], "countRows": false }
+      },
+      "title": "All Users — Session Summary",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (user) (increase(openlabstats_user_session_logins_total[$__range]))",
+          "legendFormat": "",
+          "refId": "logins",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "sum by (user) (increase(openlabstats_user_session_seconds_total[$__range]))",
+          "legendFormat": "",
+          "refId": "time",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "sum by (user) (increase(openlabstats_user_session_seconds_total[$__range])) / sum by (user) (increase(openlabstats_user_session_logins_total[$__range]))",
+          "legendFormat": "",
+          "refId": "avg",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "count by (user) (increase(openlabstats_app_launches_total[$__range]) > 0)",
+          "legendFormat": "",
+          "refId": "apps",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": {
+              "user": "User",
+              "Value #logins": "Logins",
+              "Value #time": "Total Time",
+              "Value #avg": "Avg Session",
+              "Value #apps": "Apps Used"
+            },
+            "indexByName": {
+              "User": 0,
+              "Logins": 1,
+              "Total Time": 2,
+              "Avg Session": 3,
+              "Apps Used": 4
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["openlabstats", "user-sessions"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 2,
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+  },
+  "timezone": "browser",
+  "title": "User Sessions",
+  "uid": "openlabstats-user-sessions",
+  "version": 1
+}

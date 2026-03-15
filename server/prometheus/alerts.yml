@@ -1,0 +1,51 @@
+groups:
+  - name: openlabstats_agent_health
+    rules:
+      # Agent is unreachable for more than 5 minutes.
+      - alert: AgentDown
+        expr: up{job="openlabstats"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenLabStats agent down on {{ $labels.instance }}"
+          description: "Agent at {{ $labels.instance }} (lab: {{ $labels.lab }}) has been unreachable for 5 minutes."
+
+      # No active user sessions on a device during business hours.
+      # Useful for detecting idle lab machines.
+      # Uncomment and adjust the schedule as needed.
+      # - alert: DeviceIdleDuringHours
+      #   expr: |
+      #     (count by (instance) (openlabstats_user_session_active == 1) or vector(0)) == 0
+      #     and ON() hour() >= 8 and ON() hour() <= 20
+      #     and ON() day_of_week() >= 1 and ON() day_of_week() <= 5
+      #   for: 2h
+      #   labels:
+      #     severity: info
+      #   annotations:
+      #     summary: "Lab device idle during business hours"
+      #     description: "{{ $labels.instance }} has had no user sessions for 2+ hours during business hours."
+
+  - name: openlabstats_usage
+    rules:
+      # Pre-computed recording rules for faster dashboard queries.
+
+      # Total app usage seconds per app over the last 24 hours.
+      - record: openlabstats:app_usage_24h:sum
+        expr: sum by (app, category) (increase(openlabstats_app_usage_seconds_total[24h]))
+
+      # Total app launches per app over the last 24 hours.
+      - record: openlabstats:app_launches_24h:sum
+        expr: sum by (app, category) (increase(openlabstats_app_launches_total[24h]))
+
+      # Total app usage per lab over the last 24 hours.
+      - record: openlabstats:lab_usage_24h:sum
+        expr: sum by (lab, app) (increase(openlabstats_app_usage_seconds_total[24h]))
+
+      # Active device count.
+      - record: openlabstats:active_devices:count
+        expr: count(up{job="openlabstats"} == 1)
+
+      # Total unique apps in use right now.
+      - record: openlabstats:active_apps:count
+        expr: count(count by (app) (openlabstats_app_active == 1))

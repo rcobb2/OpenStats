@@ -1,0 +1,157 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:fire="http://wixtoolset.org/schemas/v4/wxs/firewall">
+
+  <!-- ================================================================
+       OpenLabStats Agent MSI Installer
+       
+       Silent install example:
+         msiexec /i openlabstats-agent.msi /qn SERVERADDRESS=server.campus.edu PORT=9183
+       
+       Properties:
+         SERVERADDRESS  - Central management server URL (optional)
+         PORT           - Prometheus metrics port (default: 9183)
+         INSTALLDIR     - Installation directory (default: C:\Program Files\OpenLabStats)
+       ================================================================ -->
+
+  <Package Name="OpenLabStats Agent"
+           Manufacturer="OpenLabStats"
+           Version="0.1.0"
+           UpgradeCode="E7A14B3C-5D62-4F89-A1C0-8B3E6F9D2A71"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of OpenLabStats Agent is already installed."
+                  AllowSameVersionUpgrades="yes" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- ============================================================
+         Public properties for admin customization via command line.
+         ============================================================ -->
+    <Property Id="SERVERADDRESS" Value="" Secure="yes" />
+    <Property Id="PORT" Value="9183" Secure="yes" />
+
+    <!-- ============================================================
+         Directory structure
+         ============================================================ -->
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLDIR" Name="OpenLabStats">
+        <Directory Id="ConfigDir" Name="configs" />
+        <Directory Id="DataDir" Name="data" />
+        <Directory Id="LogDir" Name="logs" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ============================================================
+         Agent binary
+         ============================================================ -->
+    <ComponentGroup Id="AgentBinary" Directory="INSTALLDIR">
+      <Component Id="AgentExe" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+        <File Id="AgentExeFile"
+              Source="$(var.BuildOutput)\openlabstats-agent.exe"
+              KeyPath="yes" />
+
+        <!-- Register as a Windows service -->
+        <ServiceInstall Id="AgentService"
+                        Type="ownProcess"
+                        Name="OpenLabStats"
+                        DisplayName="OpenLabStats Agent"
+                        Description="Open-source software usage tracking agent for higher education"
+                        Start="auto"
+                        Account="LocalSystem"
+                        ErrorControl="normal"
+                        Arguments="--config &quot;[ConfigDir]agent.yaml&quot;" />
+
+        <ServiceControl Id="AgentServiceControl"
+                        Name="OpenLabStats"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ============================================================
+         Configuration files
+         ============================================================ -->
+    <ComponentGroup Id="ConfigFiles" Directory="ConfigDir">
+      <Component Id="AgentYaml" Guid="B2C3D4E5-F6A7-8901-BCDE-F12345678901">
+        <File Id="AgentYamlFile"
+              Source="$(var.SourceRoot)\configs\agent.yaml"
+              KeyPath="yes" />
+      </Component>
+
+      <Component Id="SoftwareMap" Guid="C3D4E5F6-A7B8-9012-CDEF-123456789012">
+        <File Id="SoftwareMapFile"
+              Source="$(var.SourceRoot)\configs\software-map.json"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ============================================================
+         Empty directories (data and logs)
+         ============================================================ -->
+    <ComponentGroup Id="DataDirs">
+      <Component Id="DataDirComp" Directory="DataDir" Guid="D4E5F6A7-B8C9-0123-DEFA-234567890123">
+        <CreateFolder />
+      </Component>
+      <Component Id="LogDirComp" Directory="LogDir" Guid="E5F6A7B8-C9D0-1234-EFAB-345678901234">
+        <CreateFolder />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ============================================================
+         Firewall rule
+         ============================================================ -->
+    <ComponentGroup Id="FirewallRules" Directory="INSTALLDIR">
+      <Component Id="FirewallRule" Guid="F6A7B8C9-D0E1-2345-FABC-456789012345">
+        <fire:FirewallException Id="AgentFirewall"
+                                Name="OpenLabStats Agent"
+                                Protocol="tcp"
+                                Port="[PORT]"
+                                Scope="any"
+                                Description="Allow Prometheus to scrape OpenLabStats agent metrics" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ============================================================
+         Post-install: patch agent.yaml with custom property values.
+         Uses XmlConfig to set reportURL and port, or a simple
+         text-file transform via SetProperty + custom action.
+         ============================================================ -->
+    <SetProperty Id="PatchConfigAction"
+                 Before="PatchConfigAction"
+                 Sequence="execute"
+                 Value="&quot;[SystemFolder]cmd.exe&quot; /c (echo server:&amp; echo   port: [PORT]&amp; echo   metricsPath: /metrics&amp; echo   reportURL: &quot;[SERVERADDRESS]&quot;) &gt; &quot;[ConfigDir]server-override.yaml&quot;" />
+
+    <!-- We use a custom action to rewrite the config with the correct values -->
+    <CustomAction Id="PatchConfigAction"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  BinaryRef="Wix4UtilCA_X86" />
+
+    <!-- Simpler approach: use a deferred CA to do string replacement in agent.yaml -->
+    <CustomAction Id="ConfigureAgent"
+                  Directory="INSTALLDIR"
+                  ExeCommand="[SystemFolder]cmd.exe /c powershell -NoProfile -Command &quot;$c = Get-Content '[ConfigDir]agent.yaml' -Raw; $c = $c -replace 'reportURL:\s*&quot;&quot;', 'reportURL: &quot;[SERVERADDRESS]&quot;'; $c = $c -replace 'port:\s*9183', 'port: [PORT]'; Set-Content '[ConfigDir]agent.yaml' $c -NoNewline&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="ConfigureAgent" After="InstallFiles" Condition="SERVERADDRESS OR (PORT &lt;&gt; &quot;9183&quot;)" />
+    </InstallExecuteSequence>
+
+    <!-- ============================================================
+         Feature tree
+         ============================================================ -->
+    <Feature Id="Complete" Title="OpenLabStats Agent" Level="1">
+      <ComponentGroupRef Id="AgentBinary" />
+      <ComponentGroupRef Id="ConfigFiles" />
+      <ComponentGroupRef Id="DataDirs" />
+      <ComponentGroupRef Id="FirewallRules" />
+    </Feature>
+
+  </Package>
+</Wix>

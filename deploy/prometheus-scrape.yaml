@@ -1,0 +1,24 @@
+# Add this to your prometheus.yml scrape_configs section.
+# Adjust targets to list all lab machines running the OpenLabStats agent.
+
+scrape_configs:
+  - job_name: 'openlabstats'
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - 'lab-pc-01:9183'
+          - 'lab-pc-02:9183'
+          - 'lab-pc-03:9183'
+        labels:
+          lab: 'library-101'
+
+      - targets:
+          - 'classroom-pc-01:9183'
+          - 'classroom-pc-02:9183'
+        labels:
+          lab: 'science-201'
+
+    # Optional: relabel to use hostname from the agent's device_info metric.
+    # metric_relabel_configs:
+    #   - source_labels: [hostname]
+    #     target_label: instance

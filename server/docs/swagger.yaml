@@ -1,0 +1,618 @@
+basePath: /
+definitions:
+  api.AssignLabRequest:
+    properties:
+      labId:
+        type: string
+    type: object
+  api.CreateLabRequest:
+    properties:
+      building:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  api.GenerateInstallerRequest:
+    properties:
+      labName:
+        type: string
+      port:
+        type: integer
+      serverAddress:
+        type: string
+    type: object
+  api.MappingRequest:
+    properties:
+      category:
+        type: string
+      displayName:
+        type: string
+      exeName:
+        type: string
+      family:
+        type: string
+      publisher:
+        type: string
+    type: object
+  api.RegisterAgentRequest:
+    properties:
+      agentVersion:
+        type: string
+      hostname:
+        type: string
+      id:
+        type: string
+      ipAddress:
+        type: string
+      osVersion:
+        type: string
+      port:
+        type: integer
+    type: object
+  api.SummaryResponse:
+    properties:
+      onlineAgents:
+        type: integer
+      totalAgents:
+        type: integer
+      totalLabs:
+        type: integer
+      totalMappings:
+        type: integer
+    type: object
+  store.Agent:
+    properties:
+      agentVersion:
+        type: string
+      createdAt:
+        type: string
+      hostname:
+        type: string
+      id:
+        type: string
+      ipAddress:
+        type: string
+      labId:
+        type: string
+      lastSeen:
+        type: string
+      osVersion:
+        type: string
+      port:
+        type: integer
+      status:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  store.Lab:
+    properties:
+      building:
+        type: string
+      createdAt:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  store.SoftwareMapping:
+    properties:
+      category:
+        type: string
+      createdAt:
+        type: string
+      displayName:
+        type: string
+      exeName:
+        type: string
+      family:
+        type: string
+      id:
+        type: integer
+      publisher:
+        type: string
+      source:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Central management server for the OpenLabStats fleet. Manages agent
+    enrollment, software mappings, lab groupings, and reporting.
+  title: OpenLabStats Server API
+  version: 0.1.0
+paths:
+  /api/v1/agents:
+    get:
+      description: Returns all agents that have registered with the server.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.Agent'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all enrolled agents
+      tags:
+      - agents
+  /api/v1/agents/{agentID}:
+    delete:
+      description: Removes an agent from the fleet inventory.
+      parameters:
+      - description: Agent ID
+        in: path
+        name: agentID
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Remove an agent
+      tags:
+      - agents
+    get:
+      description: Returns a single agent's details.
+      parameters:
+      - description: Agent ID
+        in: path
+        name: agentID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.Agent'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get agent by ID
+      tags:
+      - agents
+  /api/v1/agents/{agentID}/lab:
+    put:
+      consumes:
+      - application/json
+      description: Associates an agent with a lab/room for grouping.
+      parameters:
+      - description: Agent ID
+        in: path
+        name: agentID
+        required: true
+        type: string
+      - description: Lab assignment
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.AssignLabRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Assign agent to a lab
+      tags:
+      - agents
+  /api/v1/agents/register:
+    post:
+      consumes:
+      - application/json
+      description: Agents call this on startup and periodically to register themselves
+        with the server.
+      parameters:
+      - description: Agent registration payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.RegisterAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.Agent'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Register or heartbeat an agent
+      tags:
+      - agents
+  /api/v1/installers/generate:
+    post:
+      consumes:
+      - application/json
+      description: 'Generates an MSI installer pre-configured with the given server
+        address and port. Returns a download URL. NOTE: Full MSI generation requires
+        WiX Toolset on the server; this endpoint currently returns the install command
+        with the appropriate properties.'
+      parameters:
+      - description: Installer configuration
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.GenerateInstallerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Generate a custom MSI installer
+      tags:
+      - installers
+  /api/v1/labs:
+    get:
+      description: Returns all configured labs/rooms.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.Lab'
+            type: array
+      summary: List all labs
+      tags:
+      - labs
+    post:
+      consumes:
+      - application/json
+      description: Creates a new lab or room grouping for agents.
+      parameters:
+      - description: Lab details
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateLabRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/store.Lab'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a lab/room
+      tags:
+      - labs
+  /api/v1/labs/{labID}:
+    delete:
+      parameters:
+      - description: Lab ID
+        in: path
+        name: labID
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a lab
+      tags:
+      - labs
+    get:
+      parameters:
+      - description: Lab ID
+        in: path
+        name: labID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.Lab'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get lab by ID
+      tags:
+      - labs
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Lab ID
+        in: path
+        name: labID
+        required: true
+        type: string
+      - description: Updated lab details
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateLabRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a lab
+      tags:
+      - labs
+  /api/v1/mappings:
+    get:
+      description: Returns all software name mappings for admin management.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.SoftwareMapping'
+            type: array
+      summary: List all software mappings
+      tags:
+      - mappings
+    post:
+      consumes:
+      - application/json
+      description: Adds a new exe-to-display-name mapping.
+      parameters:
+      - description: Mapping details
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.MappingRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a software mapping
+      tags:
+      - mappings
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing exe-to-display-name mapping (upsert by exeName).
+      parameters:
+      - description: Mapping details
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.MappingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a software mapping
+      tags:
+      - mappings
+  /api/v1/mappings/{mappingID}:
+    delete:
+      parameters:
+      - description: Mapping ID
+        in: path
+        name: mappingID
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a software mapping
+      tags:
+      - mappings
+  /api/v1/mappings/agent:
+    get:
+      description: Returns all software mappings in the format agents expect (software-map.json
+        compatible). Agents poll this endpoint via mappingUpdateURL.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get mappings for agents
+      tags:
+      - mappings
+  /api/v1/reports/active-users:
+    get:
+      description: Returns users with active sessions right now.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Currently active users
+      tags:
+      - reports
+  /api/v1/reports/summary:
+    get:
+      description: 'Returns high-level fleet stats: total agents, online count, labs,
+        mappings.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.SummaryResponse'
+      summary: Fleet summary
+      tags:
+      - reports
+  /api/v1/reports/top-apps:
+    get:
+      description: Returns the top applications by total usage hours over the given
+        time range. Defaults to last 24 hours.
+      parameters:
+      - default: 24h
+        description: Time range for the query (e.g. 24h, 7d, 30d)
+        in: query
+        name: range
+        type: string
+      - default: 20
+        description: Max number of results
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Top applications by usage
+      tags:
+      - reports
+  /api/v1/reports/usage-by-lab:
+    get:
+      description: Returns total app usage hours grouped by lab over the given time
+        range.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Usage breakdown by lab
+      tags:
+      - reports
+  /api/v1/settings:
+    get:
+      description: Returns the current server configuration (non-sensitive fields).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get server settings
+      tags:
+      - settings
+swagger: "2.0"

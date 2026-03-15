@@ -1,0 +1,101 @@
+# OpenLabStats Agent Configuration
+
+# Prometheus metrics HTTP server
+server:
+  port: 9183
+  metricsPath: /metrics
+  # Central management server URL (optional, set by MSI SERVERADDRESS property)
+  reportURL: "http://localhost:8080"
+
+# Process monitoring settings
+monitor:
+  # Interval for reconciliation polling (catches missed WMI events)
+  reconcileInterval: 30s
+  # Minimum process lifetime to track (filters transient system processes)
+  minLifetime: 2s
+  # Process name patterns to exclude from tracking (regex)
+  excludePatterns:
+    - "(?i)^svchost\\.exe$"
+    - "(?i)^csrss\\.exe$"
+    - "(?i)^conhost\\.exe$"
+    - "(?i)^RuntimeBroker\\.exe$"
+    - "(?i)^taskhostw\\.exe$"
+    - "(?i)^ShellExperienceHost\\.exe$"
+    - "(?i)^StartMenuExperienceHost\\.exe$"
+    - "(?i)^dllhost\\.exe$"
+    - "(?i)^sihost\\.exe$"
+    - "(?i)^fontdrvhost\\.exe$"
+    - "(?i)^dwm\\.exe$"
+    - "(?i)^ctfmon\\.exe$"
+    - "(?i)^WmiPrvSE\\.exe$"
+    - "(?i)^powershell\\.exe$"
+    - "(?i)^pwsh\\.exe$"
+    - "(?i)^cmd\\.exe$"
+    - "(?i)^WindowsTerminal\\.exe$"
+    - "(?i)^OpenConsole\\.exe$"
+    - "(?i)^explorer\\.exe$"
+    - "(?i)^SearchProtocolHost\\.exe$"
+    - "(?i)^SearchFilterHost\\.exe$"
+    - "(?i)^SearchHost\\.exe$"
+    - "(?i)^TiWorker\\.exe$"
+    - "(?i)^TrustedInstaller\\.exe$"
+    - "(?i)^MoUsoCoreWorker\\.exe$"
+    - "(?i)^MusNotification\\.exe$"
+    - "(?i)^SecurityHealthService\\.exe$"
+    - "(?i)^SgrmBroker\\.exe$"
+    - "(?i)^spoolsv\\.exe$"
+    - "(?i)^msiexec\\.exe$"
+    - "(?i)^OfficeClickToRun\\.exe$"
+    - "(?i)^OSPPSVC\\.exe$"
+    - "(?i)^ai\\.exe$"
+    - "(?i)^SDXHelper\\.exe$"
+    - "(?i)^backgroundTaskHost\\.exe$"
+    - "(?i)^PanGpHipMp\\.exe$"
+    - "(?i)^PanGpHip\\.exe$"
+    - "(?i)^kubectl\\.exe$"
+    - "(?i)^AgentExecutor\\.exe$"
+    - "(?i)^Antigravity\\.exe$"
+    - "(?i)^GoogleUpdate.*\\.exe$"
+    - "(?i)^wa_3rd_party_host.*\\.exe$"
+    - "(?i)^LogiOptionsPlus.*\\.exe$"
+    - "(?i)^gopls\\.exe$"
+    - "(?i)^language_server.*\\.exe$"
+    - "(?i)^WMIADAP\\.exe$"
+    - "(?i)^audiodg\\.exe$"
+    - "(?i)^SenseImdsCollector\\.exe$"
+    - "(?i)^smartscreen\\.exe$"
+    - "(?i)^MsMpEng\\.exe$"
+    - "(?i)^wuaucltcore\\.exe$"
+    - "(?i)^LogonUI\\.exe$"
+    - "(?i)^OfficeC2RClient\\.exe$"
+    - "(?i)^officesvcmgr\\.exe$"
+    - "(?i)^PwaHelper\\.exe$"
+    - "(?i)^identity_helper\\.exe$"
+    - "(?i)^GLPI-Agent.*\\.exe$"
+    - "(?i)^perl\\.exe$"
+
+# Software name normalization
+normalizer:
+  # Path to community/server-managed software mapping file
+  mappingFile: configs/software-map.json
+  # URL to pull mapping updates from central server (optional)
+  mappingUpdateURL: "http://localhost:8080/api/v1/mappings/agent"
+  # How often to check for mapping updates
+  mappingRefreshInterval: 1h
+
+# Software inventory scan
+inventory:
+  # How often to scan installed software from registry
+  scanInterval: 1h
+
+# Local storage
+store:
+  # Path to SQLite database file
+  dbPath: data/openlabstats.db
+
+# Logging
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+  # Log to file (in addition to Windows Event Log when running as service)
+  filePath: logs/agent.log

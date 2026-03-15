@@ -1,0 +1,115 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "openlabstats",
+    "title": "OpenLabStats - Software Usage",
+    "tags": ["openlabstats", "higher-ed"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Top Applications by Usage Time (24h)",
+        "type": "barchart",
+        "gridPos": { "h": 10, "w": 12, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "topk(15, sum by (app) (increase(openlabstats_app_usage_seconds_total[24h])))",
+            "legendFormat": "{{app}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Top Applications by Launch Count (24h)",
+        "type": "barchart",
+        "gridPos": { "h": 10, "w": 12, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "topk(15, sum by (app) (increase(openlabstats_app_launches_total[24h])))",
+            "legendFormat": "{{app}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Currently Active Applications",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 10 },
+        "targets": [
+          {
+            "expr": "count(openlabstats_app_active == 1)",
+            "legendFormat": "Active Apps"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Active User Sessions",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 10 },
+        "targets": [
+          {
+            "expr": "count(openlabstats_user_session_active == 1)",
+            "legendFormat": "Active Sessions"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Monitored Devices",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+        "targets": [
+          {
+            "expr": "count(openlabstats_device_info)",
+            "legendFormat": "Devices"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Usage by Category (24h)",
+        "type": "piechart",
+        "gridPos": { "h": 10, "w": 12, "x": 0, "y": 14 },
+        "targets": [
+          {
+            "expr": "sum by (category) (increase(openlabstats_app_usage_seconds_total[24h]))",
+            "legendFormat": "{{category}}"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Application Usage Over Time",
+        "type": "timeseries",
+        "gridPos": { "h": 10, "w": 12, "x": 12, "y": 14 },
+        "targets": [
+          {
+            "expr": "sum by (app) (rate(openlabstats_app_usage_seconds_total[5m]))",
+            "legendFormat": "{{app}}"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Installed Software Count by Device",
+        "type": "barchart",
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+        "targets": [
+          {
+            "expr": "count by (hostname) (openlabstats_installed_software_info)",
+            "legendFormat": "{{hostname}}"
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}
