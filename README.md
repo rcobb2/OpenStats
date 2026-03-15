@@ -6,8 +6,9 @@ Open-source software usage tracking for higher education. An alternative to prop
 
 The OpenLabStats agent runs as a Windows service on lab and classroom computers. It tracks:
 
-- **Software usage** — which applications are launched, how long they run, and who uses them
+- **Software usage** — which applications are launched, how long they run, and who uses them (human only)
 - **Launch counts** — how many times each application is opened
+- **Foreground tracking** — active vs background usage for precise analytics
 - **User sessions** — when users log in and out
 - **Software inventory** — what's installed on each machine
 
@@ -144,10 +145,11 @@ The agent compiles to a single `openlabstats-agent.exe` with no runtime dependen
 
 ## Roadmap
 
-- [ ] Central management server (mapping push, AI normalization, reporting)
+- [x] Central management server (mapping push, reporting)
+- [x] Foreground window tracking (active vs background usage)
+- [ ] AI Normalizer (automated categorization)
 - [ ] macOS agent (using NSWorkspace/launchd)
 - [ ] MSI installer package
-- [ ] Foreground window tracking (active vs background usage)
 - [ ] Web-based application tracking (browser URL categorization)
 
 ## License

@@ -126,6 +126,16 @@ When modifying the system, update ALL applicable components:
 - [ ] Update any affected API handlers
 - [ ] Test with existing PostgreSQL instance
 
+### Updating Documentation
+
+Whenever a significant feature is added or architectural changes occur, update the corresponding documentation:
+
+- [ ] `HUMANS.md` - Overall system architecture and data flow
+- [ ] `README.md` - User-facing features and roadmap
+- [ ] `agent/agent.md` - Agent-specific internal logic and metrics
+- [ ] `server/server.md` - Server API, database schema, and components
+- [ ] `server/web/web.md` - Frontend structure and components
+
 ## Best Practices
 
 ### Code Style

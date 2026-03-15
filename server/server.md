@@ -60,7 +60,8 @@ PostgreSQL connection and migrations:
 Prometheus file-based service discovery:
 - `Refresh()` - Queries agents from DB, writes JSON to configured path
 - Format: file_sd compatible JSON with `targets`, `labels`
-- Includes: `__address__`, `lab`, `hostname`, `agent_version`
+- Includes: `__address__`, `lab`, `building`, `room`, `hostname`, `agent_version`
+- **Trigger**: Automatic refresh when labs or agent assignments change
 
 ### `internal/api/agents.go`
 
@@ -129,6 +130,7 @@ docker-compose up -d
 ```sql
 labs:
   id, name, building, room, description, created_at, updated_at
+  (Supports inline editing and resizable UI columns)
 
 agents:
   id (PK), hostname, ip_address, os_version, agent_version,

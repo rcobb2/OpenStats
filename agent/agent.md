@@ -8,8 +8,9 @@ The agent:
 1. Subscribes to WMI process start/stop events
 2. Tracks foreground window changes
 3. Normalizes software names (PE metadata + mapping file)
-4. Exposes Prometheus metrics for scraping
-5. Registers with central server for fleet management
+4. Filters out system/service accounts (`SYSTEM`, `DWM`, `NT SERVICE`, etc.)
+5. Exposes Prometheus metrics for scraping
+6. Registers with central server for fleet management
 
 ## Key Packages
 
@@ -44,6 +45,7 @@ Active process state management:
 - Maintains map of running processes
 - Handles checkpointing for metrics aggregation
 - Deduplicates by (app, user, hostname) to prevent double-counting
+- **User Filtering**: Only records metrics for valid human users (excludes system/computer accounts)
 - Integrates with foreground poller
 
 ### `internal/monitor/foreground.go`

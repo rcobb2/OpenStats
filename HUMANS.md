@@ -31,7 +31,7 @@ The agent runs as a Windows service on lab computers and tracks:
 
 - **Software usage** - Application launch/exit events via WMI
 - **Foreground time** - Which app has the active window
-- **User sessions** - Derived from process ownership
+- **User sessions** - Derived from human process ownership (excludes services)
 - **Installed software** - Registry scans
 
 Data is exposed as Prometheus metrics at `http://<host>:9183/metrics`.
@@ -49,7 +49,7 @@ Data is exposed as Prometheus metrics at `http://<host>:9183/metrics`.
 Central management server providing:
 
 - **Agent registration** - Heartbeat endpoint, status tracking
-- **Lab management** - Grouping agents by physical location
+- **Lab & Room management** - Grouping agents by physical location (Building/Room)
 - **Software mappings** - CRUD for normalization rules
 - **Reporting** - Aggregated usage data
 - **Installer generation** - Customized agent installers
@@ -67,7 +67,7 @@ Web UI for managing the fleet:
 - **Labs** - Lab/room management
 - **Agents** - Fleet inventory, status
 - **Mappings** - Software name normalization rules
-- **Reports** - Usage analytics
+- **Reports** - Usage analytics with resizable data tables
 - **Installer** - Generate customized agent packages
 
 ### Infrastructure

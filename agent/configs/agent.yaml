@@ -54,7 +54,6 @@ monitor:
     - "(?i)^PanGpHip\\.exe$"
     - "(?i)^kubectl\\.exe$"
     - "(?i)^AgentExecutor\\.exe$"
-    - "(?i)^Antigravity\\.exe$"
     - "(?i)^GoogleUpdate.*\\.exe$"
     - "(?i)^wa_3rd_party_host.*\\.exe$"
     - "(?i)^LogiOptionsPlus.*\\.exe$"

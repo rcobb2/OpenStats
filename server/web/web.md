@@ -29,7 +29,7 @@ server/web/
 │   │   └── Installer.jsx
 │   └── components/      # Shared components
 │       ├── Layout.jsx   # Nav + shell
-│       └── Table.jsx   # Reusable table
+│       └── Table.jsx   # ResizableTable wrapper
 ├── index.html
 ├── package.json
 └── vite.config.js
@@ -116,9 +116,10 @@ Base URL: `/api/v1` (proxied by server)
 - Routes: Dashboard, Labs, Agents, Mappings, Reports, Installer
 
 ### Table (`components/Table.jsx`)
-- Reusable table with columns
-- Sortable headers
-- Action buttons (edit, delete)
+- `ResizableTable` component
+- Automatically adds resizable handles to all column headers
+- Maintains `table-layout: fixed` for stable resizing
+- Hover effects for handle visibility
 
 ## Routing (`main.jsx`)
 
