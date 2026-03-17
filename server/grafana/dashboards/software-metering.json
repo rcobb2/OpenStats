@@ -1,0 +1,120 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Peak Concurrent Application Usage",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (app) (openlabstats_app_active == 1)",
+          "legendFormat": "{{ app }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "none" } },
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 8 },
+      "id": 2,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      },
+      "title": "Installed vs. Executed (90 Days)",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "count by (name) (openlabstats_installed_software_info)",
+          "legendFormat": "Installed (Total)",
+          "instant": true
+        },
+        {
+          "expr": "count by (app) (sum by (app, hostname) (increase(openlabstats_app_launches_total[90d]) > 0))",
+          "legendFormat": "Used (Last 90d)",
+          "instant": true
+        }
+      ],
+      "description": "Compare installations to actual activity."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 8 },
+      "id": 3,
+      "options": {
+        "stacking": "normal",
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "title": "Software Version Sprawl",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "count by (name, version) (openlabstats_installed_software_info)",
+          "legendFormat": "{{ name }} v{{ version }}",
+          "instant": true
+        }
+      ],
+      "description": "See fragmentation of software versions."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+      "id": 4,
+      "options": { "showHeader": true },
+      "title": "Total Software Usage Time (Hours)",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (app) (increase(openlabstats_app_usage_seconds_total[$__range])) / 3600",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    }
+  ],
+  "refresh": "1h",
+  "schemaVersion": 39,
+  "tags": ["software", "licensing"],
+  "templating": {
+    "list": [
+      {
+        "hide": 2,
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(openlabstats_app_usage_seconds_total, app)",
+        "includeAll": true,
+        "multi": true,
+        "name": "app",
+        "query": { "query": "label_values(openlabstats_app_usage_seconds_total, app)" },
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-30d", "to": "now" },
+  "title": "Software Metering & License Compliance",
+  "uid": "ols-software"
+}

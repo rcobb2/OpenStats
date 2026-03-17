@@ -79,6 +79,7 @@ When modifying the system, update ALL applicable components:
 
 - [ ] `agent/internal/metrics/prometheus.go` - Add metric definition
 - [ ] `agent/cmd/agent/main.go` - Wire up initialization if needed
+- [ ] `agent/cmd/agent/main.go` - Add CLI tool if new status query needed
 - [ ] `agent/configs/agent.yaml` - Add config if applicable
 - [ ] `agent/internal/enrollment/client.go` - If server API changed
 - [ ] `README.md` - Update metrics table
@@ -92,6 +93,14 @@ When modifying the system, update ALL applicable components:
 - [ ] `agent/installer/build.ps1` - Build script
 - [ ] `agent/configs/agent.yaml` - Default values (server address, port)
 - [ ] `server/docs/swagger.yaml` - If API changed for enrollment
+- [ ] `README.md` - Update MSI install examples
+- [ ] `agent/agent.md` - Update CLI tools section
+
+### Adding CLI Flags
+
+- [ ] `agent/cmd/agent/main.go` - Add CLI handler
+- [ ] `README.md` - Update CLI Commands section
+- [ ] `agent/agent.md` - Update CLI Tools section
 
 ### Adding a New API Endpoint
 

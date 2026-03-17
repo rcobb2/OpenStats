@@ -20,6 +20,7 @@ RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=go-builder /openlabstats-server /usr/local/bin/openlabstats-server
 COPY --from=web-builder /app/dist /usr/local/bin/public
+COPY --from=web-builder /app/public/installers /usr/local/bin/public/installers
 COPY config/server.yaml /etc/openlabstats/server.yaml
 
 WORKDIR /usr/local/bin

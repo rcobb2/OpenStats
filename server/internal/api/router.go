@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -54,10 +57,19 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// Swagger UI (Phase 3).
 	r.Get("/api/docs/*", httpSwagger.Handler(
 		httpSwagger.URL("/api/docs/doc.json"),
 	))
+
+	// Grafana Proxy - allow frontend to access dashboards without direct exposure.
+	// We point this to the internal container address 'grafana:3000'.
+	grafanaURL, _ := url.Parse("http://openlabstats-grafana:3000")
+	proxy := httputil.NewSingleHostReverseProxy(grafanaURL)
+	r.Mount("/grafana", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Strip the /grafana prefix so it matches Grafana's internal routing.
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/grafana")
+		proxy.ServeHTTP(w, r)
+	}))
 
 	// API v1 routes.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -68,6 +80,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Get("/{agentID}", s.GetAgent)
 			r.Put("/{agentID}/lab", s.AssignAgentToLab)
 			r.Delete("/{agentID}", s.DeleteAgent)
+			r.Post("/{agentID}/force-update", s.ForceAgentUpdate)
 		})
 
 		// Labs
@@ -96,9 +109,10 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Get("/summary", s.ReportSummary)
 		})
 
-		// Installer generation
+		// Installer generation & download
 		r.Route("/installers", func(r chi.Router) {
 			r.Post("/generate", s.GenerateInstaller)
+			r.Get("/latest", s.DownloadLatestInstaller)
 		})
 
 		// Settings
@@ -108,7 +122,14 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		})
 	})
 
-	// SPA frontend
+	// Serve installer MSI files directly (used by agents for self-update).
+	installersDir := filepath.Join(s.cfg.Server.PublicDir, "installers")
+	r.Get("/installers/*", func(w http.ResponseWriter, req *http.Request) {
+		filename := strings.TrimPrefix(req.URL.Path, "/installers/")
+		http.ServeFile(w, req, filepath.Join(installersDir, filename))
+	})
+
+	// SPA frontend (catch-all).
 	r.Get("/*", spaHandler(s.cfg.Server.PublicDir))
 
 	return r

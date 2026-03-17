@@ -16,13 +16,18 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.0"
+const agentVersion = "0.1.3"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
+type RegisterRequest struct {
+	ID           string `json:"id"`
+	Hostname     string `json:"hostname"`
+	IPAddress    string `json:"ipAddress"`
+	OSVersion    string `json:"osVersion"`
+	AgentVersion string `json:"agentVersion"`
 	Port         int    `json:"port"`
 	Building     string `json:"building"`
 	Room         string `json:"room"`
-	UpdateURL    string `json:"updateUrl,omitempty"`
 }
 
 type RegisterAgentResponse struct {
@@ -35,10 +40,8 @@ type SystemSettings struct {
 	UpdateIntervalSeconds    int    `json:"updateIntervalSeconds"`
 	StaleTimeoutDays         int    `json:"staleTimeoutDays"`
 	MinAgentVersion          string `json:"minAgentVersion"`
-}
-
-type RegisterResponse struct {
-	Settings *SystemSettings `json:"settings"`
+	MaintenanceWindowStart   string `json:"maintenanceWindowStart"`
+	MaintenanceWindowEnd     string `json:"maintenanceWindowEnd"`
 }
 
 // Client handles agent registration with the central server.
@@ -52,7 +55,6 @@ type Client struct {
 }
 
 // NewClient creates a new enrollment client.
-// serverURL is the base URL of the central server (e.g., "https://server.campus.edu:8080").
 func NewClient(serverURL string, agentPort int, building, room string, logger *slog.Logger) *Client {
 	return &Client{
 		serverURL: serverURL,
@@ -66,24 +68,38 @@ func NewClient(serverURL string, agentPort int, building, room string, logger *s
 	}
 }
 
-	var respData RegisterAgentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
-		c.logger.Warn("failed to decode registration response", "error", err)
-		return nil, "" // Still registered successfully
-	}
-
-	c.logger.Info("registered with server", "url", url, "hostname", hostname)
-	return respData.Settings, respData.UpdateURL
-}
-
 // Register sends a registration/heartbeat to the central server.
-// Returns settings if provided by server.
 func (c *Client) Register(ctx context.Context) (*SystemSettings, string) {
 	settings, updateURL, err := c.doRegister(ctx)
 	if err != nil {
 		c.logger.Warn("registration failed", "error", err)
 	}
 	return settings, updateURL
+}
+
+// GetSettings fetches settings from the server without registering.
+func (c *Client) GetSettings(ctx context.Context) (*SystemSettings, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.serverURL+"/api/v1/settings", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned %d", resp.StatusCode)
+	}
+
+	var settings SystemSettings
+	if err := json.NewDecoder(resp.Body).Decode(&settings); err != nil {
+		return nil, err
+	}
+
+	return &settings, nil
 }
 
 func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error) {
@@ -94,7 +110,7 @@ func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error
 		ID:           hostname,
 		Hostname:     hostname,
 		IPAddress:    ip,
-		OSVersion:    "", // TODO: read from registry
+		OSVersion:    "",
 		AgentVersion: agentVersion,
 		Port:         c.port,
 		Building:     c.building,
@@ -125,21 +141,26 @@ func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error
 
 	var res RegisterAgentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, "", nil // Consider it a success without settings
+		return nil, "", nil
 	}
 
-	return res.Settings, res.UpdateURL
+	return res.Settings, res.UpdateURL, nil
 }
 
 // RunHeartbeat periodically registers with the server.
-// Blocks until ctx is cancelled.
 func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration) {
 	currentInterval := defaultInterval
-	
-	// Register immediately on startup.
+
 	s, updateURL := c.Register(ctx)
 	if s != nil && s.HeartbeatIntervalSeconds > 0 {
 		currentInterval = time.Duration(s.HeartbeatIntervalSeconds) * time.Second
+	}
+
+	// Also check for update on startup.
+	// Server-directed updates take priority - always update when server sends URL.
+	if updateURL != "" {
+		c.logger.Info("startup: server-directed update received, initiating self-update", "url", updateURL)
+		go c.executeSelfUpdate(updateURL)
 	}
 
 	ticker := time.NewTicker(currentInterval)
@@ -151,6 +172,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 			return
 		case <-ticker.C:
 			s, updateURL = c.Register(ctx)
+			c.logger.Debug("heartbeat completed", "updateURL", updateURL)
 			if s != nil {
 				if s.HeartbeatIntervalSeconds > 0 {
 					newInterval := time.Duration(s.HeartbeatIntervalSeconds) * time.Second
@@ -161,27 +183,22 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 					}
 				}
 
-				// Check for updates if URL provided.
 				if updateURL != "" {
-					if isInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
-						c.logger.Info("within maintenance window, initiating self-update", "url", updateURL)
-						go c.executeSelfUpdate(updateURL)
-					} else {
-						c.logger.Debug("update available but outside maintenance window", "start", s.MaintenanceWindowStart, "end", s.MaintenanceWindowEnd)
-					}
+					// Server-directed update: always update when server sends URL
+					c.logger.Info("server-directed update received, initiating self-update", "url", updateURL)
+					go c.executeSelfUpdate(updateURL)
 				}
 			}
 		}
 	}
 }
 
-func isInMaintenanceWindow(startStr, endStr string) bool {
+func IsInMaintenanceWindow(startStr, endStr string) bool {
 	if startStr == "" || endStr == "" {
-		return true // No window set, always permit
+		return true
 	}
 
 	now := time.Now()
-	// Parse current time as HH:mm and convert to minutes since midnight for easy comparison
 	currentMinutes := now.Hour()*60 + now.Minute()
 
 	var startH, startM, endH, endM int
@@ -192,23 +209,19 @@ func isInMaintenanceWindow(startStr, endStr string) bool {
 	endMinutes := endH*60 + endM
 
 	if startMinutes < endMinutes {
-		// Standard window (e.g., 22:00 to 04:00 doesn't happen here)
 		return currentMinutes >= startMinutes && currentMinutes <= endMinutes
 	} else {
-		// Overnight window (e.g., 22:00 to 04:00)
 		return currentMinutes >= startMinutes || currentMinutes <= endMinutes
 	}
 }
 
 func (c *Client) executeSelfUpdate(url string) {
-	// 1. Resolve relative path to absolute
 	if !strings.HasPrefix(url, "http") {
 		url = c.serverURL + url
 	}
 
 	c.logger.Info("downloading update", "url", url)
-	
-	// 2. Download to temp file
+
 	tempFile := filepath.Join(os.TempDir(), "openlabstats-update.msi")
 	out, err := os.Create(tempFile)
 	if err != nil {
@@ -238,9 +251,6 @@ func (c *Client) executeSelfUpdate(url string) {
 
 	c.logger.Info("update downloaded, launching installer", "path", tempFile)
 
-	// 3. Launch msiexec silently
-	// We use /qn for silent, /i for install, and restart the service.
-	// We also use REBOOT=ReallySuppress to avoid unexpected lab reboots.
 	cmd := exec.Command("msiexec.exe", "/i", tempFile, "/qn", "REBOOT=ReallySuppress")
 	if err := cmd.Start(); err != nil {
 		c.logger.Error("failed to launch msiexec", "error", err)
@@ -248,10 +258,8 @@ func (c *Client) executeSelfUpdate(url string) {
 	}
 
 	c.logger.Info("msiexec launched, agent will likely restart now")
-	// The agent will be killed by the MSI installer as it replaces the binary.
 }
 
-// getOutboundIP returns the preferred outbound IP of this machine.
 func getOutboundIP() string {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {

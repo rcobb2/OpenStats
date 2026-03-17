@@ -97,6 +97,6 @@ store:
 # Logging
 logging:
   # Log level: debug, info, warn, error
-  level: info
+  level: debug
   # Log to file (in addition to Windows Event Log when running as service)
   filePath: logs/agent.log

@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { getAgents, deleteAgent, assignAgentToLab, getLabs } from '../../api';
+import { getAgents, deleteAgent, assignAgentToLab, getLabs, forceAgentUpdate } from '../../api';
 import ResizableTable from '../../components/Table';
 
 export default function AgentsList() {
   const [agents, setAgents] = useState([]);
   const [labs, setLabs] = useState([]);
   const [error, setError] = useState(null);
+  const [updating, setUpdating] = useState({});
+  const [toast, setToast] = useState(null);
 
   const load = () => {
     Promise.all([getAgents(), getLabs()])
@@ -14,6 +16,11 @@ export default function AgentsList() {
   };
 
   useEffect(load, []);
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const handleDelete = async (id) => {
     if (!confirm(`Remove agent ${id}?`)) return;
@@ -26,10 +33,34 @@ export default function AgentsList() {
     load();
   };
 
+  const handleForceUpdate = async (id) => {
+    if (!confirm(`Force update agent ${id}?\n\nThe agent will receive the update URL on its next heartbeat and install within its maintenance window.`)) return;
+    setUpdating(u => ({ ...u, [id]: true }));
+    try {
+      const res = await forceAgentUpdate(id);
+      showToast(`✓ Update queued for ${id}. The agent will install on next heartbeat.`);
+      load();
+    } catch (err) {
+      showToast(`✗ Failed to queue update: ${err.message}`, 'error');
+    } finally {
+      setUpdating(u => ({ ...u, [id]: false }));
+    }
+  };
+
   if (error) return <div className="error">{error}</div>;
 
   return (
     <div>
+      {toast && (
+        <div className={`toast-banner ${toast.type}`} style={{
+          position: 'fixed', top: '1.5rem', right: '1.5rem', zIndex: 9999,
+          padding: '0.85rem 1.5rem', borderRadius: '10px', fontWeight: 500,
+          background: toast.type === 'error' ? 'var(--danger, #e74c3c)' : 'var(--success, #27ae60)',
+          color: '#fff', boxShadow: '0 4px 18px rgba(0,0,0,0.18)',
+          animation: 'fadeIn 0.2s ease'
+        }}>{toast.msg}</div>
+      )}
+
       <h2>Agents ({agents.length})</h2>
       <ResizableTable>
         <thead>
@@ -64,7 +95,23 @@ export default function AgentsList() {
                 </select>
               </td>
               <td>{new Date(a.lastSeen).toLocaleString()}</td>
-              <td>
+              <td style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                {(a.status === 'outdated' || a.status === 'online') && (
+                  <button
+                    className="btn-warning"
+                    title="Force the agent to download and install the latest version"
+                    onClick={() => handleForceUpdate(a.id)}
+                    disabled={updating[a.id]}
+                    style={{
+                      background: 'linear-gradient(135deg, #f39c12, #e67e22)',
+                      color: '#fff', border: 'none', borderRadius: '6px',
+                      padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.82rem',
+                      opacity: updating[a.id] ? 0.6 : 1
+                    }}
+                  >
+                    {updating[a.id] ? '⏳ Queuing…' : '⬆ Force Update'}
+                  </button>
+                )}
                 <button className="btn-danger" onClick={() => handleDelete(a.id)}>Remove</button>
               </td>
             </tr>

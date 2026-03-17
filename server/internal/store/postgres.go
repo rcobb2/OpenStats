@@ -58,6 +58,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		lab_id      TEXT REFERENCES labs(id) ON DELETE SET NULL,
 		port        INT NOT NULL DEFAULT 9183,
 		status      TEXT NOT NULL DEFAULT 'unknown',
+		pending_update TEXT NOT NULL DEFAULT '',
 		last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -100,9 +101,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	INSERT INTO settings (key, value) VALUES ('heartbeat_interval_seconds', '120') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('update_interval_seconds', '3600') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('stale_timeout_days', '90') ON CONFLICT DO NOTHING;
-	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.0') ON CONFLICT DO NOTHING;
-	INSERT INTO settings (key, value) VALUES ('maintenance_window_start', '22:00') ON CONFLICT DO NOTHING;
-	INSERT INTO settings (key, value) VALUES ('maintenance_window_end', '04:00') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.3') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('maintenance_window_start', '') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('maintenance_window_end', '') ON CONFLICT DO NOTHING;
+
+	-- Migration: add pending_update column if it doesn't exist
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS pending_update TEXT NOT NULL DEFAULT '';
 	`
 	_, err := s.pool.Exec(ctx, schema)
 	if err != nil {
@@ -114,19 +118,20 @@ func (s *Store) migrate(ctx context.Context) error {
 // --- Agent operations ---
 
 type Agent struct {
-	ID           string    `json:"id"`
-	Hostname     string    `json:"hostname"`
-	IPAddress    string    `json:"ipAddress"`
-	OSVersion    string    `json:"osVersion"`
-	AgentVersion string    `json:"agentVersion"`
-	LabID        *string   `json:"labId,omitempty"`
-	Port         int       `json:"port"`
-	Status       string    `json:"status"`
-	Building     string    `json:"building"`
-	Room         string    `json:"room"`
-	LastSeen     time.Time `json:"lastSeen"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID            string    `json:"id"`
+	Hostname      string    `json:"hostname"`
+	IPAddress     string    `json:"ipAddress"`
+	OSVersion     string    `json:"osVersion"`
+	AgentVersion  string    `json:"agentVersion"`
+	LabID         *string   `json:"labId,omitempty"`
+	Port          int       `json:"port"`
+	Status        string    `json:"status"`
+	PendingUpdate string    `json:"pendingUpdate,omitempty"`
+	Building      string    `json:"building"`
+	Room          string    `json:"room"`
+	LastSeen      time.Time `json:"lastSeen"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // UpsertAgent registers or updates an agent (idempotent on hostname).
@@ -150,18 +155,19 @@ func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
 	}
 
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO agents (id, hostname, ip_address, os_version, agent_version, port, status, last_seen, lab_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+		INSERT INTO agents (id, hostname, ip_address, os_version, agent_version, port, status, pending_update, last_seen, lab_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
 		ON CONFLICT (id) DO UPDATE SET
 			ip_address = EXCLUDED.ip_address,
 			os_version = EXCLUDED.os_version,
 			agent_version = EXCLUDED.agent_version,
 			port = EXCLUDED.port,
 			status = EXCLUDED.status,
+			pending_update = COALESCE(NULLIF(EXCLUDED.pending_update, ''), agents.pending_update),
 			last_seen = NOW(),
 			updated_at = NOW(),
 			lab_id = COALESCE(agents.lab_id, EXCLUDED.lab_id)`, // Don't overwrite existing lab assignment if already set manually
-		a.ID, a.Hostname, a.IPAddress, a.OSVersion, a.AgentVersion, a.Port, a.Status, a.LabID,
+		a.ID, a.Hostname, a.IPAddress, a.OSVersion, a.AgentVersion, a.Port, a.Status, a.PendingUpdate, a.LabID,
 	)
 	return err
 }
@@ -169,7 +175,7 @@ func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
 // ListAgents returns all enrolled agents.
 func (s *Store) ListAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, last_seen, created_at, updated_at
+		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, pending_update, last_seen, created_at, updated_at
 		FROM agents ORDER BY hostname`)
 	if err != nil {
 		return nil, err
@@ -179,7 +185,7 @@ func (s *Store) ListAgents(ctx context.Context) ([]Agent, error) {
 	var agents []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.PendingUpdate, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
@@ -191,9 +197,9 @@ func (s *Store) ListAgents(ctx context.Context) ([]Agent, error) {
 func (s *Store) GetAgent(ctx context.Context, id string) (*Agent, error) {
 	a := &Agent{}
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, last_seen, created_at, updated_at
+		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, pending_update, last_seen, created_at, updated_at
 		FROM agents WHERE id = $1`, id).
-		Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt)
+		Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.PendingUpdate, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +215,24 @@ func (s *Store) AssignAgentToLab(ctx context.Context, agentID, labID string) err
 // DeleteAgent removes an agent.
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1`, id)
+	return err
+}
+
+// SetAgentStatus explicitly sets an agent's status field.
+func (s *Store) SetAgentStatus(ctx context.Context, id, status string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET status = $1, updated_at = NOW() WHERE id = $2`, status, id)
+	return err
+}
+
+// SetAgentPendingUpdate sets the update URL an agent should download and install.
+func (s *Store) SetAgentPendingUpdate(ctx context.Context, id, updateURL string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET pending_update = $1, updated_at = NOW() WHERE id = $2`, updateURL, id)
+	return err
+}
+
+// ClearAgentPendingUpdate clears any pending update for an agent.
+func (s *Store) ClearAgentPendingUpdate(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET pending_update = '', updated_at = NOW() WHERE id = $1`, id)
 	return err
 }
 
@@ -430,6 +454,7 @@ func (s *Store) GetPrometheusTargets(ctx context.Context) ([]AgentTarget, error)
 	}
 	return targets, rows.Err()
 }
+
 // --- System settings ---
 
 type SystemSettings struct {

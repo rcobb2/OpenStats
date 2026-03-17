@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getAgents, deleteAgent, assignAgentToLab, getLabs } from '../api';
+import { getAgents, deleteAgent, assignAgentToLab, getLabs, forceAgentUpdate } from '../api';
 import ResizableTable from '../components/Table';
 
 export default function Agents() {
@@ -24,6 +24,17 @@ export default function Agents() {
   const handleAssignLab = async (agentId, labId) => {
     await assignAgentToLab(agentId, labId);
     load();
+  };
+
+  const handleForceUpdate = async (id) => {
+    if (!confirm(`Force update agent ${id}?`)) return;
+    try {
+      const result = await forceAgentUpdate(id);
+      alert(`Update queued: ${result.message || 'Agent will update on next heartbeat'}`);
+      load();
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
   };
 
   if (error) return <div className="error">{error}</div>;
@@ -65,6 +76,8 @@ export default function Agents() {
               </td>
               <td>{new Date(a.lastSeen).toLocaleString()}</td>
               <td>
+              <td>
+                <button className="btn-secondary" onClick={() => handleForceUpdate(a.id)}>Update</button>
                 <button className="btn-danger" onClick={() => handleDelete(a.id)}>Remove</button>
               </td>
             </tr>

@@ -1,0 +1,141 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "tooltip": { "mode": "single" }
+      },
+      "title": "Fleet Status",
+      "type": "piechart",
+      "targets": [
+        {
+          "expr": "count by (status) (label_replace(up{job=\"openlabstats\"}, \"status\", \"Online\", \"\", \"\") * (up == 1) OR label_replace(up{job=\"openlabstats\"}, \"status\", \"Offline\", \"\", \"\") * (up == 0))",
+          "legendFormat": "{{ status }}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Total Daily Logins (30d)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(increase(openlabstats_user_session_logins_total[24h]))",
+          "legendFormat": "Logins"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 },
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      },
+      "title": "Top 5 Applications (by Usage)",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "topk(5, sum by (app) (increase(openlabstats_app_usage_seconds_total[$__range])))",
+          "legendFormat": "{{ app }}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "showHeader": true
+      },
+      "title": "Hardware ROI Insights & Alerts",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "absent(up{job=\"openlabstats\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "description": "Mocked insights based on fleet data."
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["executive", "openlabstats"],
+  "templating": {
+    "list": [
+      {
+        "hide": 2,
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(up{job=\"openlabstats\"}, lab)",
+        "includeAll": true,
+        "multi": true,
+        "name": "lab",
+        "query": { "query": "label_values(up{job=\"openlabstats\"}, lab)" },
+        "refresh": 2,
+        "type": "query",
+        "label": "Lab/Building"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(up{job=\"openlabstats\", lab=~\"$lab\"}, instance)",
+        "includeAll": true,
+        "multi": true,
+        "name": "agent",
+        "query": { "query": "label_values(up{job=\"openlabstats\", lab=~\"$lab\"}, instance)" },
+        "refresh": 2,
+        "type": "query",
+        "label": "Agent/Hostname"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "title": "Executive Overview",
+  "uid": "ols-executive"
+}

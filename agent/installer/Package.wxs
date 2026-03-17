@@ -17,7 +17,7 @@
 
   <Package Name="OpenLabStats Agent"
            Manufacturer="OpenLabStats"
-           Version="0.1.0"
+           Version="0.1.1"
            UpgradeCode="E7A14B3C-5D62-4F89-A1C0-8B3E6F9D2A71"
            Scope="perMachine"
            Compressed="yes">
@@ -30,10 +30,10 @@
     <!-- ============================================================
          Public properties for admin customization via command line.
          ============================================================ -->
-    <Property Id="SERVERADDRESS" Value="" Secure="yes" />
+    <Property Id="SERVERADDRESS" Secure="yes" />
     <Property Id="PORT" Value="9183" Secure="yes" />
-    <Property Id="BUILDING" Value="" Secure="yes" />
-    <Property Id="ROOM" Value="" Secure="yes" />
+    <Property Id="BUILDING" Secure="yes" />
+    <Property Id="ROOM" Secure="yes" />
 
     <!-- ============================================================
          Directory structure
@@ -119,23 +119,9 @@
     </ComponentGroup>
 
     <!-- ============================================================
-         Post-install: patch agent.yaml with custom property values.
-         Uses XmlConfig to set reportURL and port, or a simple
-         text-file transform via SetProperty + custom action.
+         Post-install: configure agent.yaml using PowerShell.
+         This replaces placeholders in the default config with MSI properties.
          ============================================================ -->
-    <SetProperty Id="PatchConfigAction"
-                 Before="PatchConfigAction"
-                 Sequence="execute"
-                 Value="&quot;[SystemFolder]cmd.exe&quot; /c (echo server:&amp; echo   port: [PORT]&amp; echo   metricsPath: /metrics&amp; echo   reportURL: &quot;[SERVERADDRESS]&quot;) &gt; &quot;[ConfigDir]server-override.yaml&quot;" />
-
-    <!-- We use a custom action to rewrite the config with the correct values -->
-    <CustomAction Id="PatchConfigAction"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred"
-                  Impersonate="no"
-                  BinaryRef="Wix4UtilCA_X86" />
-
-    <!-- Simpler approach: use a deferred CA to do string replacement in agent.yaml -->
     <CustomAction Id="ConfigureAgent"
                   Directory="INSTALLDIR"
                   ExeCommand="[SystemFolder]cmd.exe /c powershell -NoProfile -Command &quot;$c = Get-Content '[ConfigDir]agent.yaml' -Raw; $c = $c -replace 'reportURL:\s*&quot;&quot;', 'reportURL: &quot;[SERVERADDRESS]&quot;'; $c = $c -replace 'port:\s*9183', 'port: [PORT]'; $c = $c -replace 'building:\s*&quot;&quot;', 'building: &quot;[BUILDING]&quot;'; $c = $c -replace 'room:\s*&quot;&quot;', 'room: &quot;[ROOM]&quot;'; Set-Content '[ConfigDir]agent.yaml' $c -NoNewline&quot;"

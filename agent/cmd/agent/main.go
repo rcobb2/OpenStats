@@ -16,6 +16,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/go-ole/go-ole"
+	"github.com/go-ole/go-ole/oleutil"
 	"github.com/rcobb/openlabstats-agent/internal/config"
 	"github.com/rcobb/openlabstats-agent/internal/enrollment"
 	"github.com/rcobb/openlabstats-agent/internal/inventory"
@@ -24,6 +26,10 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
 	"github.com/rcobb/openlabstats-agent/internal/service"
 	"github.com/rcobb/openlabstats-agent/internal/store"
+)
+
+var (
+	maintenanceOverride *bool // nil = auto, true = forced on, false = forced off
 )
 
 func main() {
@@ -47,7 +53,35 @@ func main() {
 			return
 
 		case "version":
-			fmt.Println("openlabstats-agent v0.1.0")
+			fmt.Println("openlabstats-agent v0.1.3")
+			return
+
+		case "serveraddress":
+			handleServerAddress()
+			return
+
+		case "building":
+			handleBuilding()
+			return
+
+		case "room":
+			handleRoom()
+			return
+
+		case "heartbeat":
+			handleHeartbeat()
+			return
+
+		case "maintenancewindow":
+			handleMaintenanceWindow()
+			return
+
+		case "setmaintenance":
+			handleSetMaintenance()
+			return
+
+		case "status":
+			handleStatus()
 			return
 
 		case "help":
@@ -81,6 +115,148 @@ func main() {
 	}
 }
 
+func handleServerAddress() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(cfg.Server.ReportURL)
+}
+
+func handleBuilding() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(cfg.Monitor.Building)
+}
+
+func handleRoom() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(cfg.Monitor.Room)
+}
+
+func handleHeartbeat() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	client := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, slog.Default())
+	settings, err := client.GetSettings(context.Background())
+	if err != nil {
+		fmt.Printf("Configured: %ds (server unreachable, showing default)\n", 120)
+		fmt.Printf("Actual: unknown (server unreachable)\n")
+		return
+	}
+
+	fmt.Printf("Configured: %ds\n", settings.HeartbeatIntervalSeconds)
+	fmt.Printf("Actual: %ds\n", settings.HeartbeatIntervalSeconds)
+}
+
+func handleMaintenanceWindow() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	client := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, slog.Default())
+	settings, err := client.GetSettings(context.Background())
+	if err != nil {
+		fmt.Printf("In Maintenance Window: unknown (server unreachable)\n")
+		fmt.Printf("Configured Window: %s - %s\n", "22:00", "04:00")
+		fmt.Printf("Override: %s\n", getMaintenanceOverrideStatus())
+		return
+	}
+
+	inWindow := enrollment.IsInMaintenanceWindow(settings.MaintenanceWindowStart, settings.MaintenanceWindowEnd)
+
+	// Check override
+	if maintenanceOverride != nil {
+		fmt.Printf("In Maintenance Window: %v (override)\n", *maintenanceOverride)
+	} else {
+		fmt.Printf("In Maintenance Window: %v\n", inWindow)
+	}
+	fmt.Printf("Configured Window: %s - %s\n", settings.MaintenanceWindowStart, settings.MaintenanceWindowEnd)
+	fmt.Printf("Override: %s\n", getMaintenanceOverrideStatus())
+}
+
+func handleSetMaintenance() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Usage: openlabstats-agent setmaintenance <true|false>\n")
+		os.Exit(1)
+	}
+
+	arg := strings.ToLower(os.Args[2])
+	switch arg {
+	case "true", "1", "yes", "on":
+		val := true
+		maintenanceOverride = &val
+		fmt.Println("Maintenance mode: forced ON")
+	case "false", "0", "no", "off":
+		val := false
+		maintenanceOverride = &val
+		fmt.Println("Maintenance mode: forced OFF")
+	case "auto", "clear":
+		maintenanceOverride = nil
+		fmt.Println("Maintenance mode: auto (time-based)")
+	default:
+		fmt.Fprintf(os.Stderr, "Invalid value: %s (use true, false, or auto)\n", os.Args[2])
+		os.Exit(1)
+	}
+}
+
+func getMaintenanceOverrideStatus() string {
+	if maintenanceOverride == nil {
+		return "auto"
+	}
+	if *maintenanceOverride {
+		return "forced on"
+	}
+	return "forced off"
+}
+
+func handleStatus() {
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Version:      0.1.3\n")
+	fmt.Printf("Building:     %s\n", cfg.Monitor.Building)
+	fmt.Printf("Room:         %s\n", cfg.Monitor.Room)
+	fmt.Printf("Server:       %s\n", cfg.Server.ReportURL)
+	fmt.Printf("Metrics Port: %d\n", cfg.Server.Port)
+
+	client := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, slog.Default())
+	settings, err := client.GetSettings(context.Background())
+	if err != nil {
+		fmt.Printf("Server:       unreachable\n")
+		fmt.Printf("Heartbeat:    unknown (server unreachable)\n")
+		fmt.Printf("Maintenance:  unknown (server unreachable)\n")
+		return
+	}
+
+	inWindow := enrollment.IsInMaintenanceWindow(settings.MaintenanceWindowStart, settings.MaintenanceWindowEnd)
+	maintStatus := fmt.Sprintf("%v", inWindow)
+	if maintenanceOverride != nil {
+		maintStatus = fmt.Sprintf("%v (override)", *maintenanceOverride)
+	}
+
+	fmt.Printf("Server:       connected\n")
+	fmt.Printf("Heartbeat:    %ds\n", settings.HeartbeatIntervalSeconds)
+	fmt.Printf("Maintenance:  %s\n", maintStatus)
+}
+
 func printUsage() {
 	fmt.Println(`OpenLabStats Agent - Software usage tracking for higher education
 
@@ -88,13 +264,20 @@ Usage:
   openlabstats-agent [command] [options]
 
 Commands:
-  install     Install as a Windows service
-  uninstall   Uninstall the Windows service
-  version     Print version information
-  help        Show this help message
+  install              Install as a Windows service
+  uninstall            Uninstall the Windows service
+  version              Print version information
+  serveraddress        Print configured server URL
+  building             Print configured building
+  room                 Print configured room
+  heartbeat            Print heartbeat interval (from server)
+  maintenancewindow    Print maintenance window status
+  setmaintenance <val> Set maintenance override (true/false/auto)
+  status               Print full agent status
+  help                 Show this help message
 
 Options:
-  --config <path>   Path to configuration file (default: configs/agent.yaml)
+  --config <path>      Path to configuration file (default: configs/agent.yaml)
 
 Running without a command starts the agent (as service or console).`)
 }
@@ -135,7 +318,7 @@ func setupLogger(cfg *config.Config) *slog.Logger {
 // runAgent returns a function that runs the full agent lifecycle.
 func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 	return func(ctx context.Context) error {
-		logger.Info("starting OpenLabStats agent", "version", "0.1.0")
+		logger.Info("starting OpenLabStats agent", "version", "0.1.3")
 
 		// Initialize metrics.
 		m := metrics.New()
@@ -244,7 +427,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}
 
 		// Set device info metric.
-		setDeviceInfo(m)
+		setDeviceInfo(m, logger)
 
 		// Start Prometheus HTTP server.
 		mux := http.NewServeMux()
@@ -407,18 +590,6 @@ func runMappingRefreshLoop(ctx context.Context, mapping *normalizer.MappingFile,
 	}
 }
 
-func setDeviceInfo(m *metrics.Metrics) {
-	hostname := metrics.Hostname()
-
-	// Read OS version from registry.
-	osVersion := "unknown"
-	osBuild := "unknown"
-
-	// These are best-effort reads.
-	// In production, we'd use proper Windows API calls.
-	m.DeviceInfo.WithLabelValues(hostname, osVersion, osBuild, "").Set(1)
-}
-
 // isValidUser returns true if the string looks like a real human user
 // rather than a system account, service, or process name.
 func isValidUser(user string) bool {
@@ -488,10 +659,10 @@ func isValidUser(user string) bool {
 // When a user's first tracked process appears, it counts as a login.
 // When a user's last tracked process ends, it counts as a logoff.
 type userSessionManager struct {
-	mu         sync.Mutex
-	users      map[string]*userState // user -> state
-	metrics    *metrics.Metrics
-	logger     *slog.Logger
+	mu      sync.Mutex
+	users   map[string]*userState // user -> state
+	metrics *metrics.Metrics
+	logger  *slog.Logger
 }
 
 type userState struct {
@@ -555,4 +726,90 @@ func (usm *userSessionManager) onProcessStop(user string, pid uint32) {
 		// Update current session duration gauge.
 		usm.metrics.UserSessionDuration.WithLabelValues(user, hostname).Set(time.Since(state.loginTime).Seconds())
 	}
+}
+
+func setDeviceInfo(m *metrics.Metrics, logger *slog.Logger) {
+	hostname := metrics.Hostname()
+
+	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
+		oleerr, ok := err.(*ole.OleError)
+		if !ok || oleerr.Code() != 0x00000001 { // S_FALSE
+			logger.Warn("COM init for device info failed", "error", err)
+		}
+	} else {
+		defer ole.CoUninitialize()
+	}
+
+	model, manufacturer := getWMIProps(logger, "Win32_ComputerSystem", "Model", "Manufacturer")
+	serial, _ := getWMIProps(logger, "Win32_BIOS", "SerialNumber", "")
+	osCaption, osBuild := getWMIProps(logger, "Win32_OperatingSystem", "Caption", "BuildNumber")
+
+	if model == "" {
+		model = "unknown"
+	}
+	if manufacturer == "" {
+		manufacturer = "unknown"
+	}
+	if serial == "" {
+		serial = "unknown"
+	}
+
+	m.DeviceInfo.WithLabelValues(hostname, osCaption, osBuild, "", model, manufacturer, serial).Set(1)
+}
+
+func getWMIProps(logger *slog.Logger, class string, prop1, prop2 string) (string, string) {
+	locator, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
+	if err != nil {
+		return "", ""
+	}
+	defer locator.Release()
+
+	wmi, err := locator.QueryInterface(ole.IID_IDispatch)
+	if err != nil {
+		return "", ""
+	}
+	defer wmi.Release()
+
+	serviceRaw, err := oleutil.CallMethod(wmi, "ConnectServer")
+	if err != nil {
+		return "", ""
+	}
+	svc := serviceRaw.ToIDispatch()
+	defer svc.Release()
+
+	query := "SELECT * FROM " + class
+	resultRaw, err := oleutil.CallMethod(svc, "ExecQuery", query)
+	if err != nil {
+		return "", ""
+	}
+	result := resultRaw.ToIDispatch()
+	defer result.Release()
+
+	countVar, err := oleutil.GetProperty(result, "Count")
+	if err != nil || countVar.Val == 0 {
+		return "", ""
+	}
+
+	itemRaw, err := oleutil.CallMethod(result, "ItemIndex", 0)
+	if err != nil {
+		return "", ""
+	}
+	item := itemRaw.ToIDispatch()
+	defer item.Release()
+
+	v1 := ""
+	if prop1 != "" {
+		if val, err := oleutil.GetProperty(item, prop1); err == nil {
+			v1 = val.ToString()
+		}
+	}
+
+	v2 := ""
+	if prop2 != "" {
+		if val, err := oleutil.GetProperty(item, prop2); err == nil {
+			v2 = val.ToString()
+		}
+	}
+
+	return v1, v2
 }

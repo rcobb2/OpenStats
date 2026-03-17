@@ -19,7 +19,7 @@ import (
 )
 
 // @title        OpenLabStats Server API
-// @version      0.1.0
+// @version      0.1.3
 // @description  Central management server for the OpenLabStats fleet. Manages agent enrollment, software mappings, lab groupings, and reporting.
 // @host         localhost:8080
 // @BasePath     /
@@ -103,7 +103,7 @@ func runStaleChecker(db *store.Store, disc *discovery.FileSD, logger *slog.Logge
 
 	for range ticker.C {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		
+
 		settings, err := db.GetSettings(ctx)
 		if err != nil {
 			logger.Error("failed to get settings for stale check", "error", err)

@@ -1,0 +1,125 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "calculate": { "toggle": false },
+        "cellGap": 1,
+        "color": { "mode": "scheme", "scheme": "Oranges", "steps": 64 },
+        "exemplars": { "color": "rgba(255,0,255,0.7)" },
+        "filterValues": { "le": 1e-9 },
+        "legend": { "show": true },
+        "tooltip": { "show": true, "yHistogram": false },
+        "rows": { "reverse": false },
+        "columns": { "reverse": false }
+      },
+      "title": "Lab Occupancy Heatmap (Hour of Day vs Day of Week)",
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "sum(openlabstats_user_session_active == 1) by (lab)",
+          "legendFormat": "{{ lab }}",
+          "format": "ts"
+        }
+      ],
+      "description": "Visualize peak hours. Use Grafana's time-derivative or specific bucketing if Prometheus data is dense."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "id": 2,
+      "options": {
+        "showHeader": true
+      },
+      "title": "Zero-Usage Hardware (Last 14 Days)",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "openlabstats_device_info * on(hostname) group_left() (sum(increase(openlabstats_user_session_logins_total[14d])) by (hostname) == 0)",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "id": 3,
+      "options": {
+        "pieType": "pie",
+        "legend": { "displayMode": "list", "placement": "right" }
+      },
+      "title": "OS Breakdown",
+      "type": "piechart",
+      "targets": [
+        {
+          "expr": "count by (os_version) (openlabstats_device_info)",
+          "instant": true,
+          "legendFormat": "{{ os_version }}"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "id": 4,
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      },
+      "title": "Average Session Length by Lab",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "sum by (lab) (increase(openlabstats_user_session_seconds_total[$__range])) / sum by (lab) (increase(openlabstats_user_session_logins_total[$__range]))",
+          "instant": true,
+          "legendFormat": "{{ lab }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "id": 5,
+      "options": {
+        "orientation": "horizontal"
+      },
+      "title": "Hardware Model Inventory",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "count by (model) (openlabstats_device_info)",
+          "instant": true,
+          "legendFormat": "{{ model }}"
+        }
+      ]
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": ["hardware", "labs"],
+  "templating": {
+    "list": [
+      {
+        "hide": 2,
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "title": "Hardware & Asset Utilization",
+  "uid": "ols-hardware"
+}

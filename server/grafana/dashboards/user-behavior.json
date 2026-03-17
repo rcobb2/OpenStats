@@ -1,0 +1,84 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "Unique Users Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "count(count by (user) (increase(openlabstats_user_session_logins_total[24h]) > 0))",
+          "legendFormat": "Unique Users (Daily)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "gradientMode": "area" },
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 8 },
+      "id": 2,
+      "options": { "orientation": "horizontal", "showValue": "always" },
+      "title": "Top Users by Total Duration",
+      "type": "barchart",
+      "targets": [
+        {
+          "expr": "topk(10, sum by (user) (increase(openlabstats_user_session_seconds_total[$__range])))",
+          "legendFormat": "{{ user }}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 8 },
+      "id": 3,
+      "options": { "showHeader": true },
+      "title": "Concurrent User Sessions (Potential Risk)",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (user) (openlabstats_user_session_active) > 1",
+          "legendFormat": "",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "description": "Users logged into multiple machines at once."
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": ["user", "behavior"],
+  "templating": {
+    "list": [
+      {
+        "hide": 2,
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "title": "User Behavior Analytics",
+  "uid": "ols-users"
+}

@@ -46,7 +46,12 @@ $env:GOARCH = "amd64"
 $env:CGO_ENABLED = "0"
 
 $ldflags = "-s -w -X main.version=$Version"
-$buildResult = & go build -ldflags $ldflags -o $AgentExe "$RepoRoot\cmd\agent\" 2>&1
+
+# Store current location and hop to repo root to ensure go.mod is found
+Push-Location $RepoRoot
+$buildResult = & go build -ldflags $ldflags -o $AgentExe ".\cmd\agent\" 2>&1
+Pop-Location
+
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Go build failed: $buildResult"
     exit 1
@@ -58,14 +63,21 @@ Write-Host "  Agent built: $AgentExe" -ForegroundColor Green
 # -------------------------------------------------------------------
 $wixCmd = Get-Command "wix" -ErrorAction SilentlyContinue
 if (-not $wixCmd) {
-    # Try .NET tool
-    $wixCmd = Get-Command "dotnet" -ErrorAction SilentlyContinue
-    if ($wixCmd) {
-        Write-Host "  WiX CLI not found, trying 'dotnet tool run wix'..." -ForegroundColor Yellow
-        $wixPrefix = "dotnet tool run wix"
+    # Check common install path for v6
+    $commonPath = "C:\Program Files\WiX Toolset v6.0\bin\wix.exe"
+    if (Test-Path $commonPath) {
+        $wixPrefix = "`"$commonPath`""
+        Write-Host "  WiX found at: $commonPath" -ForegroundColor Green
     } else {
-        Write-Error "WiX Toolset not found. Install with: dotnet tool install --global wix"
-        exit 1
+        # Try .NET tool
+        $wixCmd = Get-Command "dotnet" -ErrorAction SilentlyContinue
+        if ($wixCmd) {
+            Write-Host "  WiX CLI not found, trying 'dotnet tool run wix'..." -ForegroundColor Yellow
+            $wixPrefix = "dotnet tool run wix"
+        } else {
+            Write-Error "WiX Toolset not found. Install with: winget install WiXToolset.WiXCLI"
+            exit 1
+        }
     }
 } else {
     $wixPrefix = "wix"
@@ -92,10 +104,15 @@ $wixArgs = @(
     $PackageWxs
 )
 
-if ($wixPrefix -eq "wix") {
+if ($wixPrefix -eq "dotnet tool run wix") {
+    & dotnet tool run wix @wixArgs
+} elseif ($wixPrefix -eq "wix") {
     & wix @wixArgs
 } else {
-    & dotnet tool run wix @wixArgs
+    # It must be a full path (possibly quoted)
+    # Remove outer quotes if present for & operator
+    $unquoted = $wixPrefix.Trim('"' , "'")
+    & $unquoted @wixArgs
 }
 
 if ($LASTEXITCODE -ne 0) {

@@ -21,7 +21,7 @@ export default function Dashboard() {
           <span className="stat-label">Total Agents</span>
         </div>
         <div className="stat-card">
-          <span className="stat-value">{summary.onlineAgents}</span>
+          <span className="stat-value" style={{ color: 'var(--success)' }}>{summary.onlineAgents}</span>
           <span className="stat-label">Online</span>
         </div>
         <div className="stat-card">
@@ -32,6 +32,24 @@ export default function Dashboard() {
           <span className="stat-value">{summary.totalMappings}</span>
           <span className="stat-label">Mappings</span>
         </div>
+      </div>
+
+      <div style={{ 
+        background: 'var(--card-bg)', 
+        borderRadius: '8px', 
+        border: '1px solid var(--border)',
+        overflow: 'hidden',
+        height: '700px',
+        marginTop: '2rem'
+      }}>
+        <iframe 
+          src="/grafana/d/ols-executive/executive-overview?orgId=1&refresh=30s&kiosk&theme=dark" 
+          width="100%" 
+          height="100%" 
+          frameBorder="0" 
+          title="Fleet Pulse"
+          style={{ display: 'block' }}
+        />
       </div>
     </div>
   );

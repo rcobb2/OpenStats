@@ -95,12 +95,24 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("agent registered", "hostname", req.Hostname, "ip", req.IPAddress)
 
-	// If outdated, check for an update URL.
+	// Get the agent to check for pending update (cleared after being returned).
+	dbAgent, err := s.store.GetAgent(r.Context(), req.ID)
+	if err != nil {
+		s.logger.Error("failed to get agent after registration", "error", err)
+	}
+
+	// Determine update URL - server-directed takes priority over version-based.
 	updateURL := ""
-	if status == "outdated" {
-		if filename, err := s.store.GetLatestInstaller(r.Context()); err == nil {
-			updateURL = "/api/v1/installers/download/" + filename
-		}
+
+	// First check if server has queued a pending update for this agent.
+	if dbAgent != nil && dbAgent.PendingUpdate != "" {
+		updateURL = dbAgent.PendingUpdate
+		s.logger.Info("sending pending update to agent", "agentID", req.ID, "url", updateURL)
+		// Clear the pending update after retrieving it so it won't be sent again.
+		_ = s.store.ClearAgentPendingUpdate(r.Context(), req.ID)
+	} else if status == "outdated" {
+		// Fallback: version-based outdated check.
+		updateURL = s.GetLatestInstallerURL()
 	}
 
 	writeJSON(w, http.StatusOK, RegisterAgentResponse{
@@ -210,6 +222,44 @@ func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ForceAgentUpdate godoc
+// @Summary      Force an agent to update immediately
+// @Description  Queues an update for the specified agent which will be delivered on its next heartbeat.
+// @Tags         agents
+// @Param        agentID  path  string  true  "Agent ID"
+// @Success      200  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/v1/agents/{agentID}/force-update [post]
+func (s *Server) ForceAgentUpdate(w http.ResponseWriter, r *http.Request) {
+	// First validate agent exists.
+	agentID := chi.URLParam(r, "agentID")
+	if _, err := s.store.GetAgent(r.Context(), agentID); err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	url := s.GetLatestInstallerURL()
+	if url == "" {
+		writeError(w, http.StatusNotFound, "no installer available on server")
+		return
+	}
+
+	// Queue the update for the agent - it will be delivered on next heartbeat.
+	if err := s.store.SetAgentPendingUpdate(r.Context(), agentID, url); err != nil {
+		s.logger.Error("failed to queue agent update", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to queue update")
+		return
+	}
+
+	s.logger.Info("force update queued", "agentID", agentID, "url", url)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":    "queued",
+		"message":   "Agent will receive update URL on next heartbeat.",
+		"updateUrl": url,
+	})
 }
 
 func isVersionBelow(current, target string) bool {

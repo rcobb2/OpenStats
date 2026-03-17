@@ -101,7 +101,7 @@ func New() *Metrics {
 				Name:      "device_info",
 				Help:      "Static device information as labels. Value is always 1.",
 			},
-			[]string{"hostname", "os_version", "os_build", "domain"},
+			[]string{"hostname", "os_version", "os_build", "domain", "model", "manufacturer", "serial"},
 		),
 		InstalledSoftware: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{

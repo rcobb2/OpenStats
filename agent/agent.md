@@ -131,6 +131,45 @@ net start OpenLabStats
 # Uninstall
 net stop OpenLabStats
 .\openlabstats-agent.exe uninstall
+```
+
+## CLI Tools
+
+The agent provides several CLI commands for querying status and configuration:
+
+| Command | Description |
+|---------|-------------|
+| `--version` | Print agent version |
+| `--serveraddress` | Print configured server URL |
+| `--building` | Print configured building |
+| `--room` | Print configured room |
+| `--heartbeat` | Print heartbeat interval (from server settings) |
+| `--maintenancewindow` | Print maintenance window status and configured times |
+| `--setmaintenance <val>` | Set maintenance override (`true`, `false`, or `auto`) |
+| `--status` | Print full agent status (version, building, room, server, heartbeat, maintenance) |
+
+### Examples
+
+```powershell
+# Check agent version
+.\openlabstats-agent.exe version
+
+# Check server address
+.\openlabstats-agent.exe serveraddress
+
+# Check full status
+.\openlabstats-agent.exe status
+
+# Check maintenance window status
+.\openlabstats-agent.exe maintenancewindow
+
+# Force maintenance mode (useful before updates)
+.\openlabstats-agent.exe setmaintenance true
+```
+
+### Offline Behavior
+
+Commands that require server connection (`--heartbeat`, `--maintenancewindow`, `--status`) will show "unknown" or cached values if the server is unreachable. Config-based commands (`--version`, `--serveraddress`, `--building`, `--room`) work offline.
 
 ## MSI Installer
 

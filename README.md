@@ -64,6 +64,67 @@ net stop OpenLabStats
 .\openlabstats-agent.exe uninstall
 ```
 
+## MSI Installer
+
+The agent can be deployed via MSI with full support for silent installation and remote configuration.
+
+### MSI Properties
+
+| Property | Description | Default |
+|----------|-------------|---------|
+| `SERVERADDRESS` | URL of the central management server | `""` |
+| `PORT` | Prometheus metrics scrape port | `9183` |
+| `BUILDING` | Lab building name for auto-assignment | `""` |
+| `ROOM` | Lab room number for auto-assignment | `""` |
+| `INSTALLDIR` | Custom installation path | `C:\Program Files\OpenLabStats` |
+
+### Silent Install Examples
+
+```powershell
+# Standard install with server enrollment
+msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="http://openlabstats.campus.edu:8080"
+
+# Install with automatic lab and room assignment
+msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="http://server:8080" BUILDING="Science Hall" ROOM="302"
+
+# Install with logging
+msiexec /i openlabstats-agent.msi /qn /l*v install.log SERVERADDRESS="http://server:8080"
+```
+
+## CLI Commands
+
+The agent supports several CLI commands for querying status and configuration:
+
+| Command | Description |
+|---------|-------------|
+| `--version` | Print agent version |
+| `--serveraddress` | Print configured server URL |
+| `--building` | Print configured building |
+| `--room` | Print configured room |
+| `--heartbeat` | Print heartbeat interval (from server settings) |
+| `--maintenancewindow` | Print maintenance window status and configured times |
+| `--setmaintenance <val>` | Set maintenance override (`true`, `false`, or `auto`) |
+| `--status` | Print full agent status |
+
+### CLI Examples
+
+```powershell
+# Check agent version
+.\openlabstats-agent.exe version
+
+# Check server address
+.\openlabstats-agent.exe serveraddress
+
+# Check full status
+.\openlabstats-agent.exe status
+
+# Check maintenance window status
+.\openlabstats-agent.exe maintenancewindow
+
+# Force maintenance mode (useful before updates)
+.\openlabstats-agent.exe setmaintenance true
+```
+
 ## Configuration
 
 Edit `configs/agent.yaml`:
@@ -147,9 +208,9 @@ The agent compiles to a single `openlabstats-agent.exe` with no runtime dependen
 
 - [x] Central management server (mapping push, reporting)
 - [x] Foreground window tracking (active vs background usage)
+- [x] MSI installer package
 - [ ] AI Normalizer (automated categorization)
 - [ ] macOS agent (using NSWorkspace/launchd)
-- [ ] MSI installer package
 - [ ] Web-based application tracking (browser URL categorization)
 
 ## License
