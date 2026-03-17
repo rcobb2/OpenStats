@@ -1,18 +1,15 @@
-# Compiled binaries
+# Binaries
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary
 *.test
-
-# Output of go coverage
 *.out
+*.msi
 
-# Go workspace file
+# Go
 go.work
+go.sum
 
 # IDE
 .vscode/
@@ -23,10 +20,15 @@ go.work
 # OS
 Thumbs.db
 .DS_Store
+nul
 
-# Agent runtime data
-data/
-logs/
+# Agent runtime
+agent/data/
+agent/logs/
 
-# MSI installer output
-*.msi
+# Frontend
+server/web/dist/
+server/web/node_modules/
+
+# Build
+*.tmp

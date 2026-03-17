@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	user32                     = syscall.MustLoadDLL("user32.dll")
-	procGetForegroundWindow    = user32.MustFindProc("GetForegroundWindow")
+	user32                       = syscall.MustLoadDLL("user32.dll")
+	procGetForegroundWindow      = user32.MustFindProc("GetForegroundWindow")
 	procGetWindowThreadProcessId = user32.MustFindProc("GetWindowThreadProcessId")
 )
 
@@ -43,7 +43,10 @@ func RunForegroundPoller(ctx context.Context, tracker *Tracker, interval time.Du
 		case <-ticker.C:
 			pid := getForegroundPID()
 			if pid != 0 {
+				logger.Debug("foreground window PID", "pid", pid)
 				tracker.IncrementForeground(pid, interval)
+			} else {
+				logger.Debug("no foreground window active")
 			}
 		}
 	}

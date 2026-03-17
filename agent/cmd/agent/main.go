@@ -347,6 +347,13 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Initialize process tracker.
 		tracker := monitor.NewTracker(logger)
 
+		// Scan for existing processes that started before the agent.
+		logger.Info("scanning for existing processes...")
+		existingProcs := monitor.ScanExistingProcesses(logger, norm.ResolveFamily)
+		for _, p := range existingProcs {
+			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
+		}
+
 		// Initialize user session manager (derives login/logoff from process events).
 		userSessions := newUserSessionManager(m, logger)
 

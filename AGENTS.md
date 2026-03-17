@@ -106,12 +106,20 @@ When modifying the system, update ALL applicable components:
 
 - [ ] `server/internal/api/router.go` - Add route
 - [ ] `server/internal/api/<entity>.go` - Add handler
-- [ ] `server/internal/store/postgres.go` - Add DB operations
+- [ ] `server/internal/store/postgres.go` - Add DB operations if needed
 - [ ] `server/docs/swagger.yaml` - Run `swag init` to regenerate
 - [ ] `server/web/src/api.js` - Add client function
-- [ ] `server/web/src/pages/` - Add page component
-- [ ] `server/web/src/main.jsx` - Add route
-- [ ] `server/web/src/components/Layout.jsx` - Add nav link
+- [ ] `server/web/src/pages/` - Add page component if needed
+- [ ] `server/web/src/main.jsx` - Add route if needed
+- [ ] `server/web/src/components/Layout.jsx` - Add nav link if needed
+
+### Modifying Reports Page
+
+- [ ] `server/web/src/pages/Reports.jsx` - Update page component
+- [ ] `server/web/src/api.js` - Add API functions if new data needed
+- [ ] Backend: Add/modify endpoints in `server/internal/api/reports.go`
+- [ ] `server/grafana/dashboards/*.json` - Update Grafana panels if applicable
+- [ ] `deploy/grafana-dashboard.json` - Sync deploy copy
 
 ### Adding a New Frontend Page
 
@@ -259,3 +267,19 @@ Installers can be pre-configured with the following properties:
 - `ROOM`: Default room number for auto-lab assignment.
 
 If `BUILDING` and `ROOM` are provided, the server will automatically create the lab if it doesn't exist upon initial registration.
+
+## Foreground Tracking Fix
+
+### Problem
+The foreground tracking metrics showed all 0s in Prometheus even though the code was implemented. This was because:
+1. The WMI watcher only catches processes that start *after* the agent starts
+2. Processes already running when the agent starts were not being tracked
+3. When the foreground window belonged to an untracked process, the foreground time couldn't be attributed
+
+### Solution
+Added startup process scanning:
+1. `agent/internal/monitor/wmi.go`: Added `ScanExistingProcesses()` function to query all running processes via WMI
+2. `agent/internal/monitor/tracker.go`: Added `RegisterExistingProcess()` method to register processes with the tracker
+3. `agent/cmd/agent/main.go`: Added startup scan that discovers and registers existing processes
+
+This ensures that when the agent starts, it scans for all currently running processes and registers them with the tracker, allowing the foreground poller to properly attribute foreground time.

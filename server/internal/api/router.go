@@ -103,7 +103,11 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 
 		// Reports
 		r.Route("/reports", func(r chi.Router) {
-			r.Get("/top-apps", s.ReportTopApps)
+			r.Get("/top-apps", s.ReportTopAppsUsage)
+			r.Get("/top-apps-by-launches", s.ReportTopAppsByLaunches)
+			r.Get("/top-apps-by-foreground", s.ReportTopAppsByForegroundTime)
+			r.Get("/bottom-apps-by-launches", s.ReportBottomAppsByLaunches)
+			r.Get("/bottom-apps-by-foreground", s.ReportBottomAppsByForegroundTime)
 			r.Get("/usage-by-lab", s.ReportUsageByLab)
 			r.Get("/active-users", s.ReportActiveUsers)
 			r.Get("/summary", s.ReportSummary)

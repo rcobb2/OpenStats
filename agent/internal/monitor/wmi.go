@@ -267,6 +267,105 @@ func getProcessExePath(pid uint32) string {
 	return getStringProp(item, "ExecutablePath")
 }
 
+// RunningProcess represents a process discovered during startup scan.
+type RunningProcess struct {
+	PID       uint32
+	ParentPID uint32
+	ExeName   string
+	ExePath   string
+	User      string
+	FamilyKey string
+}
+
+// ScanExistingProcesses queries Win32_Process for all running processes.
+// This should be called at startup to discover processes that started before the agent.
+func ScanExistingProcesses(logger *slog.Logger, familyResolver func(string, string) string) []RunningProcess {
+	var processes []RunningProcess
+
+	// Initialize COM for this goroutine.
+	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
+		oleerr, ok := err.(*ole.OleError)
+		if !ok || oleerr.Code() != 0x00000001 {
+			logger.Error("COM init failed for scan", "error", err)
+			return processes
+		}
+	}
+	defer ole.CoUninitialize()
+
+	locator, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
+	if err != nil {
+		logger.Error("failed to create WMI locator for scan", "error", err)
+		return processes
+	}
+	defer locator.Release()
+
+	wmi, err := locator.QueryInterface(ole.IID_IDispatch)
+	if err != nil {
+		logger.Error("failed to get WMI dispatch for scan", "error", err)
+		return processes
+	}
+	defer wmi.Release()
+
+	serviceRaw, err := oleutil.CallMethod(wmi, "ConnectServer")
+	if err != nil {
+		logger.Error("failed to connect to WMI for scan", "error", err)
+		return processes
+	}
+	service := serviceRaw.ToIDispatch()
+	defer service.Release()
+
+	query := "SELECT ProcessId, ParentProcessId, Name, ExecutablePath FROM Win32_Process"
+	resultRaw, err := oleutil.CallMethod(service, "ExecQuery", query)
+	if err != nil {
+		logger.Error("failed to query processes", "error", err)
+		return processes
+	}
+	result := resultRaw.ToIDispatch()
+	defer result.Release()
+
+	countVar, _ := oleutil.GetProperty(result, "Count")
+	count := int(countVar.Val)
+	logger.Debug("scanning existing processes", "count", count)
+
+	for i := 0; i < count; i++ {
+		itemRaw, err := oleutil.CallMethod(result, "ItemIndex", i)
+		if err != nil {
+			continue
+		}
+		item := itemRaw.ToIDispatch()
+
+		pid := uint32(getUint32Prop(item, "ProcessId"))
+		parentPID := uint32(getUint32Prop(item, "ParentProcessId"))
+		exeName := getStringProp(item, "Name")
+		exePath := getStringProp(item, "ExecutablePath")
+
+		item.Release()
+
+		if exeName == "" {
+			continue
+		}
+
+		user := getProcessUser(pid)
+
+		var familyKey string
+		if familyResolver != nil {
+			familyKey = familyResolver(exeName, exePath)
+		}
+
+		processes = append(processes, RunningProcess{
+			PID:       pid,
+			ParentPID: parentPID,
+			ExeName:   exeName,
+			ExePath:   exePath,
+			User:      user,
+			FamilyKey: familyKey,
+		})
+	}
+
+	logger.Info("finished scanning existing processes", "count", len(processes))
+	return processes
+}
+
 // getProcessUser looks up the user who owns a process via WMI GetOwner.
 func getProcessUser(pid uint32) string {
 	// Best-effort: call GetOwner on the Win32_Process object.

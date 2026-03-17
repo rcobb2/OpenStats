@@ -23,11 +23,11 @@ type ProcessSession struct {
 
 // processGroup tracks a root process and all its children as a single unit.
 type processGroup struct {
-	RootPID        uint32
-	ExeName        string // from the root process
-	ExePath        string // from the root process
-	User           string
-	FamilyKey      string
+	RootPID         uint32
+	ExeName         string // from the root process
+	ExePath         string // from the root process
+	User            string
+	FamilyKey       string
 	StartTime       time.Time
 	LastCheckpoint  time.Time
 	ForegroundDelta time.Duration
@@ -113,6 +113,59 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 	t.logger.Debug("new process group created",
 		"pid", pid, "exe", exeName, "user", user, "family", familyKey)
 	return true
+}
+
+// RegisterExistingProcess registers a process that was already running when the agent started.
+// It uses the same logic as OnProcessStart but without the "isNewGroup" return value.
+func (t *Tracker) RegisterExistingProcess(pid, parentPID uint32, exeName, exePath, user, familyKey string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if parentPID != 0 {
+		if rootPID, ok := t.pidToGroup[parentPID]; ok {
+			group := t.groups[rootPID]
+			if group != nil && group.FamilyKey != "" {
+				group.MemberPIDs[pid] = true
+				t.pidToGroup[pid] = rootPID
+				t.logger.Debug("existing process joined group via parent",
+					"pid", pid, "exe", exeName, "parentPID", parentPID, "rootPID", rootPID)
+				return
+			}
+		}
+	}
+
+	if familyKey != "" {
+		if rootPID, ok := t.familyGroups[familyKey]; ok {
+			if group, exists := t.groups[rootPID]; exists {
+				group.MemberPIDs[pid] = true
+				t.pidToGroup[pid] = rootPID
+				t.logger.Debug("existing process joined group via family",
+					"pid", pid, "exe", exeName, "family", familyKey, "rootPID", rootPID)
+				return
+			}
+			delete(t.familyGroups, familyKey)
+		}
+	}
+
+	now := time.Now()
+	group := &processGroup{
+		RootPID:        pid,
+		ExeName:        exeName,
+		ExePath:        exePath,
+		User:           user,
+		FamilyKey:      familyKey,
+		StartTime:      now,
+		LastCheckpoint: now,
+		MemberPIDs:     map[uint32]bool{pid: true},
+	}
+	t.groups[pid] = group
+	t.pidToGroup[pid] = pid
+	if familyKey != "" {
+		t.familyGroups[familyKey] = pid
+	}
+
+	t.logger.Debug("existing process group created",
+		"pid", pid, "exe", exeName, "user", user, "family", familyKey)
 }
 
 // OnProcessStop marks a process as stopped.
@@ -251,6 +304,7 @@ func (t *Tracker) IncrementForeground(pid uint32, duration time.Duration) {
 
 	rootPID, ok := t.pidToGroup[pid]
 	if !ok {
+		t.logger.Debug("foreground PID not tracked", "pid", pid)
 		return
 	}
 

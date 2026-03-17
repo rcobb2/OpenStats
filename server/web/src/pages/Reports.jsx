@@ -1,14 +1,22 @@
 import { useState, useEffect } from 'react';
-import { getTopApps, getActiveUsers } from '../api';
-import ResizableTable from '../components/Table';
+import { 
+  exportTopAppsByLaunches, 
+  exportTopAppsByForeground,
+  exportBottomAppsByLaunches,
+  exportBottomAppsByForeground
+} from '../api';
 
 export default function Reports() {
   const [range, setRange] = useState('24h');
-  const [reportType, setReportType] = useState('user'); // 'user', 'hardware', 'software'
-  const [topApps, setTopApps] = useState(null);
-  const [activeUsers, setActiveUsers] = useState(null);
+  const [reportType, setReportType] = useState('user');
+  const [exporting, setExporting] = useState(false);
 
-  // Map our UI ranges to Grafana time ranges
+  const reports = {
+    user: { title: 'User Behavior Analytics', uid: 'ols-users', slug: 'user-behavior-analytics' },
+    hardware: { title: 'Hardware & Asset Utilization', uid: 'ols-hardware', slug: 'hardware-asset-utilization' },
+    software: { title: 'Software Metering & License Compliance', uid: 'software-metering', slug: 'software-metering' },
+  };
+
   const rangeMap = {
     '1h': 'now-1h',
     '24h': 'now-24h',
@@ -16,37 +24,26 @@ export default function Reports() {
     '30d': 'now-30d',
   };
 
-  const reports = {
-    user: { title: 'User Behavior Analytics', uid: 'ols-users', slug: 'user-behavior-analytics' },
-    hardware: { title: 'Hardware & Asset Utilization', uid: 'ols-hardware', slug: 'hardware-asset-utilization' },
-    software: { title: 'Software Metering & License Compliance', uid: 'ols-software', slug: 'software-metering-license-compliance' },
-  };
-
-  useEffect(() => {
-    getTopApps(range).then(setTopApps).catch(() => {});
-    getActiveUsers().then(setActiveUsers).catch(() => {});
-  }, [range]);
-
-  const parsePromResult = (data) => {
-    if (!data?.data?.result) return [];
-    return data.data.result.map(r => ({
-      labels: r.metric || {},
-      value: r.value ? parseFloat(r.value[1]) : 0,
-    })).filter(r => r.value > 0).sort((a, b) => b.value - a.value);
-  };
-
-  const apps = topApps ? parsePromResult(topApps) : [];
-  const users = activeUsers ? parsePromResult(activeUsers) : [];
-
   const grafanaSrc = `/grafana/d/${reports[reportType].uid}/${reports[reportType].slug}?orgId=1&refresh=30s&kiosk&theme=dark&from=${rangeMap[range]}&to=now`;
+
+  const handleExport = async (exportFn) => {
+    setExporting(true);
+    try {
+      await exportFn(range);
+    } catch (err) {
+      alert('Export failed: ' + err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <h2>{reports[reportType].title}</h2>
-        <div className="controls" style={{ margin: 0, display: 'flex', gap: '1rem' }}>
+        <div className="controls" style={{ margin: 0, display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <div>
-            <label>Report Type: </label>
+            <label>Report: </label>
             <select value={reportType} onChange={e => setReportType(e.target.value)}>
               <option value="user">User Behavior</option>
               <option value="hardware">Hardware Utilization</option>
@@ -62,6 +59,42 @@ export default function Reports() {
               <option value="30d">Last 30 Days</option>
             </select>
           </div>
+          {reportType === 'software' && (
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button 
+                className="btn-secondary" 
+                onClick={() => handleExport(exportTopAppsByLaunches)}
+                disabled={exporting}
+                title="Export Top 10 by Launch Count"
+              >
+                CSV: Top 10 Launches
+              </button>
+              <button 
+                className="btn-secondary" 
+                onClick={() => handleExport(exportTopAppsByForeground)}
+                disabled={exporting}
+                title="Export Top 10 by Active Time"
+              >
+                CSV: Top 10 Active Time
+              </button>
+              <button 
+                className="btn-secondary" 
+                onClick={() => handleExport(exportBottomAppsByLaunches)}
+                disabled={exporting}
+                title="Export Bottom 10 by Launch Count"
+              >
+                CSV: Bottom 10 Launches
+              </button>
+              <button 
+                className="btn-secondary" 
+                onClick={() => handleExport(exportBottomAppsByForeground)}
+                disabled={exporting}
+                title="Export Bottom 10 by Active Time"
+              >
+                CSV: Bottom 10 Active Time
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -70,8 +103,8 @@ export default function Reports() {
         borderRadius: '8px', 
         border: '1px solid var(--border)',
         overflow: 'hidden',
-        height: '600px',
-        marginBottom: '2rem',
+        height: 'calc(100vh - 220px)',
+        minHeight: '500px',
         marginTop: '1rem'
       }}>
         <iframe 
@@ -82,46 +115,6 @@ export default function Reports() {
           title="Grafana Dashboard"
           style={{ display: 'block' }}
         />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-        <section>
-          <h3>Top Applications ({range})</h3>
-          {apps.length > 0 ? (
-            <ResizableTable>
-              <thead><tr><th>Application</th><th>Usage (h)</th></tr></thead>
-              <tbody>
-                {apps.slice(0, 10).map((a, i) => (
-                  <tr key={i}>
-                    <td>{a.labels.app || 'Unknown'}</td>
-                    <td>{(a.value / 3600).toFixed(1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </ResizableTable>
-          ) : (
-            <p className="empty">No usage data.</p>
-          )}
-        </section>
-
-        <section>
-          <h3>Active Users</h3>
-          {users.length > 0 ? (
-            <ResizableTable>
-              <thead><tr><th>User</th><th>Hostname</th></tr></thead>
-              <tbody>
-                {users.map((u, i) => (
-                  <tr key={i}>
-                    <td>{u.labels.user || 'Unknown'}</td>
-                    <td>{u.labels.hostname || ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </ResizableTable>
-          ) : (
-            <p className="empty">No active users.</p>
-          )}
-        </section>
       </div>
     </div>
   );
