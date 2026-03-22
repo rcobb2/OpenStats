@@ -12,6 +12,7 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
 	Prom     PromConfig     `yaml:"prometheus"`
+	Grafana  GrafanaConfig  `yaml:"grafana"`
 	FileSD   FileSDConfig   `yaml:"fileSD"`
 }
 
@@ -41,6 +42,10 @@ type PromConfig struct {
 	URL string `yaml:"url"`
 }
 
+type GrafanaConfig struct {
+	URL string `yaml:"url"`
+}
+
 type FileSDConfig struct {
 	OutputPath string `yaml:"outputPath"`
 }
@@ -58,7 +63,19 @@ func Load(path string) (*Config, error) {
 	}
 
 	setDefaults(cfg)
+	applyEnvOverrides(cfg)
 	return cfg, nil
+}
+
+// applyEnvOverrides allows deployment-time overrides without editing server.yaml.
+// PROMETHEUS_URL and GRAFANA_URL take precedence over config file values.
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("PROMETHEUS_URL"); v != "" {
+		cfg.Prom.URL = v
+	}
+	if v := os.Getenv("GRAFANA_URL"); v != "" {
+		cfg.Grafana.URL = v
+	}
 }
 
 func setDefaults(cfg *Config) {
@@ -85,6 +102,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Prom.URL == "" {
 		cfg.Prom.URL = "http://prometheus:9090"
+	}
+	if cfg.Grafana.URL == "" {
+		cfg.Grafana.URL = "http://grafana:3000"
 	}
 	if cfg.FileSD.OutputPath == "" {
 		cfg.FileSD.OutputPath = "/etc/prometheus/file_sd/openlabstats.json"

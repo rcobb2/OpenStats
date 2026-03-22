@@ -11,17 +11,8 @@ export default function Installer() {
     setError(null);
     setResult(null);
     try {
-      // In a real app, generateInstaller might return a URL or a formatted command.
-      // Our backend current GenerateInstaller doesn't yet support building/room as inputs for the command string generation,
-      // but we can pass them anyway if we update the backend later.
       const res = await generateInstaller(form);
-      
-      // Manually enhance the result if it doesn't include the new switches
-      let cmd = res.installCommand;
-      if (form.building) cmd += ` BUILDING="${form.building}"`;
-      if (form.room) cmd += ` ROOM="${form.room}"`;
-      
-      setResult({ ...res, installCommand: cmd });
+      setResult(res);
     } catch (err) {
       setError(err.message);
     }
@@ -62,11 +53,21 @@ export default function Installer() {
 
       {result && (
         <div className="result-box">
+          {result.downloadUrl ? (
+            <>
+              <h3>Download Installer</h3>
+              <a href={result.downloadUrl} download className="btn-primary" style={{ display: 'inline-block', marginBottom: '1.5rem' }}>
+                Download MSI
+              </a>
+            </>
+          ) : (
+            <p style={{ color: 'var(--text-muted)' }}>No MSI found on server. Upload an installer to <code>public/installers/</code> to enable downloads.</p>
+          )}
           <h3>Install Command</h3>
           <p>Run this on target machines (as Administrator):</p>
-          <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand} /qn</code></pre>
+          <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand}</code></pre>
           <h3>Silent Deployment (SCCM / Intune / GPO)</h3>
-          <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand} /qn /l*v C:\temp\openlabstats-install.log</code></pre>
+          <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand} /l*v C:\temp\openlabstats-install.log</code></pre>
         </div>
       )}
     </div>
