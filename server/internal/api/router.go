@@ -62,12 +62,13 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 	))
 
 	// Grafana Proxy - allow frontend to access dashboards without direct exposure.
-	// We point this to the internal container address 'grafana:3000'.
-	grafanaURL, _ := url.Parse("http://openlabstats-grafana:3000")
+	// URL is read from config (grafana.url), overridable via GRAFANA_URL env var.
+	// The /grafana prefix is NOT stripped: with GF_SERVER_SERVE_FROM_SUB_PATH=true,
+	// Grafana expects the full /grafana/... path. Stripping it causes an infinite
+	// redirect loop because Grafana redirects bare paths back to /grafana/...
+	grafanaURL, _ := url.Parse(cfg.Grafana.URL)
 	proxy := httputil.NewSingleHostReverseProxy(grafanaURL)
 	r.Mount("/grafana", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Strip the /grafana prefix so it matches Grafana's internal routing.
-		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/grafana")
 		proxy.ServeHTTP(w, r)
 	}))
 

@@ -14,7 +14,8 @@ import (
 type GenerateInstallerRequest struct {
 	ServerAddress string `json:"serverAddress"`
 	Port          int    `json:"port"`
-	LabName       string `json:"labName"`
+	Building      string `json:"building"`
+	Room          string `json:"room"`
 }
 
 // GenerateInstaller godoc
@@ -50,11 +51,16 @@ func (s *Server) GenerateInstaller(w http.ResponseWriter, r *http.Request) {
 		downloadURL = "/installers/" + latestMSI
 	}
 
-	installCmd := "msiexec /i openlabstats-agent.msi /qn " +
-		"SERVERADDRESS=" + req.ServerAddress + " " +
-		"PORT=" + intToStr(req.Port)
+	msiName := "openlabstats-agent.msi"
 	if latestMSI != "" {
-		installCmd = fmt.Sprintf(`msiexec /i "%s" /qn SERVERADDRESS=%s PORT=%d`, latestMSI, req.ServerAddress, req.Port)
+		msiName = latestMSI
+	}
+	installCmd := fmt.Sprintf(`msiexec /i "%s" /qn SERVERADDRESS="%s" PORT=%d`, msiName, req.ServerAddress, req.Port)
+	if req.Building != "" {
+		installCmd += fmt.Sprintf(` BUILDING="%s"`, req.Building)
+	}
+	if req.Room != "" {
+		installCmd += fmt.Sprintf(` ROOM="%s"`, req.Room)
 	}
 
 	response := map[string]string{

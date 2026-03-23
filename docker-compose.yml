@@ -1,0 +1,108 @@
+services:
+  # ---------------------------------------------------------------
+  # Tailscale sidecar - exposes openstats at https://openstats.tail9e516.ts.net
+  # hostname must differ from service name to avoid Tailnet conflict
+  # ---------------------------------------------------------------
+  ts-openstats:
+    image: tailscale/tailscale:stable
+    container_name: ts-openstats
+    hostname: openstats-server
+    restart: ${RESTART_POLICY:-unless-stopped}
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY_OPENSTATS}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_EXTRA_ARGS=--advertise-tags=tag:openlabstats
+    volumes:
+      - ./state:/var/lib/tailscale
+      - ./config:/config:ro
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    networks:
+      - homelab-network
+    command: >
+      sh -c "/usr/local/bin/containerboot &
+             sleep 10;
+             tailscale serve --service=svc:openstats --https=443 127.0.0.1:8080;
+             tailscale serve advertise svc:openstats;
+             wait"
+
+  # ---------------------------------------------------------------
+  # OpenLabStats server - built from source, shares ts-openstats network
+  # ---------------------------------------------------------------
+  openlabstats-server:
+    build:
+      context: ../OpenStats/server
+      dockerfile: Dockerfile
+    container_name: openlabstats-server
+    restart: ${RESTART_POLICY:-unless-stopped}
+    network_mode: service:ts-openstats
+    volumes:
+      - ./config/server.yaml:/etc/openlabstats/server.yaml:ro
+      - ./data/file_sd:/etc/prometheus/file_sd
+      - ./data/installers:/usr/local/bin/public/installers
+    depends_on:
+      - ts-openstats
+      - openlabstats-postgres
+
+  # ---------------------------------------------------------------
+  # Prometheus - scrapes agent metrics via file_sd
+  # ---------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: ${RESTART_POLICY:-unless-stopped}
+    volumes:
+      - ./server/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./server/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./data/file_sd:/etc/prometheus/file_sd:ro
+      - ./data/prometheus:/prometheus
+    networks:
+      - homelab-network
+
+  # ---------------------------------------------------------------
+  # Grafana - dashboards for OpenLabStats metrics
+  # ---------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: openlabstats-grafana
+    restart: ${RESTART_POLICY:-unless-stopped}
+    environment:
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://prometheus:9090}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_OPENSTATS_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SERVER_ROOT_URL=${OPENSTATS_PUBLIC_URL:-https://openstats.tail9e516.ts.net}/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./server/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./server/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - homelab-network
+
+  # ---------------------------------------------------------------
+  # Dedicated PostgreSQL for OpenLabStats
+  # ---------------------------------------------------------------
+  openlabstats-postgres:
+    image: postgres:17-alpine
+    container_name: openlabstats-postgres
+    restart: ${RESTART_POLICY:-unless-stopped}
+    environment:
+      POSTGRES_USER: openlabstats
+      POSTGRES_PASSWORD: openlabstats
+      POSTGRES_DB: openlabstats
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - homelab-network
+
+networks:
+  homelab-network:
+    external: true

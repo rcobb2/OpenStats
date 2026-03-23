@@ -25,12 +25,6 @@ scrape_configs:
           - /etc/prometheus/file_sd/openlabstats.json
         refresh_interval: 30s
 
-    # Fallback: static targets for development or pre-server setups.
-    static_configs:
-      - targets: ['host.docker.internal:9183']
-        labels:
-          lab: 'development'
-
     # Relabel: keep the agent-reported hostname as a label.
     metric_relabel_configs:
       - source_labels: [hostname]

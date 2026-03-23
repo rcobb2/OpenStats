@@ -1,12 +1,11 @@
-# OpenLabStats Server Configuration
-
+# OpenLabStats Server Configuration - Homelab deployment
 server:
   port: 8080
   host: ""
   publicDir: public
 
 database:
-  host: postgres
+  host: openlabstats-postgres
   port: 5432
   user: openlabstats
   password: openlabstats
@@ -19,8 +18,5 @@ prometheus:
 grafana:
   url: http://grafana:3000
 
-# Prometheus file-based service discovery.
-# The server writes this file whenever agents register/deregister.
-# Prometheus watches it via file_sd_configs.
 fileSD:
   outputPath: /etc/prometheus/file_sd/openlabstats.json

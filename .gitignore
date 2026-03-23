@@ -32,3 +32,10 @@ server/web/node_modules/
 
 # Build
 *.tmp
+
+# Homelab deployment runtime data
+data/
+state/
+
+# Installer binaries and built frontend assets
+server/web/public/
