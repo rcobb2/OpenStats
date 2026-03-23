@@ -28,8 +28,18 @@ type Metrics struct {
 	InstalledSoftware       *prometheus.GaugeVec
 }
 
-// New creates and registers all Prometheus metrics.
+// New creates and registers all Prometheus metrics with the default (global) registry.
 func New() *Metrics {
+	return newMetrics(prometheus.DefaultRegisterer)
+}
+
+// NewForTest creates metrics backed by a fresh private registry so that
+// concurrent test runs don't collide with the global registry.
+func NewForTest() *Metrics {
+	return newMetrics(prometheus.NewRegistry())
+}
+
+func newMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		AppUsageSeconds: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -113,7 +123,7 @@ func New() *Metrics {
 		),
 	}
 
-	prometheus.MustRegister(
+	reg.MustRegister(
 		m.AppUsageSeconds,
 		m.AppForegroundSeconds,
 		m.AppLaunches,

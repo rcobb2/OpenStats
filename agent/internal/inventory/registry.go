@@ -1,28 +1,12 @@
+//go:build windows
+
 package inventory
 
 import (
-	"log/slog"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
 )
-
-// InstalledApp represents a software application found in the Windows registry.
-type InstalledApp struct {
-	Name      string
-	Version   string
-	Publisher string
-}
-
-// Scanner reads installed software from the Windows registry.
-type Scanner struct {
-	logger *slog.Logger
-}
-
-// NewScanner creates a new inventory scanner.
-func NewScanner(logger *slog.Logger) *Scanner {
-	return &Scanner{logger: logger}
-}
 
 // Scan reads installed software from the standard Uninstall registry keys.
 // It checks both 64-bit and 32-bit registry views.

@@ -127,4 +127,5 @@ func setDefaults(cfg *Config) {
 	if cfg.Logging.FilePath == "" {
 		cfg.Logging.FilePath = "logs/agent.log"
 	}
+	setPlatformDefaults(cfg)
 }

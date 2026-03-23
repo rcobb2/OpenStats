@@ -1,3 +1,5 @@
+//go:build windows
+
 package service
 
 import (
@@ -15,10 +17,6 @@ import (
 const ServiceName = "OpenLabStats"
 const ServiceDisplayName = "OpenLabStats Agent"
 const ServiceDescription = "Open-source software usage tracking agent for higher education"
-
-// AgentRunner is the function signature for the main agent logic.
-// It receives a context that is cancelled when the service is stopping.
-type AgentRunner func(ctx context.Context) error
 
 // handler implements svc.Handler for the Windows Service Control Manager.
 type handler struct {

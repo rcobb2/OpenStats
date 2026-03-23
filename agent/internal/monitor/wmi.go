@@ -1,3 +1,5 @@
+//go:build windows
+
 package monitor
 
 import (
@@ -21,15 +23,6 @@ type WMIWatcher struct {
 	familyResolver  func(exeName, exePath string) string // returns family key
 	onStart         func(pid uint32, exeName string, isNewGroup bool)
 	onStop          func(session *ProcessSession)
-}
-
-// WMIWatcherConfig holds configuration for the WMI watcher.
-type WMIWatcherConfig struct {
-	ExcludePatterns []string
-	MinLifetime     time.Duration
-	FamilyResolver  func(exeName, exePath string) string
-	OnStart         func(pid uint32, exeName string, isNewGroup bool)
-	OnStop          func(session *ProcessSession)
 }
 
 // NewWMIWatcher creates a new WMI event watcher.
@@ -265,16 +258,6 @@ func getProcessExePath(pid uint32) string {
 	defer item.Release()
 
 	return getStringProp(item, "ExecutablePath")
-}
-
-// RunningProcess represents a process discovered during startup scan.
-type RunningProcess struct {
-	PID       uint32
-	ParentPID uint32
-	ExeName   string
-	ExePath   string
-	User      string
-	FamilyKey string
 }
 
 // ScanExistingProcesses queries Win32_Process for all running processes.

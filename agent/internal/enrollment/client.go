@@ -5,14 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -50,6 +46,7 @@ type Client struct {
 	port      int
 	building  string
 	room      string
+	osVersion string
 	logger    *slog.Logger
 	client    *http.Client
 }
@@ -66,6 +63,12 @@ func NewClient(serverURL string, agentPort int, building, room string, logger *s
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+// WithOSVersion sets the OS version string included in registration payloads.
+func (c *Client) WithOSVersion(v string) *Client {
+	c.osVersion = v
+	return c
 }
 
 // Register sends a registration/heartbeat to the central server.
@@ -110,7 +113,7 @@ func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error
 		ID:           hostname,
 		Hostname:     hostname,
 		IPAddress:    ip,
-		OSVersion:    "",
+		OSVersion:    c.osVersion,
 		AgentVersion: agentVersion,
 		Port:         c.port,
 		Building:     c.building,
@@ -213,51 +216,6 @@ func IsInMaintenanceWindow(startStr, endStr string) bool {
 	} else {
 		return currentMinutes >= startMinutes || currentMinutes <= endMinutes
 	}
-}
-
-func (c *Client) executeSelfUpdate(url string) {
-	if !strings.HasPrefix(url, "http") {
-		url = c.serverURL + url
-	}
-
-	c.logger.Info("downloading update", "url", url)
-
-	tempFile := filepath.Join(os.TempDir(), "openlabstats-update.msi")
-	out, err := os.Create(tempFile)
-	if err != nil {
-		c.logger.Error("failed to create temp file for update", "error", err)
-		return
-	}
-	defer out.Close()
-
-	resp, err := c.client.Get(url)
-	if err != nil {
-		c.logger.Error("failed to download update", "error", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		c.logger.Error("failed to download update: unexpected status", "status", resp.StatusCode)
-		return
-	}
-
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		c.logger.Error("failed to save update to disk", "error", err)
-		return
-	}
-	out.Close()
-
-	c.logger.Info("update downloaded, launching installer", "path", tempFile)
-
-	cmd := exec.Command("msiexec.exe", "/i", tempFile, "/qn", "REBOOT=ReallySuppress")
-	if err := cmd.Start(); err != nil {
-		c.logger.Error("failed to launch msiexec", "error", err)
-		return
-	}
-
-	c.logger.Info("msiexec launched, agent will likely restart now")
 }
 
 func getOutboundIP() string {

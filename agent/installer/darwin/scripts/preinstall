@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+LABEL="com.openlabstats.agent"
+PLIST_PATH="/Library/LaunchDaemons/com.openlabstats.agent.plist"
+
+# If the daemon is running, stop it gracefully before replacing the binary.
+if launchctl list "$LABEL" &>/dev/null; then
+    launchctl bootout "system/$LABEL" || true
+    # Give the process a moment to exit cleanly.
+    sleep 2
+fi
+
+# Remove old plist if upgrading (will be reinstalled by payload).
+rm -f "$PLIST_PATH"
+
+exit 0

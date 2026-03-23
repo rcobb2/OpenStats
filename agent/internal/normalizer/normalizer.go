@@ -15,16 +15,17 @@ type AppInfo struct {
 }
 
 // Normalizer resolves raw exe names into friendly application names.
-// It uses a tiered approach: PE metadata first, then mapping file.
+// It uses a tiered approach: mapping file first, then platform metadata (PE on Windows,
+// Info.plist on macOS), then a cleaned version of the exe name.
 type Normalizer struct {
 	mapping *MappingFile
-	pe      *PEReader
+	pe      MetadataReader
 	cache   sync.Map // exePath -> *AppInfo
 	logger  *slog.Logger
 }
 
-// NewNormalizer creates a new normalizer with the given mapping file and PE reader.
-func NewNormalizer(mapping *MappingFile, pe *PEReader, logger *slog.Logger) *Normalizer {
+// NewNormalizer creates a new normalizer with the given mapping file and metadata reader.
+func NewNormalizer(mapping *MappingFile, pe MetadataReader, logger *slog.Logger) *Normalizer {
 	return &Normalizer{
 		mapping: mapping,
 		pe:      pe,

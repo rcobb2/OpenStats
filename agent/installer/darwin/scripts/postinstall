@@ -1,0 +1,29 @@
+#!/bin/bash
+set -e
+
+PLIST_PATH="/Library/LaunchDaemons/com.openlabstats.agent.plist"
+LABEL="com.openlabstats.agent"
+LOG_DIR="/var/log/openlabstats"
+INSTALL_DIR="/usr/local/openlabstats"
+
+# Create log directory if not present.
+mkdir -p "$LOG_DIR"
+chmod 755 "$LOG_DIR"
+
+# Ensure install dir has correct permissions.
+chmod 755 "$INSTALL_DIR"
+chmod 755 "$INSTALL_DIR/openlabstats-agent"
+
+# Set correct plist permissions (must be root:wheel, mode 644 for launchd).
+chown root:wheel "$PLIST_PATH"
+chmod 644 "$PLIST_PATH"
+
+# If the daemon is already loaded (upgrade), bootout first.
+if launchctl list "$LABEL" &>/dev/null; then
+    launchctl bootout "system/$LABEL" || true
+fi
+
+# Bootstrap the daemon.
+launchctl bootstrap system "$PLIST_PATH"
+
+exit 0
