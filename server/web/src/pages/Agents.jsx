@@ -76,7 +76,6 @@ export default function Agents() {
               </td>
               <td>{new Date(a.lastSeen).toLocaleString()}</td>
               <td>
-              <td>
                 <button className="btn-secondary" onClick={() => handleForceUpdate(a.id)}>Update</button>
                 <button className="btn-danger" onClick={() => handleDelete(a.id)}>Remove</button>
               </td>

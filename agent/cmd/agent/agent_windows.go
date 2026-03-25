@@ -28,7 +28,7 @@ import (
 // runAgent returns a function that runs the full agent lifecycle on Windows.
 func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 	return func(ctx context.Context) error {
-		logger.Info("starting OpenLabStats agent", "version", "0.1.3")
+		logger.Info("starting OpenLabStats agent", "version", "0.1.5")
 
 		// Initialize metrics.
 		m := metrics.New()
@@ -60,12 +60,17 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Scan for existing processes that started before the agent.
 		logger.Info("scanning for existing processes...")
 		existingProcs := monitor.ScanExistingProcesses(logger, norm.ResolveFamily)
+
+		// Initialize user session manager before the existing process loop so
+		// pre-existing processes are reflected in the session refcount at startup.
+		userSessions := newUserSessionManager(m, logger)
+
 		for _, p := range existingProcs {
 			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
+			if isValidUser(p.User) {
+				userSessions.onProcessStart(p.User, p.PID)
+			}
 		}
-
-		// Initialize user session manager (derives login/logoff from process events).
-		userSessions := newUserSessionManager(m, logger)
 
 		// Set up WMI watcher.
 		watcher, err := monitor.NewWMIWatcher(tracker, logger, monitor.WMIWatcherConfig{
@@ -123,7 +128,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}()
 
 		// Start periodic checkpoint loop for active process groups.
-		go runCheckpointLoop(ctx, tracker, norm, m, cfg.Monitor.ReconcileInterval, logger)
+		go runCheckpointLoop(ctx, tracker, norm, m, userSessions, cfg.Monitor.ReconcileInterval, logger)
 
 		// Start foreground window poller.
 		go monitor.RunForegroundPoller(ctx, tracker, 1*time.Second, logger)
@@ -139,7 +144,8 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 
 		// Start enrollment heartbeat if a central server is configured.
 		if cfg.Server.ReportURL != "" {
-			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger)
+			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
+				WithOSVersion(getWindowsOSCaption(logger))
 			go enrollClient.RunHeartbeat(ctx, 2*time.Minute)
 		}
 
@@ -207,6 +213,25 @@ func setDeviceInfo(m *metrics.Metrics, logger *slog.Logger) {
 	}
 
 	m.DeviceInfo.WithLabelValues(hostname, osCaption, osBuild, "", model, manufacturer, serial).Set(1)
+}
+
+// getWindowsOSCaption returns the Windows product name (e.g. "Microsoft Windows 11 Pro")
+// from WMI. Used so the server can identify the agent as Windows and serve the correct
+// .msi installer URL. Falls back to "Windows" on error.
+func getWindowsOSCaption(logger *slog.Logger) string {
+	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
+		oleerr, ok := err.(*ole.OleError)
+		if !ok || oleerr.Code() != 0x00000001 { // S_FALSE — already initialized
+			return "Windows"
+		}
+	} else {
+		defer ole.CoUninitialize()
+	}
+	caption, _ := getWMIProps(logger, "Win32_OperatingSystem", "Caption", "")
+	if caption == "" {
+		return "Windows"
+	}
+	return caption
 }
 
 func getWMIProps(logger *slog.Logger, class string, prop1, prop2 string) (string, string) {

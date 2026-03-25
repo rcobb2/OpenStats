@@ -22,7 +22,7 @@ INSTALLER_DIR="$SCRIPT_DIR"
 PAYLOAD_DIR="$INSTALLER_DIR/payload"
 SCRIPTS_DIR="$INSTALLER_DIR/scripts"
 BUILD_DIR="$INSTALLER_DIR/build"
-VERSION="0.1.3"
+VERSION="0.1.5"
 ARCH="${1:-arm64}"
 
 echo "Building openlabstats-agent v$VERSION for $ARCH ..."
@@ -54,7 +54,7 @@ chmod 755 "$BIN_PATH"
 
 # Copy a default agent.yaml only if none exists in the payload.
 CONFIG_DST="$PAYLOAD_DIR/usr/local/openlabstats/configs/agent.yaml"
-CONFIG_SRC="$AGENT_DIR/configs/agent.yaml"
+CONFIG_SRC="$AGENT_DIR/configs/agent-macos.yaml"
 if [[ ! -f "$CONFIG_DST" && -f "$CONFIG_SRC" ]]; then
     mkdir -p "$(dirname "$CONFIG_DST")"
     cp "$CONFIG_SRC" "$CONFIG_DST"

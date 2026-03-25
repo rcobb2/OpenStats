@@ -12,7 +12,7 @@
     Directory for build artifacts (default: installer\build).
 #>
 param(
-    [string]$Version = "0.1.0",
+    [string]$Version = "0.1.5",
     [string]$OutputDir = ""
 )
 

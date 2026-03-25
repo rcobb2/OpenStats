@@ -71,6 +71,7 @@ export const exportBottomAppsByForeground = (range = '24h') =>
 // Installers
 export const generateInstaller = (data) =>
   request('/installers/generate', { method: 'POST', body: JSON.stringify(data) });
+export const getMacInstallerURL = () => `${BASE}/installers/latest?platform=mac`;
 
 // Settings
 export const getSettings = () => request('/settings');

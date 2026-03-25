@@ -39,7 +39,7 @@ func main() {
 			return
 
 		case "version":
-			fmt.Println("openlabstats-agent v0.1.3")
+			fmt.Println("openlabstats-agent v0.1.5")
 			return
 
 		case "serveraddress":
@@ -216,7 +216,7 @@ func handleStatus() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Version:      0.1.3\n")
+	fmt.Printf("Version:      0.1.5\n")
 	fmt.Printf("Building:     %s\n", cfg.Monitor.Building)
 	fmt.Printf("Room:         %s\n", cfg.Monitor.Room)
 	fmt.Printf("Server:       %s\n", cfg.Server.ReportURL)

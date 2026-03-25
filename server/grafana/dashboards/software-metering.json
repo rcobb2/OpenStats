@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -7,182 +9,58 @@
   "links": [],
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "id": 4,
-      "options": { "showHeader": true },
-      "title": "Total Software Usage Time (Hours)",
-      "type": "table",
-      "targets": [
-        {
-          "expr": "sum by (app) (increase(openlabstats_app_usage_seconds_total[$__range])) / 3600",
-          "instant": true,
-          "format": "table"
-        }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "id": 5,
-      "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "orientation": "horizontal",
-        "showValues": "auto"
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
       },
-      "title": "Top 10 Applications by Launch Count",
-      "type": "barchart",
-      "targets": [
-        {
-          "expr": "topk(10, sum by (app) (increase(openlabstats_app_launches_total[$__range])))",
-          "legendFormat": "{{ app }}",
-          "instant": true
-        }
-      ],
-      "description": "Top 10 most launched applications"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "id": 6,
-      "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "orientation": "horizontal",
-        "showValues": "auto"
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
       },
-      "title": "Top 10 Applications by Active Time",
-      "type": "barchart",
-      "targets": [
-        {
-          "expr": "topk(10, sum by (app) (increase(openlabstats_app_foreground_seconds_total[$__range])) / 3600)",
-          "legendFormat": "{{ app }}",
-          "instant": true
-        }
-      ],
-      "description": "Top 10 applications by foreground (active) time in hours"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "id": 7,
+      "id": 1,
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "orientation": "horizontal",
-        "showValues": "auto"
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
       },
-      "title": "Launch Count % of Total",
-      "type": "barchart",
+      "title": "Peak Concurrent Application Usage",
+      "type": "timeseries",
       "targets": [
         {
-          "expr": "topk(10, sum by (app) (increase(openlabstats_app_launches_total[$__range])) / scalar(sum(increase(openlabstats_app_launches_total[$__range]))) * 100)",
-          "legendFormat": "{{ app }}",
-          "instant": true
+          "expr": "sum by (app) (openlabstats_app_active == 1)",
+          "legendFormat": "{{ app }}"
         }
-      ],
-      "description": "Percentage of total application launches per app"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "id": 8,
-      "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "orientation": "horizontal",
-        "showValues": "auto"
-      },
-      "title": "Runtime % of Total",
-      "type": "barchart",
-      "targets": [
-        {
-          "expr": "topk(10, sum by (app) (increase(openlabstats_app_foreground_seconds_total[$__range])) / scalar(sum(increase(openlabstats_app_foreground_seconds_total[$__range]))) * 100)",
-          "legendFormat": "{{ app }}",
-          "instant": true
-        }
-      ],
-      "description": "Percentage of total runtime per app"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
-      "id": 9,
-      "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "orientation": "horizontal",
-        "showValues": "auto"
-      },
-      "title": "Bottom 10 by Launch Count",
-      "type": "barchart",
-      "targets": [
-        {
-          "expr": "bottomk(10, sum by (app) (increase(openlabstats_app_launches_total[$__range])))",
-          "legendFormat": "{{ app }}",
-          "instant": true
-        }
-      ],
-      "description": "Least launched applications"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
-      "id": 10,
-      "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
-        "orientation": "horizontal",
-        "showValues": "auto"
-      },
-      "title": "Bottom 10 by Active Time",
-      "type": "barchart",
-      "targets": [
-        {
-          "expr": "bottomk(10, sum by (app) (increase(openlabstats_app_foreground_seconds_total[$__range])) / 3600)",
-          "legendFormat": "{{ app }}",
-          "instant": true
-        }
-      ],
-      "description": "Least active applications by foreground time"
-    }
-  ],
-  "refresh": "",
-  "schemaVersion": 38,
-  "style": "dark",
-  "tags": [],
-  "templating": {
-    "list": [
-      {
-        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
-        "hide": 0,
-        "includeAll": false,
-        "label": "Data Source",
-        "multi": false,
-        "name": "DS_PROMETHEUS",
-        "options": [],
-        "query": "prometheus",
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "type": "datasource"
-      }
-    ]
-  },
-  "time": { "from": "now-24h", "to": "now" },
-  "timepicker": {},
-  "timezone": "",
-  "title": "Software Metering",
-  "uid": "software-metering",
-  "version": 0,
-  "weekStart": ""
-}
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "none" } },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          },
           "unit": "short"
         }
       }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
       "id": 2,
       "options": {
         "orientation": "horizontal",
@@ -206,12 +84,23 @@
       "description": "Compare installations to actual activity."
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
       "id": 3,
       "options": {
         "stacking": "normal",
-        "legend": { "displayMode": "list", "placement": "bottom" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
       },
       "title": "Software Version Sprawl",
       "type": "barchart",
@@ -225,10 +114,20 @@
       "description": "See fragmentation of software versions."
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
       "id": 4,
-      "options": { "showHeader": true },
+      "options": {
+        "showHeader": true
+      },
       "title": "Total Software Usage Time (Hours)",
       "type": "table",
       "targets": [
@@ -240,11 +139,22 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
       "id": 5,
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
         "orientation": "horizontal",
         "showValues": "auto"
       },
@@ -252,7 +162,7 @@
       "type": "barchart",
       "targets": [
         {
-          "expr": "topk(10, sum by (app) (increase(openlabstats_app_launches_total[$__range])))",
+          "expr": "topk(10, sum by (app) (round(increase(openlabstats_app_launches_total[$__range]))))",
           "legendFormat": "{{ app }}",
           "instant": true
         }
@@ -260,11 +170,27 @@
       "description": "Top 10 most launched applications"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
       "id": 6,
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2
+        }
+      },
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
         "orientation": "horizontal",
         "showValues": "auto"
       },
@@ -272,7 +198,7 @@
       "type": "barchart",
       "targets": [
         {
-          "expr": "topk(10, sum by (app) (increase(openlabstats_app_foreground_seconds_total[$__range])) / 3600)",
+          "expr": "topk(10, round(sum by (app) (increase(openlabstats_app_foreground_seconds_total[$__range])) / 3600, 0.01))",
           "legendFormat": "{{ app }}",
           "instant": true
         }
@@ -280,11 +206,22 @@
       "description": "Top 10 applications by foreground (active) time in hours"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
       "id": 7,
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
         "orientation": "horizontal",
         "showValues": "auto"
       },
@@ -292,7 +229,7 @@
       "type": "barchart",
       "targets": [
         {
-          "expr": "topk(10, sum by (app) (increase(openlabstats_app_launches_total[$__range])) / sum(increase(openlabstats_app_launches_total[$__range])) * 100)",
+          "expr": "topk(10, sum by (app) (round(increase(openlabstats_app_launches_total[$__range]))) / sum(increase(openlabstats_app_launches_total[$__range])) * 100)",
           "legendFormat": "{{ app }}",
           "instant": true
         }
@@ -300,11 +237,22 @@
       "description": "Percentage of total application launches per app"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
       "id": 8,
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
         "orientation": "horizontal",
         "showValues": "auto"
       },
@@ -320,11 +268,22 @@
       "description": "Percentage of total runtime per app"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
       "id": 9,
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
         "orientation": "horizontal",
         "showValues": "auto"
       },
@@ -332,7 +291,7 @@
       "type": "barchart",
       "targets": [
         {
-          "expr": "bottomk(10, sum by (app) (increase(openlabstats_app_launches_total[$__range])))",
+          "expr": "bottomk(10, sum by (app) (round(increase(openlabstats_app_launches_total[$__range]))))",
           "legendFormat": "{{ app }}",
           "instant": true
         }
@@ -340,11 +299,27 @@
       "description": "Least launched applications"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
       "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2
+        }
+      },
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
         "orientation": "horizontal",
         "showValues": "auto"
       },
@@ -352,7 +327,7 @@
       "type": "barchart",
       "targets": [
         {
-          "expr": "bottomk(10, sum by (app) (increase(openlabstats_app_foreground_seconds_total[$__range])) / 3600)",
+          "expr": "bottomk(10, round(sum by (app) (increase(openlabstats_app_foreground_seconds_total[$__range])) / 3600, 0.01))",
           "legendFormat": "{{ app }}",
           "instant": true
         }
@@ -362,7 +337,10 @@
   ],
   "refresh": "1h",
   "schemaVersion": 39,
-  "tags": ["software", "licensing"],
+  "tags": [
+    "software",
+    "licensing"
+  ],
   "templating": {
     "list": [
       {
@@ -373,19 +351,31 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
         "definition": "label_values(openlabstats_app_usage_seconds_total, app)",
         "includeAll": true,
         "multi": true,
         "name": "app",
-        "query": { "query": "label_values(openlabstats_app_usage_seconds_total, app)" },
+        "query": {
+          "query": "label_values(openlabstats_app_usage_seconds_total, app)"
+        },
         "refresh": 1,
         "type": "query"
       }
     ]
   },
-  "time": { "from": "now-30d", "to": "now" },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "title": "Software Metering & License Compliance",
   "uid": "ols-software"
 }

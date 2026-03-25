@@ -5,6 +5,8 @@ PLIST_PATH="/Library/LaunchDaemons/com.openlabstats.agent.plist"
 LABEL="com.openlabstats.agent"
 LOG_DIR="/var/log/openlabstats"
 INSTALL_DIR="/usr/local/openlabstats"
+CONFIG_PATH="$INSTALL_DIR/configs/agent.yaml"
+CONFIG_BACKUP="/tmp/openlabstats-agent-config.bak"
 
 # Create log directory if not present.
 mkdir -p "$LOG_DIR"
@@ -13,6 +15,13 @@ chmod 755 "$LOG_DIR"
 # Ensure install dir has correct permissions.
 chmod 755 "$INSTALL_DIR"
 chmod 755 "$INSTALL_DIR/openlabstats-agent"
+
+# Restore pre-existing config (preserves building/room/server settings across updates).
+# If no backup exists this is a fresh install — keep the default config from the package.
+if [[ -f "$CONFIG_BACKUP" ]]; then
+    cp "$CONFIG_BACKUP" "$CONFIG_PATH"
+    rm -f "$CONFIG_BACKUP"
+fi
 
 # Set correct plist permissions (must be root:wheel, mode 644 for launchd).
 chown root:wheel "$PLIST_PATH"

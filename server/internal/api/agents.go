@@ -112,7 +112,7 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.ClearAgentPendingUpdate(r.Context(), req.ID)
 	} else if status == "outdated" {
 		// Fallback: version-based outdated check.
-		updateURL = s.GetLatestInstallerURL()
+		updateURL = s.GetLatestInstallerURL(req.OSVersion)
 	}
 
 	writeJSON(w, http.StatusOK, RegisterAgentResponse{
@@ -236,12 +236,13 @@ func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ForceAgentUpdate(w http.ResponseWriter, r *http.Request) {
 	// First validate agent exists.
 	agentID := chi.URLParam(r, "agentID")
-	if _, err := s.store.GetAgent(r.Context(), agentID); err != nil {
+	dbAgent, err := s.store.GetAgent(r.Context(), agentID)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	url := s.GetLatestInstallerURL()
+	url := s.GetLatestInstallerURL(dbAgent.OSVersion)
 	if url == "" {
 		writeError(w, http.StatusNotFound, "no installer available on server")
 		return

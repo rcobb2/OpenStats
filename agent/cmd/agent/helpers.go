@@ -35,7 +35,25 @@ func restoreMetrics(db *store.Store, m *metrics.Metrics, logger *slog.Logger) er
 	return nil
 }
 
-func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *normalizer.Normalizer, m *metrics.Metrics, interval time.Duration, logger *slog.Logger) {
+// checkpointSessions flushes elapsed time for all active user sessions into the
+// counter and updates the live duration gauge. Called from runCheckpointLoop so
+// that active sessions appear in Prometheus even before they end.
+func (usm *userSessionManager) checkpointSessions() {
+	usm.mu.Lock()
+	defer usm.mu.Unlock()
+
+	hostname := metrics.Hostname()
+	now := time.Now()
+
+	for user, state := range usm.users {
+		elapsed := now.Sub(state.lastCheckpoint).Seconds()
+		state.lastCheckpoint = now
+		usm.metrics.UserSessionSecondsTotal.WithLabelValues(user, hostname).Add(elapsed)
+		usm.metrics.UserSessionDuration.WithLabelValues(user, hostname).Set(now.Sub(state.loginTime).Seconds())
+	}
+}
+
+func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *normalizer.Normalizer, m *metrics.Metrics, userSessions *userSessionManager, interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -44,6 +62,7 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			userSessions.checkpointSessions()
 			snapshots := tracker.CheckpointActive()
 			hostname := metrics.Hostname()
 
@@ -226,8 +245,9 @@ type userSessionManager struct {
 }
 
 type userState struct {
-	activePIDs map[uint32]bool
-	loginTime  time.Time
+	refCount       int // number of active tracked process groups for this user
+	loginTime      time.Time
+	lastCheckpoint time.Time
 }
 
 func newUserSessionManager(m *metrics.Metrics, logger *slog.Logger) *userSessionManager {
@@ -247,10 +267,8 @@ func (usm *userSessionManager) onProcessStart(user string, pid uint32) {
 	state, exists := usm.users[user]
 	if !exists {
 		// First process for this user — counts as a login.
-		state = &userState{
-			activePIDs: make(map[uint32]bool),
-			loginTime:  time.Now(),
-		}
+		now := time.Now()
+		state = &userState{loginTime: now, lastCheckpoint: now}
 		usm.users[user] = state
 
 		usm.metrics.UserSessionLogins.WithLabelValues(user, hostname).Inc()
@@ -258,7 +276,7 @@ func (usm *userSessionManager) onProcessStart(user string, pid uint32) {
 		usm.logger.Info("user session started", "user", user)
 	}
 
-	state.activePIDs[pid] = true
+	state.refCount++
 }
 
 func (usm *userSessionManager) onProcessStop(user string, pid uint32) {
@@ -272,11 +290,12 @@ func (usm *userSessionManager) onProcessStop(user string, pid uint32) {
 		return
 	}
 
-	delete(state.activePIDs, pid)
+	state.refCount--
 
-	if len(state.activePIDs) == 0 {
+	if state.refCount <= 0 {
 		// Last process ended — counts as a logoff.
-		duration := time.Since(state.loginTime).Seconds()
+		// Only add time since last checkpoint to avoid double-counting periodic flushes.
+		duration := time.Since(state.lastCheckpoint).Seconds()
 		usm.metrics.UserSessionSecondsTotal.WithLabelValues(user, hostname).Add(duration)
 		usm.metrics.UserSessionActive.WithLabelValues(user, hostname).Set(0)
 		usm.metrics.UserSessionDuration.WithLabelValues(user, hostname).Set(0)

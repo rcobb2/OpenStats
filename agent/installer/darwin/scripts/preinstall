@@ -3,6 +3,8 @@ set -e
 
 LABEL="com.openlabstats.agent"
 PLIST_PATH="/Library/LaunchDaemons/com.openlabstats.agent.plist"
+CONFIG_PATH="/usr/local/openlabstats/configs/agent.yaml"
+CONFIG_BACKUP="/tmp/openlabstats-agent-config.bak"
 
 # If the daemon is running, stop it gracefully before replacing the binary.
 if launchctl list "$LABEL" &>/dev/null; then
@@ -13,5 +15,10 @@ fi
 
 # Remove old plist if upgrading (will be reinstalled by payload).
 rm -f "$PLIST_PATH"
+
+# Backup existing config so postinstall can restore it (preserves building/room/server settings).
+if [[ -f "$CONFIG_PATH" ]]; then
+    cp "$CONFIG_PATH" "$CONFIG_BACKUP"
+fi
 
 exit 0

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.3"
+const agentVersion = "0.1.5"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
@@ -218,7 +218,14 @@ func IsInMaintenanceWindow(startStr, endStr string) bool {
 	}
 }
 
+// getOutboundIP returns the best IP address for Prometheus to scrape this agent.
+// It prefers the Tailscale CGNAT address (100.64.0.0/10) so that Prometheus,
+// which runs under the ts-openstats sidecar, can reach agents on the Tailnet
+// regardless of LAN topology. Falls back to the default outbound LAN IP.
 func getOutboundIP() string {
+	if ip := getTailscaleIP(); ip != "" {
+		return ip
+	}
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		return ""
@@ -226,4 +233,33 @@ func getOutboundIP() string {
 	defer conn.Close()
 	addr := conn.LocalAddr().(*net.UDPAddr)
 	return addr.IP.String()
+}
+
+// getTailscaleIP returns the machine's Tailscale IP by scanning network
+// interfaces for an address in the Tailscale CGNAT range (100.64.0.0/10).
+func getTailscaleIP() string {
+	_, tsNet, _ := net.ParseCIDR("100.64.0.0/10")
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip != nil && ip.To4() != nil && tsNet.Contains(ip) {
+				return ip.String()
+			}
+		}
+	}
+	return ""
 }

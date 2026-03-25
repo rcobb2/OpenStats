@@ -17,7 +17,7 @@
 
   <Package Name="OpenLabStats Agent"
            Manufacturer="OpenLabStats"
-           Version="0.1.1"
+           Version="$(var.Version)"
            UpgradeCode="E7A14B3C-5D62-4F89-A1C0-8B3E6F9D2A71"
            Scope="perMachine"
            Compressed="yes">

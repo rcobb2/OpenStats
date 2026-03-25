@@ -25,7 +25,7 @@ import (
 // runAgent returns a function that runs the full agent lifecycle on macOS.
 func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 	return func(ctx context.Context) error {
-		logger.Info("starting OpenLabStats agent (macOS)", "version", "0.1.3")
+		logger.Info("starting OpenLabStats agent (macOS)", "version", "0.1.5")
 
 		// Initialize metrics.
 		m := metrics.New()
@@ -108,6 +108,9 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		existingProcs = watcher.FilterProcesses(existingProcs)
 		for _, p := range existingProcs {
 			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
+			if isValidUser(p.User) {
+				userSessions.onProcessStart(p.User, p.PID)
+			}
 		}
 
 		// Start process watcher in background.
@@ -118,7 +121,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}()
 
 		// Start periodic checkpoint loop for active process groups.
-		go runCheckpointLoop(ctx, tracker, norm, m, cfg.Monitor.ReconcileInterval, logger)
+		go runCheckpointLoop(ctx, tracker, norm, m, userSessions, cfg.Monitor.ReconcileInterval, logger)
 
 		// Start foreground window poller.
 		go monitor.RunForegroundPoller(ctx, tracker, 1*time.Second, logger)
@@ -135,7 +138,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Start enrollment heartbeat if a central server is configured.
 		if cfg.Server.ReportURL != "" {
 			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
-				WithOSVersion(getOSVersionDarwin())
+				WithOSVersion("macOS " + getOSVersionDarwin())
 			go enrollClient.RunHeartbeat(ctx, 2*time.Minute)
 		}
 
