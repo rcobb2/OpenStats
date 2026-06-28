@@ -37,5 +37,11 @@ server/web/node_modules/
 data/
 state/
 
+# Deployment secrets
+deploy/podman01/.env
+
+# Bitwarden token file (never commit)
+bws-token
+
 # Installer binaries and built frontend assets
 server/web/public/

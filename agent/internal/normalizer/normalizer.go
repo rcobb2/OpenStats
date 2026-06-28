@@ -93,5 +93,8 @@ func (n *Normalizer) ResolveFamily(exeName, exePath string) string {
 
 // ClearCache empties the resolution cache (e.g., after a mapping file update).
 func (n *Normalizer) ClearCache() {
-	n.cache = sync.Map{}
+	n.cache.Range(func(k, _ any) bool {
+		n.cache.Delete(k)
+		return true
+	})
 }

@@ -6,8 +6,11 @@ async function request(path, options = {}) {
     ...options,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const err = new Error(body.error || res.statusText);
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   return res.json();
 }

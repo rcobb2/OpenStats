@@ -62,6 +62,7 @@ func (f *FileSD) Refresh(ctx context.Context, st *store.Store) error {
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, f.outputPath); err != nil {
+		os.Remove(tmpPath)
 		return fmt.Errorf("rename temp file: %w", err)
 	}
 

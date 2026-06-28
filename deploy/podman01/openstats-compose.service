@@ -1,0 +1,34 @@
+[Unit]
+Description=OpenLabStats (podman-compose)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+# /run/openstats is a tmpfs dir created fresh on each boot (cleared on reboot).
+RuntimeDirectory=openstats
+RuntimeDirectoryMode=0700
+
+# /etc/openstats/bws-token contains: BWS_ACCESS_TOKEN=<machine-account-token>
+# Create it: echo "BWS_ACCESS_TOKEN=<token>" > /etc/openstats/bws-token
+#            chmod 600 /etc/openstats/bws-token; chown root:root /etc/openstats/bws-token
+EnvironmentFile=/etc/openstats/bws-token
+
+# Fetch POSTGRES_PASSWORD and GRAFANA_PASSWORD from Bitwarden before starting.
+# On restart, re-fetches so rotated credentials take effect automatically.
+ExecStartPre=/etc/openstats/fetch-secrets.sh
+
+ExecStart=/usr/bin/podman-compose \
+    --file /opt/openstats/deploy/podman01/docker-compose.yml \
+    --env-file /run/openstats/secrets.env \
+    up -d
+
+ExecStop=/usr/bin/podman-compose \
+    --file /opt/openstats/deploy/podman01/docker-compose.yml \
+    down
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

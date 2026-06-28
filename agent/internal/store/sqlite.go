@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -87,9 +88,15 @@ func (s *Store) migrate() error {
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
 
-	// Attempt to add new columns for existing databases (will fail harmlessly if they already exist).
-	_, _ = s.db.Exec("ALTER TABLE process_sessions ADD COLUMN foreground_seconds REAL DEFAULT 0;")
-	_, _ = s.db.Exec("ALTER TABLE app_usage_totals ADD COLUMN total_foreground_seconds REAL DEFAULT 0;")
+	// Add new columns for existing databases; ignore "duplicate column" from older schemas.
+	for _, stmt := range []string{
+		"ALTER TABLE process_sessions ADD COLUMN foreground_seconds REAL DEFAULT 0;",
+		"ALTER TABLE app_usage_totals ADD COLUMN total_foreground_seconds REAL DEFAULT 0;",
+	} {
+		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			s.logger.Warn("schema migration warning", "stmt", stmt, "err", err)
+		}
+	}
 
 	s.logger.Info("database schema ready")
 	return nil
@@ -100,6 +107,8 @@ func (s *Store) RecordSession(
 	pid uint32, exeName, exePath, displayName, category, publisher, user, hostname string,
 	startTime, stopTime time.Time, foregroundSeconds float64,
 ) error {
+	startTime = startTime.UTC()
+	stopTime = stopTime.UTC()
 	duration := stopTime.Sub(startTime).Seconds()
 
 	tx, err := s.db.Begin()

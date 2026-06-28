@@ -12,7 +12,9 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.5"
+// AgentVersion is the single source of truth for the agent version string.
+// Also update the installer WiX version in agent/installer/openlabstats.wxs when bumping.
+const AgentVersion = "0.1.5"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
@@ -114,7 +116,7 @@ func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error
 		Hostname:     hostname,
 		IPAddress:    ip,
 		OSVersion:    c.osVersion,
-		AgentVersion: agentVersion,
+		AgentVersion: AgentVersion,
 		Port:         c.port,
 		Building:     c.building,
 		Room:         c.room,
@@ -201,21 +203,35 @@ func IsInMaintenanceWindow(startStr, endStr string) bool {
 		return true
 	}
 
+	parseHHMM := func(s string) (int, bool) {
+		var h, m int
+		if n, _ := fmt.Sscanf(s, "%d:%d", &h, &m); n != 2 {
+			return 0, false
+		}
+		if h < 0 || h > 23 || m < 0 || m > 59 {
+			return 0, false
+		}
+		return h*60 + m, true
+	}
+
+	startMinutes, ok1 := parseHHMM(startStr)
+	endMinutes, ok2 := parseHHMM(endStr)
+	if !ok1 || !ok2 {
+		return true // treat invalid config as always in window (safe default)
+	}
+
+	if startMinutes == endMinutes {
+		return false // zero-length window means never in maintenance
+	}
+
 	now := time.Now()
 	currentMinutes := now.Hour()*60 + now.Minute()
 
-	var startH, startM, endH, endM int
-	fmt.Sscanf(startStr, "%d:%d", &startH, &startM)
-	fmt.Sscanf(endStr, "%d:%d", &endH, &endM)
-
-	startMinutes := startH*60 + startM
-	endMinutes := endH*60 + endM
-
 	if startMinutes < endMinutes {
 		return currentMinutes >= startMinutes && currentMinutes <= endMinutes
-	} else {
-		return currentMinutes >= startMinutes || currentMinutes <= endMinutes
 	}
+	// Wraps midnight: e.g. 23:00–05:00
+	return currentMinutes >= startMinutes || currentMinutes <= endMinutes
 }
 
 // getOutboundIP returns the best IP address for Prometheus to scrape this agent.

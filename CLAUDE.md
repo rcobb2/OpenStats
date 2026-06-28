@@ -4,16 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenLabStats is an open-source software usage tracking system for higher education labs — an alternative to proprietary tools like LabStats. It consists of three components: a Windows agent (Go), a central management server (Go), and a React/Vite web frontend. The agent and server are **separate Go modules** (`agent/go.mod`, `server/go.mod`) — run `go` commands from within each directory.
+OpenLabStats is an open-source software usage tracking system for higher education labs — an alternative to proprietary tools like LabStats. It consists of three components: a cross-platform agent (Windows + macOS, Go), a central management server (Go), and a React/Vite web frontend. The agent and server are **separate Go modules** (`agent/go.mod`, `server/go.mod`) — run `go` commands from within each directory.
 
 ## Build & Run
 
 ```powershell
-# Agent (must target Windows — uses WMI, Win32 APIs)
+# Agent (Windows)
 cd agent
 go build -o openlabstats-agent.exe ./cmd/agent/
 .\openlabstats-agent.exe --config configs\agent.yaml   # console/test mode
 .\openlabstats-agent.exe install && net start OpenLabStats  # as service
+
+# Agent (macOS)
+cd agent
+go build -o openlabstats-agent ./cmd/agent/
+./openlabstats-agent --config configs/agent.yaml
 
 # Server
 cd server
@@ -41,7 +46,7 @@ cd server && go test ./...
 ## Architecture
 
 ```
-[Windows Agent :9183] --/metrics--> [Prometheus] --> [Grafana]
+[Agent :9183] --/metrics--> [Prometheus] --> [Grafana]
         |
         +-- POST /api/v1/agents/register --> [Server :8080]
                                                   |
@@ -51,14 +56,14 @@ cd server && go test ./...
                                              Swagger at /api/docs
 ```
 
-- **Agent** (`agent/`): Windows service that uses WMI subscriptions to track process start/stop, polls foreground window, normalizes software names, and exposes Prometheus metrics at `:9183/metrics`.
+- **Agent** (`agent/`): Cross-platform service (Windows + macOS) that tracks process start/stop (WMI on Windows, polling on macOS), polls foreground window, normalizes software names, and exposes Prometheus metrics at `:9183/metrics`. Platform-specific entry points in `cmd/agent/agent_windows.go` and `cmd/agent/agent_darwin.go`; shared interface via `monitor/watcher.go`.
 - **Server** (`server/`): REST API (chi router) backed by PostgreSQL; manages agent fleet, lab groupings, software name mappings, reports, and installer generation. Serves the frontend SPA and Swagger docs.
 - **Frontend** (`server/web/`): React 19 + Vite SPA. All API calls go through `src/api.js`. Routes defined in `src/main.jsx`.
 
 ## Key Design Decisions & Behaviors
 
 - **No auth** — CORS is open; designed for internal campus networks only.
-- **Agent startup behavior**: `wmi.go:ScanExistingProcesses()` runs at startup to register already-running processes — critical so the foreground poller can attribute time to processes launched before the agent started.
+- **Agent startup behavior**: `ScanExistingProcesses()` (in `wmi.go` on Windows, `proc_darwin.go` on macOS) runs at startup to register already-running processes — critical so the foreground poller can attribute time to processes launched before the agent started.
 - **Two-tier name normalization** in the agent: (1) server-managed `software-map.json` looked up by exe name, (2) PE metadata (`FileDescription`) extracted from the executable. See `agent/internal/normalizer/`.
 - **Prometheus service discovery**: The server writes a `file_sd` JSON file to `fileSD.outputPath` (configured in `server.yaml`). This file is auto-refreshed whenever lab/agent assignments change — no manual Prometheus config needed per agent.
 - **SQLite on agent** — Local persistence for metric restoration across restarts (`agent/internal/store/sqlite.go`).
@@ -72,9 +77,13 @@ cd server && go test ./...
 | Path | Purpose |
 |------|---------|
 | `agent/cmd/agent/main.go` | Entry point, CLI subcommands, version const (`v0.1.3`) |
-| `agent/internal/monitor/wmi.go` | WMI subscriptions + `ScanExistingProcesses()` |
+| `agent/cmd/agent/agent_windows.go` | Windows agent runner (WMI-based) |
+| `agent/cmd/agent/agent_darwin.go` | macOS agent runner (poll-based) |
+| `agent/internal/monitor/watcher.go` | Cross-platform watcher interface (`WMIWatcherConfig`) |
+| `agent/internal/monitor/wmi.go` | Windows WMI subscriptions + `ScanExistingProcesses()` |
+| `agent/internal/monitor/proc_darwin.go` | macOS process scanning + `ScanExistingProcesses()` |
 | `agent/internal/monitor/tracker.go` | Process state, foreground time attribution, user filtering |
-| `agent/internal/monitor/foreground.go` | Win32 `GetForegroundWindow` polling |
+| `agent/internal/monitor/foreground.go` | Foreground window polling (Windows: Win32; macOS: CoreGraphics) |
 | `agent/internal/metrics/prometheus.go` | All Prometheus metric definitions and labels |
 | `agent/internal/normalizer/normalizer.go` | Name resolution orchestration |
 | `agent/internal/enrollment/client.go` | Server registration + heartbeat; also holds `agentVersion` const |
@@ -119,7 +128,8 @@ cd server && go test ./...
 - Edit the `migrate()` function in `server/internal/store/postgres.go` — never in migrations files.
 
 ### Version Bump
-- Update version in BOTH `agent/cmd/agent/main.go` (version const) AND `agent/internal/enrollment/client.go` (agentVersion).
+- Single source of truth: `enrollment.AgentVersion` in `agent/internal/enrollment/client.go`. `main.go` references it — no second edit needed.
+- Also update the WiX version in `agent/installer/openlabstats.wxs`.
 
 ## MSI Installer
 
@@ -146,3 +156,4 @@ Each component has its own context doc — update these when making significant 
 - `AGENTS.md` — AI agent coordination rules and change checklists
 - `agent/agent.md` — agent internals, metrics, CLI tools
 - `server/server.md` — server API, DB schema, components
+- `server/web/web.md` — frontend structure, pages, components

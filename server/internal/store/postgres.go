@@ -240,8 +240,8 @@ func (s *Store) ClearAgentPendingUpdate(ctx context.Context, id string) error {
 func (s *Store) MarkStaleAgents(ctx context.Context, threshold time.Duration) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE agents SET status = 'offline', updated_at = NOW()
-		WHERE status = 'online' AND last_seen < NOW() - $1::interval`,
-		threshold.String(),
+		WHERE status = 'online' AND last_seen < NOW() - ($1 * INTERVAL '1 second')`,
+		int64(threshold.Seconds()),
 	)
 	return err
 }
@@ -249,8 +249,8 @@ func (s *Store) MarkStaleAgents(ctx context.Context, threshold time.Duration) er
 func (s *Store) DeleteStaleAgents(ctx context.Context, days int) error {
 	_, err := s.pool.Exec(ctx, `
 		DELETE FROM agents
-		WHERE last_seen < NOW() - ($1 || ' days')::interval`,
-		fmt.Sprintf("%d", days),
+		WHERE last_seen < NOW() - ($1 * INTERVAL '1 day')`,
+		days,
 	)
 	return err
 }

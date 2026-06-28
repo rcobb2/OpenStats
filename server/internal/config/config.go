@@ -68,13 +68,16 @@ func Load(path string) (*Config, error) {
 }
 
 // applyEnvOverrides allows deployment-time overrides without editing server.yaml.
-// PROMETHEUS_URL and GRAFANA_URL take precedence over config file values.
+// Environment variables take precedence over config file values.
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("PROMETHEUS_URL"); v != "" {
 		cfg.Prom.URL = v
 	}
 	if v := os.Getenv("GRAFANA_URL"); v != "" {
 		cfg.Grafana.URL = v
+	}
+	if v := os.Getenv("DB_PASSWORD"); v != "" {
+		cfg.Database.Password = v
 	}
 }
 

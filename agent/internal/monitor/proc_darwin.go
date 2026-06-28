@@ -41,6 +41,7 @@ import (
 	"os/user"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -106,7 +107,8 @@ func (w *PollWatcher) isExcluded(exeName, exePath string) bool {
 
 // isSystemPath returns true when a process lives in a macOS system directory.
 // These are OS daemons, XPC services, and private framework helpers — never
-// user-installed lab software.
+// user-installed lab software. /usr/local/ is intentionally excluded from this
+// list because that's where Homebrew and user-installed CLI tools live.
 func isSystemPath(exePath string) bool {
 	for _, prefix := range []string{
 		"/System/",
@@ -307,13 +309,29 @@ func listAllPIDs() []uint32 {
 	return pids
 }
 
-// resolveUID converts a UID to a username using the standard library.
+var (
+	uidCacheMu sync.RWMutex
+	uidCache   = make(map[uint32]string)
+)
+
+// resolveUID converts a UID to a username, caching results to avoid repeated syscalls.
 func resolveUID(uid uint32) string {
-	u, err := user.LookupId(strconv.Itoa(int(uid)))
-	if err != nil {
-		return ""
+	uidCacheMu.RLock()
+	if name, ok := uidCache[uid]; ok {
+		uidCacheMu.RUnlock()
+		return name
 	}
-	return u.Username
+	uidCacheMu.RUnlock()
+
+	name := ""
+	if u, err := user.LookupId(strconv.Itoa(int(uid))); err == nil {
+		name = u.Username
+	}
+
+	uidCacheMu.Lock()
+	uidCache[uid] = name
+	uidCacheMu.Unlock()
+	return name
 }
 
 // ScanExistingProcesses returns all currently running processes.

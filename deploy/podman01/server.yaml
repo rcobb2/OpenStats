@@ -1,0 +1,28 @@
+# OpenLabStats server config for podman01.colgate.edu
+# Mounted read-only at /etc/openlabstats/server.yaml inside the container.
+
+server:
+  port: 8080
+  host: ""
+  publicDir: public
+
+database:
+  host: openlabstats-postgres
+  port: 5432
+  user: openlabstats
+  # Password is overridden at runtime by the DB_PASSWORD env var (set via secrets.env).
+  password: unused
+  dbName: openlabstats
+  sslMode: disable
+
+prometheus:
+  url: http://openlabstats-prometheus:9090
+
+# Grafana URL used by the /grafana reverse-proxy in the server.
+# Points to our own OpenLabStats Grafana on host port 3001
+# (the existing grafana-viz for cflow is on port 3000).
+grafana:
+  url: http://host.containers.internal:3001
+
+fileSD:
+  outputPath: /etc/prometheus/file_sd/openlabstats.json

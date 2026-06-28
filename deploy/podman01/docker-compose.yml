@@ -1,0 +1,104 @@
+services:
+  # ---------------------------------------------------------------
+  # PostgreSQL - dedicated to OpenLabStats (isolated from cflow DB)
+  # ---------------------------------------------------------------
+  openlabstats-postgres:
+    image: postgres:17-alpine
+    container_name: openlabstats-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: openlabstats
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: openlabstats
+    volumes:
+      - /home/pathworks/openstats/data/postgres:/var/lib/postgresql/data:Z
+    networks:
+      - openstats
+
+  # ---------------------------------------------------------------
+  # OpenLabStats Server - central management API + web UI
+  # Built from source on first deploy (or after git pull).
+  # Exposes :8080 on the host so nginx-lb can reach it via
+  # http://host.containers.internal:8080.
+  # ---------------------------------------------------------------
+  openlabstats-server:
+    build:
+      context: ../../server
+      dockerfile: Dockerfile
+    image: openlabstats-server:local
+    container_name: openlabstats-server
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8080:8080"
+    environment:
+      # Proxy /grafana/* to our own Grafana via the host bridge.
+      - GRAFANA_URL=http://host.containers.internal:3001
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - ./server.yaml:/etc/openlabstats/server.yaml:ro,Z
+      - /home/pathworks/openstats/data/file_sd:/etc/prometheus/file_sd:Z
+      - /home/pathworks/openstats/data/installers:/usr/local/bin/public/installers:Z
+    depends_on:
+      - openlabstats-postgres
+      - prometheus
+    networks:
+      - openstats
+
+  # ---------------------------------------------------------------
+  # Prometheus - time-series metrics store for agent data
+  # ---------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: openlabstats-prometheus
+    restart: unless-stopped
+    volumes:
+      - ../../server/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+      - ../../server/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro,Z
+      - /home/pathworks/openstats/data/file_sd:/etc/prometheus/file_sd:ro,Z
+      - /home/pathworks/openstats/data/prometheus:/prometheus:Z
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=365d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - openstats
+
+  # ---------------------------------------------------------------
+  # Grafana - OpenLabStats dashboards
+  # Runs on host port 3001 (existing grafana-viz uses 3000).
+  # Anonymous viewer access is intentional: dashboards are public
+  # within the campus network and embedded in the OpenLabStats UI.
+  # Served at https://openstats.colgate.edu/grafana/ via the
+  # OpenLabStats server's /grafana reverse-proxy.
+  # ---------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: openlabstats-grafana
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:3001:3000"
+    environment:
+      - PROMETHEUS_URL=http://openlabstats-prometheus:9090
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/openlabstats-overview.json
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SERVER_ROOT_URL=https://openstats.colgate.edu/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ../../server/grafana/provisioning:/etc/grafana/provisioning:ro,Z
+      - ../../server/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
+      - /home/pathworks/openstats/data/grafana:/var/lib/grafana:Z
+    depends_on:
+      - prometheus
+    networks:
+      - openstats
+
+networks:
+  openstats:
+    driver: bridge

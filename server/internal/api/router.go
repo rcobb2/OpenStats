@@ -66,11 +66,15 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 	// The /grafana prefix is NOT stripped: with GF_SERVER_SERVE_FROM_SUB_PATH=true,
 	// Grafana expects the full /grafana/... path. Stripping it causes an infinite
 	// redirect loop because Grafana redirects bare paths back to /grafana/...
-	grafanaURL, _ := url.Parse(cfg.Grafana.URL)
-	proxy := httputil.NewSingleHostReverseProxy(grafanaURL)
-	r.Mount("/grafana", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxy.ServeHTTP(w, r)
-	}))
+	grafanaURL, err := url.Parse(cfg.Grafana.URL)
+	if err != nil || grafanaURL.Host == "" || (grafanaURL.Scheme != "http" && grafanaURL.Scheme != "https") {
+		logger.Warn("grafana.url is not a valid absolute URL; /grafana proxy disabled", "url", cfg.Grafana.URL)
+	} else {
+		proxy := httputil.NewSingleHostReverseProxy(grafanaURL)
+		r.Mount("/grafana", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxy.ServeHTTP(w, r)
+		}))
+	}
 
 	// API v1 routes.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -130,7 +134,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 	// Serve installer MSI files directly (used by agents for self-update).
 	installersDir := filepath.Join(s.cfg.Server.PublicDir, "installers")
 	r.Get("/installers/*", func(w http.ResponseWriter, req *http.Request) {
-		filename := strings.TrimPrefix(req.URL.Path, "/installers/")
+		filename := filepath.Base(strings.TrimPrefix(req.URL.Path, "/installers/"))
 		http.ServeFile(w, req, filepath.Join(installersDir, filename))
 	})
 

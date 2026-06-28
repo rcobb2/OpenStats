@@ -39,7 +39,7 @@ func main() {
 			return
 
 		case "version":
-			fmt.Println("openlabstats-agent v0.1.5")
+			fmt.Println("openlabstats-agent v" + enrollment.AgentVersion)
 			return
 
 		case "serveraddress":

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -11,7 +12,11 @@ const namespace = "openlabstats"
 var hostname string
 
 func init() {
-	hostname, _ = os.Hostname()
+	var err error
+	hostname, err = os.Hostname()
+	if err != nil {
+		slog.Warn("could not determine hostname for metrics", "err", err)
+	}
 }
 
 // Metrics holds all Prometheus metric collectors for the agent.
@@ -40,6 +45,9 @@ func NewForTest() *Metrics {
 }
 
 func newMetrics(reg prometheus.Registerer) *Metrics {
+	// Note: app+user+hostname label combination creates series proportional to
+	// (apps × users × machines). For typical lab deployments (50 apps, 500 users,
+	// 100 machines) this stays under 2.5M series. Monitor Prometheus heap if scaling beyond that.
 	m := &Metrics{
 		AppUsageSeconds: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
