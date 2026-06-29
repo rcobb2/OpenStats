@@ -3,7 +3,7 @@ services:
   # PostgreSQL - dedicated to OpenLabStats (isolated from cflow DB)
   # ---------------------------------------------------------------
   openlabstats-postgres:
-    image: postgres:17-alpine
+    image: docker.io/library/postgres:17-alpine
     container_name: openlabstats-postgres
     restart: unless-stopped
     environment:
@@ -48,7 +48,7 @@ services:
   # Prometheus - time-series metrics store for agent data
   # ---------------------------------------------------------------
   prometheus:
-    image: prom/prometheus:v3.4.0
+    image: docker.io/prom/prometheus:v3.4.0
     container_name: openlabstats-prometheus
     restart: unless-stopped
     volumes:
@@ -66,32 +66,29 @@ services:
       - openstats
 
   # ---------------------------------------------------------------
-  # Grafana - OpenLabStats dashboards
-  # Runs on host port 3001 (existing grafana-viz uses 3000).
-  # Anonymous viewer access is intentional: dashboards are public
-  # within the campus network and embedded in the OpenLabStats UI.
-  # Served at https://openstats.colgate.edu/grafana/ via the
-  # OpenLabStats server's /grafana reverse-proxy.
+  # Grafana - dashboards for OpenLabStats metrics
+  # Port 3001 avoids conflict with cflow's grafana-viz on port 3000.
+  # The server proxies /grafana/* to here via host.containers.internal:3001.
+  # Uses a custom datasource config (Prometheus via bridge network),
+  # but shares dashboard JSON files from the main codebase.
   # ---------------------------------------------------------------
-  grafana:
-    image: grafana/grafana:11.6.0
+  openlabstats-grafana:
+    image: docker.io/grafana/grafana-oss:latest
     container_name: openlabstats-grafana
     restart: unless-stopped
     ports:
       - "0.0.0.0:3001:3000"
     environment:
-      - PROMETHEUS_URL=http://openlabstats-prometheus:9090
-      - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/openlabstats-overview.json
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SECURITY_ALLOW_EMBEDDING=true
-      - GF_SERVER_ROOT_URL=https://openstats.colgate.edu/grafana/
+      - GF_SERVER_ROOT_URL=http://openstats.colgate.edu/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
-      - ../../server/grafana/provisioning:/etc/grafana/provisioning:ro,Z
+      - ./grafana/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro,Z
+      - ../../server/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,Z
       - ../../server/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
       - /home/pathworks/openstats/data/grafana:/var/lib/grafana:Z
     depends_on:
