@@ -46,15 +46,13 @@ services:
 
   # ---------------------------------------------------------------
   # Prometheus - time-series metrics store for agent data.
-  # Exposed on host port 9090 so grafana.colgate.edu can reach it
-  # as a datasource (add http://host.containers.internal:9090 in Grafana UI).
+  # Internal only; to add to grafana.colgate.edu, use Tailscale
+  # IP of this host or set up a shared network separately.
   # ---------------------------------------------------------------
   prometheus:
     image: docker.io/prom/prometheus:v3.4.0
     container_name: openlabstats-prometheus
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:9090:9090"
     volumes:
       - ../../server/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
       - ../../server/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro,Z
