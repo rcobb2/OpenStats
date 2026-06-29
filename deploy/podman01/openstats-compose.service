@@ -14,7 +14,7 @@ RuntimeDirectoryMode=0700
 #            chmod 600 /etc/openstats/bws-token; chown root:root /etc/openstats/bws-token
 EnvironmentFile=/etc/openstats/bws-token
 
-# Fetch POSTGRES_PASSWORD and GRAFANA_PASSWORD from Bitwarden before starting.
+# Fetch POSTGRES_PASSWORD from Bitwarden before starting.
 # On restart, re-fetches so rotated credentials take effect automatically.
 ExecStartPre=/etc/openstats/fetch-secrets.sh
 

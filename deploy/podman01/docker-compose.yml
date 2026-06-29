@@ -31,8 +31,8 @@ services:
     ports:
       - "0.0.0.0:8080:8080"
     environment:
-      # Proxy /grafana/* to our own Grafana via the host bridge.
-      - GRAFANA_URL=http://host.containers.internal:3001
+      # Point to the shared grafana.colgate.edu instance on port 3000.
+      - GRAFANA_URL=http://host.containers.internal:3000
       - DB_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - ./server.yaml:/etc/openlabstats/server.yaml:ro,Z
@@ -45,12 +45,16 @@ services:
       - openstats
 
   # ---------------------------------------------------------------
-  # Prometheus - time-series metrics store for agent data
+  # Prometheus - time-series metrics store for agent data.
+  # Exposed on host port 9090 so grafana.colgate.edu can reach it
+  # as a datasource (add http://host.containers.internal:9090 in Grafana UI).
   # ---------------------------------------------------------------
   prometheus:
     image: docker.io/prom/prometheus:v3.4.0
     container_name: openlabstats-prometheus
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
     volumes:
       - ../../server/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
       - ../../server/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro,Z
@@ -62,37 +66,6 @@ services:
       - '--storage.tsdb.retention.time=365d'
       - '--web.enable-lifecycle'
       - '--web.enable-admin-api'
-    networks:
-      - openstats
-
-  # ---------------------------------------------------------------
-  # Grafana - dashboards for OpenLabStats metrics
-  # Port 3001 avoids conflict with cflow's grafana-viz on port 3000.
-  # The server proxies /grafana/* to here via host.containers.internal:3001.
-  # Uses a custom datasource config (Prometheus via bridge network),
-  # but shares dashboard JSON files from the main codebase.
-  # ---------------------------------------------------------------
-  openlabstats-grafana:
-    image: docker.io/grafana/grafana-oss:latest
-    container_name: openlabstats-grafana
-    restart: unless-stopped
-    ports:
-      - "0.0.0.0:3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_SECURITY_ALLOW_EMBEDDING=true
-      - GF_SERVER_ROOT_URL=http://openstats.colgate.edu/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-    volumes:
-      - ./grafana/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro,Z
-      - ../../server/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,Z
-      - ../../server/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
-      - /home/pathworks/openstats/data/grafana:/var/lib/grafana:Z
-    depends_on:
-      - prometheus
     networks:
       - openstats
 

@@ -19,14 +19,12 @@ OUT=/run/openstats/secrets.env
 bws run \
     --access-token "$BWS_ACCESS_TOKEN" \
     -- env \
-    | grep -E '^(POSTGRES_PASSWORD|GRAFANA_PASSWORD)=' \
+    | grep -E '^POSTGRES_PASSWORD=' \
     > "$OUT"
 
 chmod 600 "$OUT"
 
-for var in POSTGRES_PASSWORD GRAFANA_PASSWORD; do
-    if ! grep -q "^${var}=" "$OUT"; then
-        echo "ERROR: secret '${var}' not found in Bitwarden — check secret name matches exactly" >&2
-        exit 1
-    fi
-done
+if ! grep -q "^POSTGRES_PASSWORD=" "$OUT"; then
+    echo "ERROR: secret 'POSTGRES_PASSWORD' not found in Bitwarden — check secret name matches exactly" >&2
+    exit 1
+fi
