@@ -35,4 +35,13 @@ fi
 # Bootstrap the daemon.
 launchctl bootstrap system "$PLIST_PATH"
 
+# Allow the agent through the macOS Application Firewall so Prometheus can
+# scrape its metrics endpoint. Without this, the firewall silently drops
+# inbound connections to port 9183 when the daemon installs non-interactively.
+SOCKETFILTERFW="/usr/libexec/ApplicationFirewall/socketfilterfw"
+if [[ -x "$SOCKETFILTERFW" ]]; then
+    "$SOCKETFILTERFW" --add "$INSTALL_DIR/openlabstats-agent" 2>/dev/null || true
+    "$SOCKETFILTERFW" --unblock "$INSTALL_DIR/openlabstats-agent" 2>/dev/null || true
+fi
+
 exit 0
