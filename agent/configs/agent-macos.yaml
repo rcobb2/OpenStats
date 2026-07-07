@@ -1,11 +1,10 @@
 # OpenLabStats Agent Configuration - macOS
-# Used for development/testing on macOS.
 # macOS exclude patterns are applied automatically (see config_darwin.go).
 
 server:
   port: 9183
   metricsPath: /metrics
-  reportURL: "https://openstats.tail9e516.ts.net"
+  reportURL: "https://openstats.colgate.edu"
 
 monitor:
   reconcileInterval: 30s
@@ -17,7 +16,7 @@ monitor:
 
 normalizer:
   mappingFile: configs/software-map.json
-  mappingUpdateURL: "https://openstats.tail9e516.ts.net/api/v1/mappings/agent"
+  mappingUpdateURL: "https://openstats.colgate.edu/api/v1/mappings/agent"
   mappingRefreshInterval: 1h
 
 inventory:
