@@ -59,7 +59,6 @@ export default function Layout() {
         </ul>
         <div className="sidebar-footer">
           <a href="/api/docs/" target="_blank" rel="noreferrer">API Docs</a>
-          <a href="http://localhost:3000" target="_blank" rel="noreferrer">Grafana</a>
         </div>
       </nav>
       <main className="content">

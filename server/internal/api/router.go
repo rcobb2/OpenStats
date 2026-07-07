@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,21 +58,6 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 	r.Get("/api/docs/*", httpSwagger.Handler(
 		httpSwagger.URL("/api/docs/doc.json"),
 	))
-
-	// Grafana Proxy - allow frontend to access dashboards without direct exposure.
-	// URL is read from config (grafana.url), overridable via GRAFANA_URL env var.
-	// The /grafana prefix is NOT stripped: with GF_SERVER_SERVE_FROM_SUB_PATH=true,
-	// Grafana expects the full /grafana/... path. Stripping it causes an infinite
-	// redirect loop because Grafana redirects bare paths back to /grafana/...
-	grafanaURL, err := url.Parse(cfg.Grafana.URL)
-	if err != nil || grafanaURL.Host == "" || (grafanaURL.Scheme != "http" && grafanaURL.Scheme != "https") {
-		logger.Warn("grafana.url is not a valid absolute URL; /grafana proxy disabled", "url", cfg.Grafana.URL)
-	} else {
-		proxy := httputil.NewSingleHostReverseProxy(grafanaURL)
-		r.Mount("/grafana", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			proxy.ServeHTTP(w, r)
-		}))
-	}
 
 	// API v1 routes.
 	r.Route("/api/v1", func(r chi.Router) {

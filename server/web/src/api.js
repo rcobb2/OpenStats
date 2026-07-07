@@ -37,9 +37,26 @@ export const deleteMapping = (id) => request(`/mappings/${id}`, { method: 'DELET
 
 // Reports
 export const getSummary = () => request('/reports/summary');
-export const getTopApps = (range = '24h') => request(`/reports/top-apps?range=${range}`);
+export const getTopAppsByLaunches = (range = '24h', limit = 10) => request(`/reports/top-apps-by-launches?range=${range}&limit=${limit}`);
+export const getTopAppsByForeground = (range = '24h', limit = 10) => request(`/reports/top-apps-by-foreground?range=${range}&limit=${limit}`);
+export const getBottomAppsByLaunches = (range = '24h', limit = 10) => request(`/reports/bottom-apps-by-launches?range=${range}&limit=${limit}`);
+export const getBottomAppsByForeground = (range = '24h', limit = 10) => request(`/reports/bottom-apps-by-foreground?range=${range}&limit=${limit}`);
 export const getUsageByLab = (range = '24h') => request(`/reports/usage-by-lab?range=${range}`);
 export const getActiveUsers = () => request('/reports/active-users');
+
+// Parse a Prometheus instant-query vector response into [{name, category, value}]
+export function parsePromVector(res) {
+  if (!res?.data?.result) return [];
+  return res.data.result
+    .map(r => ({
+      name: r.metric?.app ?? r.metric?.__name__ ?? 'unknown',
+      category: r.metric?.category ?? '',
+      lab: r.metric?.lab ?? '',
+      value: parseFloat(r.value?.[1] ?? 0),
+    }))
+    .filter(r => r.value > 0)
+    .sort((a, b) => b.value - a.value);
+}
 
 // CSV Export helpers
 async function downloadCSV(path, filename) {

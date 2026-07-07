@@ -16,9 +16,6 @@ database:
 prometheus:
   url: http://prometheus:9090
 
-grafana:
-  url: http://grafana:3000
-
 # Prometheus file-based service discovery.
 # The server writes this file whenever agents register/deregister.
 # Prometheus watches it via file_sd_configs.

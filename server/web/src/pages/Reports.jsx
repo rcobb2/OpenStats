@@ -1,30 +1,173 @@
 import { useState, useEffect } from 'react';
-import { 
-  exportTopAppsByLaunches, 
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend,
+} from 'recharts';
+import {
+  getTopAppsByLaunches,
+  getTopAppsByForeground,
+  getBottomAppsByLaunches,
+  getUsageByLab,
+  parsePromVector,
+  exportTopAppsByLaunches,
   exportTopAppsByForeground,
   exportBottomAppsByLaunches,
-  exportBottomAppsByForeground
+  exportBottomAppsByForeground,
 } from '../api';
+
+const CHART_COLORS = [
+  '#4f8ff7','#43b581','#f0a030','#e55353','#a78bfa',
+  '#34d399','#fb923c','#60a5fa','#f472b6','#818cf8',
+];
+
+function HBarChart({ data, valueLabel = 'value', color = '#4f8ff7', height = 300 }) {
+  if (!data) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
+  if (data.length === 0) return <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>;
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart layout="vertical" data={data} margin={{ top: 4, right: 24, bottom: 4, left: 8 }}>
+        <XAxis
+          type="number"
+          tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
+          axisLine={{ stroke: 'var(--border)' }}
+          tickLine={false}
+          label={{ value: valueLabel, position: 'insideBottomRight', offset: -4, fill: 'var(--text-dim)', fontSize: 11 }}
+        />
+        <YAxis
+          type="category"
+          dataKey="name"
+          width={150}
+          tick={{ fill: 'var(--text)', fontSize: 12 }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <Tooltip
+          cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+          contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+          labelStyle={{ color: 'var(--text)' }}
+          formatter={(v, _name, { payload }) => [
+            typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 1 }) : v,
+            payload.category || valueLabel,
+          ]}
+        />
+        <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={22} fill={color}>
+          {data.map((_, i) => (
+            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ChartCard({ title, children }) {
+  return (
+    <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', padding: '1.25rem' }}>
+      <h3 style={{ margin: '0 0 1rem' }}>{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function UserBehaviorReport({ range }) {
+  const [foreground, setForeground] = useState(null);
+  const [launches, setLaunches] = useState(null);
+
+  useEffect(() => {
+    setForeground(null);
+    setLaunches(null);
+    getTopAppsByForeground(range, 10).then(r => setForeground(parsePromVector(r))).catch(() => setForeground([]));
+    getTopAppsByLaunches(range, 10).then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches([]));
+  }, [range]);
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
+      <ChartCard title="Top 10 Apps by Active Time">
+        <HBarChart data={foreground} valueLabel="hours" height={300} />
+      </ChartCard>
+      <ChartCard title="Top 10 Apps by Launch Count">
+        <HBarChart data={launches} valueLabel="launches" height={300} />
+      </ChartCard>
+    </div>
+  );
+}
+
+function LabUsageReport({ range }) {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    setData(null);
+    getUsageByLab(range).then(res => {
+      const raw = parsePromVector(res);
+      // Sum usage seconds by lab across all apps
+      const byLab = {};
+      raw.forEach(r => {
+        const lab = r.lab || 'unknown';
+        byLab[lab] = (byLab[lab] || 0) + r.value;
+      });
+      const labData = Object.entries(byLab)
+        .map(([lab, val]) => ({ name: lab, value: Math.round(val / 3600 * 10) / 10 }))
+        .sort((a, b) => b.value - a.value);
+      setData(labData);
+    }).catch(() => setData([]));
+  }, [range]);
+
+  return (
+    <ChartCard title="Usage Hours by Lab">
+      <HBarChart data={data} valueLabel="hours" height={Math.max(240, (data?.length ?? 5) * 36)} />
+    </ChartCard>
+  );
+}
+
+function SoftwareMeteringReport({ range, exporting, handleExport }) {
+  const [topLaunches, setTopLaunches] = useState(null);
+  const [bottomLaunches, setBottomLaunches] = useState(null);
+  const [topForeground, setTopForeground] = useState(null);
+
+  useEffect(() => {
+    setTopLaunches(null);
+    setBottomLaunches(null);
+    setTopForeground(null);
+    getTopAppsByLaunches(range, 10).then(r => setTopLaunches(parsePromVector(r))).catch(() => setTopLaunches([]));
+    getBottomAppsByLaunches(range, 10).then(r => setBottomLaunches(parsePromVector(r))).catch(() => setBottomLaunches([]));
+    getTopAppsByForeground(range, 10).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground([]));
+  }, [range]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button className="btn-secondary" onClick={() => handleExport(exportTopAppsByLaunches)} disabled={exporting}>
+          CSV: Top 10 Launches
+        </button>
+        <button className="btn-secondary" onClick={() => handleExport(exportTopAppsByForeground)} disabled={exporting}>
+          CSV: Top 10 Active Time
+        </button>
+        <button className="btn-secondary" onClick={() => handleExport(exportBottomAppsByLaunches)} disabled={exporting}>
+          CSV: Bottom 10 Launches
+        </button>
+        <button className="btn-secondary" onClick={() => handleExport(exportBottomAppsByForeground)} disabled={exporting}>
+          CSV: Bottom 10 Active Time
+        </button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
+        <ChartCard title="Top 10 Apps — Launch Count">
+          <HBarChart data={topLaunches} valueLabel="launches" height={300} />
+        </ChartCard>
+        <ChartCard title="Top 10 Apps — Active Time">
+          <HBarChart data={topForeground} valueLabel="hours" height={300} />
+        </ChartCard>
+      </div>
+      <ChartCard title="Bottom 10 Apps — Launch Count (Underutilized)">
+        <HBarChart data={bottomLaunches} valueLabel="launches" height={300} />
+      </ChartCard>
+    </div>
+  );
+}
 
 export default function Reports() {
   const [range, setRange] = useState('24h');
   const [reportType, setReportType] = useState('user');
   const [exporting, setExporting] = useState(false);
-
-  const reports = {
-    user: { title: 'User Behavior Analytics', uid: 'ols-users', slug: 'user-behavior-analytics' },
-    hardware: { title: 'Hardware & Asset Utilization', uid: 'ols-hardware', slug: 'hardware-asset-utilization' },
-    software: { title: 'Software Metering & License Compliance', uid: 'software-metering', slug: 'software-metering' },
-  };
-
-  const rangeMap = {
-    '1h': 'now-1h',
-    '24h': 'now-24h',
-    '7d': 'now-7d',
-    '30d': 'now-30d',
-  };
-
-  const grafanaSrc = `/grafana/d/${reports[reportType].uid}/${reports[reportType].slug}?orgId=1&refresh=30s&kiosk&theme=dark&from=${rangeMap[range]}&to=now`;
 
   const handleExport = async (exportFn) => {
     setExporting(true);
@@ -37,11 +180,17 @@ export default function Reports() {
     }
   };
 
+  const titles = {
+    user: 'User Behavior Analytics',
+    hardware: 'Hardware & Lab Utilization',
+    software: 'Software Metering',
+  };
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <h2>{reports[reportType].title}</h2>
-        <div className="controls" style={{ margin: 0, display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+        <h2 style={{ margin: 0 }}>{titles[reportType]}</h2>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <div>
             <label>Report: </label>
             <select value={reportType} onChange={e => setReportType(e.target.value)}>
@@ -59,63 +208,14 @@ export default function Reports() {
               <option value="30d">Last 30 Days</option>
             </select>
           </div>
-          {reportType === 'software' && (
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button 
-                className="btn-secondary" 
-                onClick={() => handleExport(exportTopAppsByLaunches)}
-                disabled={exporting}
-                title="Export Top 10 by Launch Count"
-              >
-                CSV: Top 10 Launches
-              </button>
-              <button 
-                className="btn-secondary" 
-                onClick={() => handleExport(exportTopAppsByForeground)}
-                disabled={exporting}
-                title="Export Top 10 by Active Time"
-              >
-                CSV: Top 10 Active Time
-              </button>
-              <button 
-                className="btn-secondary" 
-                onClick={() => handleExport(exportBottomAppsByLaunches)}
-                disabled={exporting}
-                title="Export Bottom 10 by Launch Count"
-              >
-                CSV: Bottom 10 Launches
-              </button>
-              <button 
-                className="btn-secondary" 
-                onClick={() => handleExport(exportBottomAppsByForeground)}
-                disabled={exporting}
-                title="Export Bottom 10 by Active Time"
-              >
-                CSV: Bottom 10 Active Time
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
-      <div style={{ 
-        background: 'var(--card-bg)', 
-        borderRadius: '8px', 
-        border: '1px solid var(--border)',
-        overflow: 'hidden',
-        height: 'calc(100vh - 220px)',
-        minHeight: '500px',
-        marginTop: '1rem'
-      }}>
-        <iframe 
-          src={grafanaSrc} 
-          width="100%" 
-          height="100%" 
-          frameBorder="0" 
-          title="Grafana Dashboard"
-          style={{ display: 'block' }}
-        />
-      </div>
+      {reportType === 'user' && <UserBehaviorReport range={range} />}
+      {reportType === 'hardware' && <LabUsageReport range={range} />}
+      {reportType === 'software' && (
+        <SoftwareMeteringReport range={range} exporting={exporting} handleExport={handleExport} />
+      )}
     </div>
   );
 }
