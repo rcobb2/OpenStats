@@ -95,6 +95,14 @@ button { background: var(--accent); color: white; border: none; padding: 0.5rem 
 button:hover { background: var(--accent-hover); }
 .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 0.3rem 0.6rem; font-size: 0.8rem; }
 .btn-danger:hover { background: rgba(229,83,83,0.15); }
+.btn-primary { background: var(--accent); color: white; border: none; padding: 0.5rem 1.25rem; border-radius: 4px; cursor: pointer; font-size: 0.88rem; text-decoration: none; }
+.btn-primary:hover { background: var(--accent-hover); }
+
+/* Tab bar */
+.tab-bar { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
+.tab { background: transparent; color: var(--text-dim); border: none; border-bottom: 2px solid transparent; padding: 0.5rem 1rem; cursor: pointer; font-size: 0.88rem; border-radius: 0; margin-bottom: -1px; }
+.tab:hover { color: var(--text); background: transparent; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
 /* Result box */
 .result-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-top: 1rem; }
