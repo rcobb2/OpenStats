@@ -67,7 +67,7 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 	if parentPID != 0 {
 		if rootPID, ok := t.pidToGroup[parentPID]; ok {
 			group := t.groups[rootPID]
-			if group.FamilyKey != "" {
+			if group != nil && group.FamilyKey != "" {
 				group.MemberPIDs[pid] = true
 				t.pidToGroup[pid] = rootPID
 				t.logger.Debug("process joined group via parent",

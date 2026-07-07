@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -141,15 +144,20 @@ func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
 		var labID string
 		err := s.pool.QueryRow(ctx, `SELECT id FROM labs WHERE building = $1 AND room = $2`, a.Building, a.Room).Scan(&labID)
 		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Warn("lab lookup failed during agent upsert", "building", a.Building, "room", a.Room, "error", err)
+			}
 			// Create new lab if not found.
 			labID = fmt.Sprintf("%s-%s", a.Building, a.Room)
 			labName := fmt.Sprintf("%s %s", a.Building, a.Room)
-			_ = s.CreateLab(ctx, &Lab{
+			if err := s.CreateLab(ctx, &Lab{
 				ID:       labID,
 				Name:     labName,
 				Building: a.Building,
 				Room:     a.Room,
-			})
+			}); err != nil {
+				slog.Warn("failed to auto-create lab during agent upsert", "labID", labID, "error", err)
+			}
 		}
 		a.LabID = &labID
 	}

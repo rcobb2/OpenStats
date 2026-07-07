@@ -153,7 +153,9 @@ func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		s.logger.Warn("failed to stream prometheus response to client", "error", err)
+	}
 }
 
 // ReportTopAppsByLaunches godoc

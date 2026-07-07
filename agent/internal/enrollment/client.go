@@ -147,7 +147,7 @@ func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error
 
 	var res RegisterAgentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, "", nil
+		return nil, "", fmt.Errorf("decode registration response: %w", err)
 	}
 
 	return res.Settings, res.UpdateURL, nil
