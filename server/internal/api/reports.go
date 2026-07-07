@@ -10,15 +10,6 @@ import (
 	"strconv"
 )
 
-// promQueryResult represents the structure of a Prometheus query_range response.
-type promQueryResult struct {
-	Status string `json:"status"`
-	Data   struct {
-		ResultType string            `json:"resultType"`
-		Result     []json.RawMessage `json:"result"`
-	} `json:"data"`
-}
-
 // promQueryInstantResult represents an instant query response.
 type promQueryInstantResult struct {
 	Status string `json:"status"`
@@ -31,49 +22,24 @@ type promQueryInstantResult struct {
 	} `json:"data"`
 }
 
-// ReportTopApps godoc
-// @Summary      Top applications by usage
-// @Description  Returns the top applications by total usage hours over the given time range. Defaults to last 24 hours.
-// @Tags         reports
-// @Produce      json
-// @Param        range  query  string  false  "Time range for the query (e.g. 24h, 7d, 30d)"  default(24h)
-// @Param        limit  query  int     false  "Max number of results"  default(20)
-// @Success      200  {object}  map[string]interface{}
-// @Failure      502  {object}  map[string]string
-// @Router       /api/v1/reports/top-apps [get]
-func (s *Server) ReportTopApps(w http.ResponseWriter, r *http.Request) {
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "24h"
-	}
-
-	query := fmt.Sprintf(
-		`topk(20, sum by (app, category) (increase(openlabstats_app_usage_seconds_total[%s])))`,
-		timeRange,
-	)
-	s.proxyPromQuery(w, query)
-}
-
 // ReportUsageByLab godoc
 // @Summary      Usage breakdown by lab
 // @Description  Returns total app usage hours grouped by lab over the given time range.
 // @Tags         reports
 // @Produce      json
 // @Param        range  query  string  false  "Time range"  default(24h)
+// @Param        format query  string  false  "Output format: json or csv"  default(json)
 // @Success      200  {object}  map[string]interface{}
 // @Failure      502  {object}  map[string]string
 // @Router       /api/v1/reports/usage-by-lab [get]
 func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "24h"
-	}
+	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
 
 	query := fmt.Sprintf(
-		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total[%s]))`,
+		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total{user!=""}[%s]))`,
 		timeRange,
 	)
-	s.proxyPromQuery(w, query)
+	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
 }
 
 // ReportActiveUsers godoc
@@ -84,7 +50,7 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 // @Success      200  {object}  map[string]interface{}
 // @Router       /api/v1/reports/active-users [get]
 func (s *Server) ReportActiveUsers(w http.ResponseWriter, r *http.Request) {
-	query := `openlabstats_user_session_active == 1`
+	query := `openlabstats_user_session_active{user!=""} == 1`
 	s.proxyPromQuery(w, query)
 }
 
@@ -139,6 +105,31 @@ func (s *Server) ReportSummary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// validTimeRange returns true if s is a valid Prometheus duration string
+// (one or more digits followed by s/m/h/d/w/y). Used to prevent PromQL injection.
+func validTimeRange(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	for i, c := range s {
+		if i == len(s)-1 {
+			return c == 's' || c == 'm' || c == 'h' || c == 'd' || c == 'w' || c == 'y'
+		}
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return false
+}
+
+// safeTimeRange returns the given range if valid, otherwise the default.
+func safeTimeRange(s, defaultRange string) string {
+	if validTimeRange(s) {
+		return s
+	}
+	return defaultRange
+}
+
 // proxyPromQuery executes an instant query against Prometheus and returns the result.
 func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
@@ -169,10 +160,7 @@ func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 // @Success      200
 // @Router       /api/v1/reports/top-apps-by-launches [get]
 func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request) {
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "24h"
-	}
+	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -182,7 +170,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 	}
 
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_launches_total[%s])))`,
+		`topk(%d, sum by (app, category) (increase(openlabstats_app_launches_total{user!=""}[%s])))`,
 		limit, timeRange,
 	)
 	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
@@ -199,10 +187,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 // @Success      200
 // @Router       /api/v1/reports/top-apps-by-foreground [get]
 func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Request) {
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "24h"
-	}
+	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -212,7 +197,7 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 	}
 
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total[%s])) / 3600)`,
+		`topk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total{user!=""}[%s])) / 3600)`,
 		limit, timeRange,
 	)
 	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
@@ -229,10 +214,7 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 // @Success      200
 // @Router       /api/v1/reports/bottom-apps-by-launches [get]
 func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Request) {
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "24h"
-	}
+	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -242,7 +224,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 	}
 
 	query := fmt.Sprintf(
-		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_launches_total[%s])))`,
+		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_launches_total{user!=""}[%s])) > 0)`,
 		limit, timeRange,
 	)
 	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
@@ -259,10 +241,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 // @Success      200
 // @Router       /api/v1/reports/bottom-apps-by-foreground [get]
 func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http.Request) {
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "24h"
-	}
+	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -272,7 +251,7 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 	}
 
 	query := fmt.Sprintf(
-		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total[%s])) / 3600)`,
+		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total{user!=""}[%s])) / 3600 > 0)`,
 		limit, timeRange,
 	)
 	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
@@ -336,19 +315,17 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 }
 
 // ReportTopAppsUsage godoc
-// @Summary      Top applications by usage time (legacy)
-// @Description  Returns the top applications by total usage hours. Use top-apps-by-launches or top-apps-by-foreground instead.
+// @Summary      Top applications by usage time
+// @Description  Returns the top applications by total usage seconds over the given time range.
 // @Tags         reports
 // @Produce      json
 // @Param        range  query  string  false  "Time range"  default(24h)
 // @Param        limit  query  int     false  "Max results"  default(20)
+// @Param        format query  string  false  "Output format: json or csv"  default(json)
 // @Success      200
 // @Router       /api/v1/reports/top-apps [get]
 func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "24h"
-	}
+	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
 
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -358,8 +335,8 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total[%s])))`,
+		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total{user!=""}[%s])))`,
 		limit, timeRange,
 	)
-	s.proxyPromQuery(w, query)
+	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
 }

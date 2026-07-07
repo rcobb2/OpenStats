@@ -49,11 +49,79 @@ func (p *PlistReader) Extract(exePath string) *AppInfo {
 		return nil
 	}
 
+	category, publisher := inferFromBundleID(info["CFBundleIdentifier"])
+
 	return &AppInfo{
 		DisplayName: name,
-		Category:    "Unknown",
-		Publisher:   "",
+		Category:    category,
+		Publisher:   publisher,
 	}
+}
+
+// inferFromBundleID maps a CFBundleIdentifier to a category and publisher.
+// Returns ("Unknown", "") when no pattern matches.
+func inferFromBundleID(id string) (category, publisher string) {
+	switch {
+	case strings.HasPrefix(id, "com.adobe."):
+		return "Creative", "Adobe Inc."
+	case id == "com.microsoft.Word", id == "com.microsoft.Excel",
+		id == "com.microsoft.Powerpoint", id == "com.microsoft.onenote",
+		id == "com.microsoft.OneDrive":
+		return "Productivity", "Microsoft Corporation"
+	case id == "com.microsoft.teams", id == "com.microsoft.teams2",
+		id == "com.microsoft.Outlook":
+		return "Communication", "Microsoft Corporation"
+	case id == "com.microsoft.edgemac":
+		return "Web Browser", "Microsoft Corporation"
+	case id == "com.microsoft.VSCode":
+		return "Development", "Microsoft Corporation"
+	case strings.HasPrefix(id, "com.microsoft."):
+		return "Productivity", "Microsoft Corporation"
+	case id == "com.apple.Safari":
+		return "Web Browser", "Apple Inc."
+	case id == "com.apple.dt.Xcode", id == "com.apple.Xcode":
+		return "Development", "Apple Inc."
+	case id == "com.apple.FinalCut", id == "com.apple.logic10",
+		id == "com.apple.garageband10", id == "com.apple.motionapp5",
+		id == "com.apple.Compressor":
+		return "Creative", "Apple Inc."
+	case id == "com.apple.iWork.Pages", id == "com.apple.iWork.Numbers",
+		id == "com.apple.iWork.Keynote":
+		return "Productivity", "Apple Inc."
+	case strings.HasPrefix(id, "com.apple.dt."):
+		return "Development", "Apple Inc."
+	case strings.HasPrefix(id, "com.apple."):
+		return "System", "Apple Inc."
+	case id == "com.google.Chrome":
+		return "Web Browser", "Google LLC"
+	case id == "com.google.GoogleDrive":
+		return "Productivity", "Google LLC"
+	case strings.HasPrefix(id, "com.google."):
+		return "Utility", "Google LLC"
+	case id == "org.mozilla.firefox":
+		return "Web Browser", "Mozilla Foundation"
+	case id == "com.zoom.xos", id == "us.zoom.xos":
+		return "Communication", "Zoom Video Communications"
+	case strings.HasPrefix(id, "com.slack-technologies."), strings.HasPrefix(id, "com.tinyspeck.slackmacgap"):
+		return "Communication", "Slack Technologies"
+	case id == "com.github.GitHub":
+		return "Development", "GitHub Inc."
+	case strings.HasPrefix(id, "com.autodesk."):
+		return "CAD/Engineering", "Autodesk Inc."
+	case strings.HasPrefix(id, "com.mathworks."):
+		return "Scientific Computing", "MathWorks Inc."
+	case strings.HasPrefix(id, "com.ibm.spss."), strings.HasPrefix(id, "com.spss."):
+		return "Statistical Analysis", "IBM Corp."
+	case id == "org.rstudio.RStudio":
+		return "Statistical Analysis", "Posit PBC"
+	case strings.HasPrefix(id, "com.wolfram."):
+		return "Scientific Computing", "Wolfram Research"
+	case id == "com.spotify.client":
+		return "Entertainment", "Spotify AB"
+	case id == "com.jamfsoftware.jamfpro", id == "com.jamfsoftware.remotemgmt":
+		return "System", "Jamf"
+	}
+	return "Unknown", ""
 }
 
 // findAppBundle walks up from path until it finds a *.app directory.
