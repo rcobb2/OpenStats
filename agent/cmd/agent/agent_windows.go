@@ -28,7 +28,7 @@ import (
 // runAgent returns a function that runs the full agent lifecycle on Windows.
 func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 	return func(ctx context.Context) error {
-		logger.Info("starting OpenLabStats agent", "version", "0.1.5")
+		logger.Info("starting OpenLabStats agent", "version", "0.1.6")
 
 		// Initialize metrics.
 		m := metrics.New()
