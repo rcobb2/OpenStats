@@ -135,11 +135,12 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 			go runMappingRefreshLoop(ctx, mapping, norm, cfg.Normalizer.MappingRefreshInterval, logger)
 		}
 
-		// Start enrollment heartbeat if a central server is configured.
+		// Start enrollment heartbeat and metrics push if a central server is configured.
 		if cfg.Server.ReportURL != "" {
 			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
 				WithOSVersion("macOS " + getOSVersionDarwin())
 			go enrollClient.RunHeartbeat(ctx, 2*time.Minute)
+			go enrollClient.RunMetricsPush(ctx, 30*time.Second)
 		}
 
 		// Set device info metric (macOS).

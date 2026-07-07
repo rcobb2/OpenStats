@@ -12,21 +12,14 @@ scrape_configs:
       - targets: ['localhost:9090']
 
   # ---------------------------------------------------------------
-  # OpenLabStats Agents (auto-discovered via server)
+  # OpenLabStats Agents (push model via server aggregator)
   # ---------------------------------------------------------------
-  # Agents register with the management server, which writes
-  # file_sd_configs JSON. Prometheus watches this file automatically.
+  # Agents push their /metrics output to POST /api/v1/agents/metrics
+  # on the server every 30s. Prometheus scrapes the aggregated endpoint
+  # at GET /metrics/agents instead of reaching agents directly on port 9183.
   - job_name: 'openlabstats'
     scrape_interval: 30s
     scrape_timeout: 10s
-
-    file_sd_configs:
-      - files:
-          - /etc/prometheus/file_sd/openlabstats.json
-        refresh_interval: 30s
-
-    # Relabel: keep the agent-reported hostname as a label.
-    metric_relabel_configs:
-      - source_labels: [hostname]
-        target_label: agent_hostname
-        action: replace
+    metrics_path: /metrics/agents
+    static_configs:
+      - targets: ['openstats-server:8080']

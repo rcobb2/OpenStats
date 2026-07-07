@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -261,6 +262,42 @@ func (s *Server) ForceAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		"message":   "Agent will receive update URL on next heartbeat.",
 		"updateUrl": url,
 	})
+}
+
+// PushAgentMetrics receives a Prometheus text-format snapshot from an agent
+// and stores it in the in-memory metrics store so that GET /metrics/agents
+// can serve aggregated metrics to Prometheus without requiring inbound access
+// to each agent's port 9183.
+func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
+	agentID := r.Header.Get("X-Agent-ID")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "X-Agent-ID header required")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read body")
+		return
+	}
+	defer r.Body.Close()
+
+	s.metricsStore.Set(agentID, body)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ServeAgentMetrics returns all non-stale agent metric snapshots concatenated
+// in Prometheus text format. Prometheus scrapes this endpoint instead of each
+// agent directly, eliminating the need for inbound access to port 9183.
+func (s *Server) ServeAgentMetrics(w http.ResponseWriter, r *http.Request) {
+	snapshots := s.metricsStore.GetAll()
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	for _, body := range snapshots {
+		w.Write(body)
+		if len(body) > 0 && body[len(body)-1] != '\n' {
+			w.Write([]byte("\n"))
+		}
+	}
 }
 
 func isVersionBelow(current, target string) bool {

@@ -20,19 +20,21 @@ import (
 
 // Server holds shared dependencies for all API handlers.
 type Server struct {
-	store     *store.Store
-	cfg       *config.Config
-	discovery *discovery.FileSD
-	logger    *slog.Logger
+	store        *store.Store
+	cfg          *config.Config
+	discovery    *discovery.FileSD
+	logger       *slog.Logger
+	metricsStore *MetricsStore
 }
 
 // NewRouter creates the chi router with all API routes.
 func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logger *slog.Logger) http.Handler {
 	s := &Server{
-		store:     st,
-		cfg:       cfg,
-		discovery: disc,
-		logger:    logger,
+		store:        st,
+		cfg:          cfg,
+		discovery:    disc,
+		logger:       logger,
+		metricsStore: newMetricsStore(),
 	}
 
 	r := chi.NewRouter()
@@ -64,6 +66,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		// Agents
 		r.Route("/agents", func(r chi.Router) {
 			r.Post("/register", s.RegisterAgent)
+			r.Post("/metrics", s.PushAgentMetrics)
 			r.Get("/", s.ListAgents)
 			r.Get("/{agentID}", s.GetAgent)
 			r.Put("/{agentID}/lab", s.AssignAgentToLab)
@@ -113,6 +116,10 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Put("/", s.UpdateSettings)
 		})
 	})
+
+	// Aggregated agent metrics endpoint for Prometheus scraping.
+	// Agents push snapshots via POST /api/v1/agents/metrics; Prometheus pulls here.
+	r.Get("/metrics/agents", s.ServeAgentMetrics)
 
 	// Serve installer MSI files directly (used by agents for self-update).
 	installersDir := filepath.Join(s.cfg.Server.PublicDir, "installers")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -232,6 +233,64 @@ func IsInMaintenanceWindow(startStr, endStr string) bool {
 	}
 	// Wraps midnight: e.g. 23:00–05:00
 	return currentMinutes >= startMinutes || currentMinutes <= endMinutes
+}
+
+// PushMetrics fetches the agent's local /metrics endpoint and pushes the body
+// to the server. This lets the server aggregate metrics from all agents and
+// expose them to Prometheus, bypassing any network firewall blocking port 9183.
+func (c *Client) PushMetrics(ctx context.Context) error {
+	localURL := fmt.Sprintf("http://localhost:%d/metrics", c.port)
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, localURL, nil)
+	if err != nil {
+		return err
+	}
+	getResp, err := c.client.Do(getReq)
+	if err != nil {
+		return fmt.Errorf("fetch local metrics: %w", err)
+	}
+	defer getResp.Body.Close()
+	body, err := io.ReadAll(getResp.Body)
+	if err != nil {
+		return fmt.Errorf("read local metrics: %w", err)
+	}
+
+	hostname, _ := os.Hostname()
+	pushURL := c.serverURL + "/api/v1/agents/metrics"
+	pushReq, err := http.NewRequestWithContext(ctx, http.MethodPost, pushURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	pushReq.Header.Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	pushReq.Header.Set("X-Agent-ID", hostname)
+
+	pushResp, err := c.client.Do(pushReq)
+	if err != nil {
+		return fmt.Errorf("push metrics: %w", err)
+	}
+	defer pushResp.Body.Close()
+	if pushResp.StatusCode != http.StatusNoContent && pushResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned %d", pushResp.StatusCode)
+	}
+	return nil
+}
+
+// RunMetricsPush pushes the agent's metrics snapshot to the server at the
+// given interval. Runs until ctx is cancelled.
+func (c *Client) RunMetricsPush(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := c.PushMetrics(ctx); err != nil {
+				c.logger.Warn("metrics push failed", "error", err)
+			} else {
+				c.logger.Debug("metrics pushed to server")
+			}
+		}
+	}
 }
 
 // getOutboundIP returns the best IP address for Prometheus to scrape this agent.
