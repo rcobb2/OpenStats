@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -239,6 +241,19 @@ func IsInMaintenanceWindow(startStr, endStr string) bool {
 	}
 	// Wraps midnight: e.g. 23:00–05:00
 	return currentMinutes >= startMinutes || currentMinutes <= endMinutes
+}
+
+// isTrustedUpdateHost returns true when host matches the host portion of
+// c.serverURL. This prevents a server from redirecting self-updates to an
+// arbitrary third-party host.
+func (c *Client) isTrustedUpdateHost(host string) bool {
+	parsed, err := neturl.Parse(c.serverURL)
+	if err != nil {
+		return false
+	}
+	// Strip port for comparison if both sides include or omit it consistently.
+	serverHost := parsed.Host
+	return strings.EqualFold(host, serverHost)
 }
 
 // PushMetrics fetches the agent's local /metrics endpoint and pushes the body

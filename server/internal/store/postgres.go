@@ -221,8 +221,14 @@ func (s *Store) AssignAgentToLab(ctx context.Context, agentID, labID string) err
 	if labID != "" {
 		labIDVal = labID
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE agents SET lab_id = $1, updated_at = NOW() WHERE id = $2`, labIDVal, agentID)
-	return err
+	tag, err := s.pool.Exec(ctx, `UPDATE agents SET lab_id = $1, updated_at = NOW() WHERE id = $2`, labIDVal, agentID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // DeleteAgent removes an agent.
@@ -318,12 +324,18 @@ func (s *Store) GetLab(ctx context.Context, id string) (*Lab, error) {
 }
 
 func (s *Store) UpdateLab(ctx context.Context, l *Lab) error {
-	_, err := s.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		UPDATE labs SET name = $1, building = $2, room = $3, description = $4, updated_at = NOW()
 		WHERE id = $5`,
 		l.Name, l.Building, l.Room, l.Description, l.ID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) DeleteLab(ctx context.Context, id string) error {

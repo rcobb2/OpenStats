@@ -4,6 +4,7 @@ package enrollment
 
 import (
 	"io"
+	neturl "net/url"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +15,14 @@ import (
 func (c *Client) executeSelfUpdate(url string) {
 	if !strings.HasPrefix(url, "http") {
 		url = c.serverURL + url
+	}
+
+	// Reject URLs that point to a different host than the configured server.
+	// This prevents a misconfigured or compromised server from redirecting the
+	// agent to download an arbitrary executable.
+	if parsed, err := neturl.Parse(url); err != nil || !c.isTrustedUpdateHost(parsed.Host) {
+		c.logger.Error("untrusted update URL rejected", "url", url)
+		return
 	}
 
 	c.logger.Info("downloading macOS update", "url", url)

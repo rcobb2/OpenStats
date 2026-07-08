@@ -24,13 +24,21 @@ export default function AgentsList() {
 
   const handleDelete = async (id) => {
     if (!confirm(`Remove agent ${id}?`)) return;
-    await deleteAgent(id);
-    load();
+    try {
+      await deleteAgent(id);
+      load();
+    } catch (err) {
+      showToast(`✗ Failed to remove agent: ${err.message}`, 'error');
+    }
   };
 
   const handleAssignLab = async (agentId, labId) => {
-    await assignAgentToLab(agentId, labId);
-    load();
+    try {
+      await assignAgentToLab(agentId, labId);
+      load();
+    } catch (err) {
+      showToast(`✗ Failed to assign lab: ${err.message}`, 'error');
+    }
   };
 
   const handleForceUpdate = async (id) => {

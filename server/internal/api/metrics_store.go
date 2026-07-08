@@ -33,6 +33,13 @@ func (ms *MetricsStore) Set(agentID string, body []byte) {
 	ms.snapshots[agentID] = agentSnapshot{body: body, updatedAt: time.Now()}
 }
 
+// Delete removes a single agent's snapshot. Called when an agent is deleted.
+func (ms *MetricsStore) Delete(agentID string) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	delete(ms.snapshots, agentID)
+}
+
 // GetAll returns the bodies of all non-stale snapshots.
 func (ms *MetricsStore) GetAll() [][]byte {
 	ms.mu.RLock()

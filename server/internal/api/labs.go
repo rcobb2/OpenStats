@@ -3,10 +3,12 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rcobb/openlabstats-server/internal/store"
 )
@@ -94,7 +96,12 @@ func (s *Server) GetLab(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "labID")
 	lab, err := s.store.GetLab(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "lab not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "lab not found")
+		} else {
+			s.logger.Error("failed to get lab", "id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to get lab")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, lab)
@@ -125,7 +132,12 @@ func (s *Server) UpdateLab(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 	}
 	if err := s.store.UpdateLab(r.Context(), lab); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update lab")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "lab not found")
+		} else {
+			s.logger.Error("failed to update lab", "id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update lab")
+		}
 		return
 	}
 

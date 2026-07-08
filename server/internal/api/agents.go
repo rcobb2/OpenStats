@@ -204,8 +204,12 @@ func (s *Server) AssignAgentToLab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.AssignAgentToLab(r.Context(), agentID, req.LabID); err != nil {
-		s.logger.Error("failed to assign agent to lab", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to assign agent")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "agent not found")
+		} else {
+			s.logger.Error("failed to assign agent to lab", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to assign agent")
+		}
 		return
 	}
 
@@ -232,6 +236,8 @@ func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent")
 		return
 	}
+
+	s.metricsStore.Delete(id)
 
 	if err := s.discovery.Refresh(r.Context(), s.store); err != nil {
 		s.logger.Error("failed to refresh prometheus targets", "error", err)
@@ -292,6 +298,18 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		writeError(w, http.StatusBadRequest, "X-Agent-ID header required")
+		return
+	}
+
+	// Reject pushes from unregistered agents so arbitrary callers cannot inject
+	// data into the aggregated metrics endpoint.
+	if _, err := s.store.GetAgent(r.Context(), agentID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusForbidden, "agent not registered")
+		} else {
+			s.logger.Error("failed to verify agent for metrics push", "id", agentID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to verify agent")
+		}
 		return
 	}
 

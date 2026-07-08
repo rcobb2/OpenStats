@@ -71,9 +71,12 @@ async function downloadCSV(path, filename) {
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.URL.revokeObjectURL(url);
+  try {
+    a.click();
+  } finally {
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }
 }
 
 export const exportTopAppsByLaunches = (range = '24h') => 

@@ -108,7 +108,8 @@ func (w *WMIWatcher) Run(ctx context.Context) error {
 	w.logger.Info("WMI event subscriptions active")
 
 	// Process events in separate goroutines.
-	go w.processStartEvents(ctx, startSink)
+	// Pass the shared service connection so per-event helpers don't open new connections.
+	go w.processStartEvents(ctx, startSink, service)
 	go w.processStopEvents(ctx, stopSink)
 
 	<-ctx.Done()
@@ -116,7 +117,7 @@ func (w *WMIWatcher) Run(ctx context.Context) error {
 	return nil
 }
 
-func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch) {
+func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch, svc *ole.IDispatch) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -127,10 +128,13 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 		// NextEvent with 1 second timeout so we can check ctx cancellation.
 		eventRaw, err := oleutil.CallMethod(sink, "NextEvent", 1000)
 		if err != nil {
-			// Timeout is expected, just retry.
+			// Timeout (no event in window) is expected, just retry.
 			continue
 		}
 		event := eventRaw.ToIDispatch()
+		if event == nil {
+			continue
+		}
 
 		processName := getStringProp(event, "ProcessName")
 		processID := getUint32Prop(event, "ProcessID")
@@ -142,17 +146,16 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 			continue
 		}
 
-		// Look up the executable path from the running process.
-		exePath := getProcessExePath(processID)
+		// Reuse the shared WMI service connection to avoid opening a new COM
+		// connection per event, which is the dominant cost under load.
+		exePath := getProcessExePath(svc, processID)
 
-		// Resolve family key for normalizer-based grouping.
 		var familyKey string
 		if w.familyResolver != nil {
 			familyKey = w.familyResolver(processName, exePath)
 		}
 
-		// Resolve the user for this process.
-		user := getProcessUser(processID)
+		user := getProcessUser(svc, processID)
 
 		isNewGroup := w.tracker.OnProcessStart(processID, parentProcessID, processName, exePath, user, familyKey)
 
@@ -172,9 +175,13 @@ func (w *WMIWatcher) processStopEvents(ctx context.Context, sink *ole.IDispatch)
 
 		eventRaw, err := oleutil.CallMethod(sink, "NextEvent", 1000)
 		if err != nil {
+			w.logger.Debug("WMI stop event wait returned error (likely timeout)", "error", err)
 			continue
 		}
 		event := eventRaw.ToIDispatch()
+		if event == nil {
+			continue
+		}
 
 		processID := getUint32Prop(event, "ProcessID")
 
@@ -215,34 +222,18 @@ func getUint32Prop(dispatch *ole.IDispatch, name string) uint32 {
 }
 
 // getProcessExePath looks up the executable path for a running process via WMI.
-func getProcessExePath(pid uint32) string {
-	// Use a quick WMI query to get the ExecutablePath.
-	// This is best-effort; if the process exits before we query, we get empty.
-	locator, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
-	if err != nil {
-		return ""
-	}
-	defer locator.Release()
-
-	wmi, err := locator.QueryInterface(ole.IID_IDispatch)
-	if err != nil {
-		return ""
-	}
-	defer wmi.Release()
-
-	serviceRaw, err := oleutil.CallMethod(wmi, "ConnectServer")
-	if err != nil {
-		return ""
-	}
-	svc := serviceRaw.ToIDispatch()
-	defer svc.Release()
-
+// svc must be an already-connected SWbemServices dispatch pointer; it is reused
+// to avoid opening a new COM connection per call.
+func getProcessExePath(svc *ole.IDispatch, pid uint32) string {
 	query := fmt.Sprintf("SELECT ExecutablePath FROM Win32_Process WHERE ProcessId = %d", pid)
 	resultRaw, err := oleutil.CallMethod(svc, "ExecQuery", query)
 	if err != nil {
 		return ""
 	}
 	result := resultRaw.ToIDispatch()
+	if result == nil {
+		return ""
+	}
 	defer result.Release()
 
 	countVar, err := oleutil.GetProperty(result, "Count")
@@ -255,6 +246,9 @@ func getProcessExePath(pid uint32) string {
 		return ""
 	}
 	item := itemRaw.ToIDispatch()
+	if item == nil {
+		return ""
+	}
 	defer item.Release()
 
 	return getStringProp(item, "ExecutablePath")
@@ -328,7 +322,7 @@ func ScanExistingProcesses(logger *slog.Logger, familyResolver func(string, stri
 			continue
 		}
 
-		user := getProcessUser(pid)
+		user := getProcessUser(service, pid)
 
 		var familyKey string
 		if familyResolver != nil {
@@ -350,28 +344,9 @@ func ScanExistingProcesses(logger *slog.Logger, familyResolver func(string, stri
 }
 
 // getProcessUser looks up the user who owns a process via WMI GetOwner.
-func getProcessUser(pid uint32) string {
-	// Best-effort: call GetOwner on the Win32_Process object.
-	// If the process exits before we can query it, we return empty.
-	locator, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
-	if err != nil {
-		return ""
-	}
-	defer locator.Release()
-
-	wmi, err := locator.QueryInterface(ole.IID_IDispatch)
-	if err != nil {
-		return ""
-	}
-	defer wmi.Release()
-
-	serviceRaw, err := oleutil.CallMethod(wmi, "ConnectServer")
-	if err != nil {
-		return ""
-	}
-	svc := serviceRaw.ToIDispatch()
-	defer svc.Release()
-
+// svc must be an already-connected SWbemServices dispatch pointer; it is reused
+// to avoid opening a new COM connection per call.
+func getProcessUser(svc *ole.IDispatch, pid uint32) string {
 	// ExecMethod calls GetOwner on the process object path.
 	// GetOwner has no in-parameters; it returns User and Domain as out-params.
 	objPath := fmt.Sprintf("Win32_Process.Handle='%d'", pid)
@@ -380,6 +355,9 @@ func getProcessUser(pid uint32) string {
 		return ""
 	}
 	outParams := outRaw.ToIDispatch()
+	if outParams == nil {
+		return ""
+	}
 	defer outParams.Release()
 
 	user := getStringProp(outParams, "User")
