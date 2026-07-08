@@ -1,10 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rcobb/openlabstats-server/internal/store"
 )
@@ -16,6 +18,7 @@ type MappingRequest struct {
 	Category    string `json:"category"`
 	Publisher   string `json:"publisher"`
 	Family      string `json:"family"`
+	Ignored     bool   `json:"ignored"`
 }
 
 // GetAgentMappings godoc
@@ -82,6 +85,7 @@ func (s *Server) CreateMapping(w http.ResponseWriter, r *http.Request) {
 		Publisher:   req.Publisher,
 		Family:      req.Family,
 		Source:      "manual",
+		Ignored:     req.Ignored,
 	}
 	if err := s.store.UpsertMapping(r.Context(), m); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create mapping")
@@ -113,9 +117,49 @@ func (s *Server) UpdateMapping(w http.ResponseWriter, r *http.Request) {
 		Publisher:   req.Publisher,
 		Family:      req.Family,
 		Source:      "manual",
+		Ignored:     req.Ignored,
 	}
 	if err := s.store.UpsertMapping(r.Context(), m); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update mapping")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// ToggleMappingIgnored godoc
+// @Summary      Toggle mapping ignored state
+// @Description  Sets or clears the ignored flag for a mapping without changing other fields.
+// @Tags         mappings
+// @Accept       json
+// @Produce      json
+// @Param        mappingID  path  int     true  "Mapping ID"
+// @Param        body       body  object  true  "Ignored state {ignored: bool}"
+// @Success      200  {object}  map[string]string
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/mappings/{mappingID}/ignore [patch]
+func (s *Server) ToggleMappingIgnored(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "mappingID")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid mapping ID")
+		return
+	}
+
+	var req struct {
+		Ignored bool `json:"ignored"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.store.SetMappingIgnored(r.Context(), id, req.Ignored); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "mapping not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to update mapping")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})

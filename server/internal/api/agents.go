@@ -27,9 +27,10 @@ type RegisterAgentRequest struct {
 }
 
 type RegisterAgentResponse struct {
-	Agent     *store.Agent          `json:"agent"`
-	Settings  *store.SystemSettings `json:"settings"`
-	UpdateURL string                `json:"updateUrl,omitempty"`
+	Agent           *store.Agent          `json:"agent"`
+	Settings        *store.SystemSettings `json:"settings"`
+	UpdateURL       string                `json:"updateUrl,omitempty"`
+	IgnoredExeNames []string              `json:"ignoredExeNames,omitempty"`
 }
 
 // RegisterAgent godoc
@@ -126,10 +127,18 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		updateURL = s.GetLatestInstallerURL(req.OSVersion)
 	}
 
+	var ignoredExeNames []string
+	if names, err := s.store.GetIgnoredExeNames(r.Context()); err == nil {
+		ignoredExeNames = names
+	} else {
+		s.logger.Warn("failed to get ignored exe names for heartbeat", "error", err)
+	}
+
 	writeJSON(w, http.StatusOK, RegisterAgentResponse{
-		Agent:     agent,
-		Settings:  settings,
-		UpdateURL: updateURL,
+		Agent:           agent,
+		Settings:        settings,
+		UpdateURL:       updateURL,
+		IgnoredExeNames: ignoredExeNames,
 	})
 }
 
@@ -320,6 +329,20 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Apply server-side mapping rewrite: rename app/category labels for manually-reviewed
+	// entries, drop ignored exe lines, and auto-insert unknown exe names for admin review.
+	if mappings, err := s.store.GetMappingsMap(r.Context()); err == nil {
+		var unknown map[string]bool
+		body, unknown = applyServerMappings(body, mappings)
+		for exeName := range unknown {
+			if err := s.store.AutoInsertMapping(r.Context(), exeName); err != nil {
+				s.logger.Warn("failed to auto-insert mapping", "exe", exeName, "error", err)
+			}
+		}
+	} else {
+		s.logger.Warn("failed to load mappings for label rewrite", "error", err)
+	}
+
 	// Inject lab/building/room labels so ReportUsageByLab works correctly.
 	// In the pull model these came from file_sd target labels; in the push model
 	// we must enrich the metrics server-side since agents don't know their lab.
@@ -409,6 +432,138 @@ func promLabelEscape(s string) string {
 	s = strings.ReplaceAll(s, `"`, `\"`)
 	s = strings.ReplaceAll(s, "\n", `\n`)
 	return s
+}
+
+// applyServerMappings rewrites app/category labels using DB mappings, drops
+// ignored exe lines, and returns exe names not yet in the DB.
+// Only source="manual" mappings trigger rewrites; source="auto" entries are
+// tracked for admin review without altering metric values.
+func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping) ([]byte, map[string]bool) {
+	if len(mappings) == 0 {
+		return body, nil
+	}
+	unknown := make(map[string]bool)
+	var out bytes.Buffer
+	out.Grow(len(body))
+
+	lines := bytes.Split(body, []byte("\n"))
+	for _, line := range lines {
+		if len(line) == 0 || line[0] == '#' {
+			out.Write(line)
+			out.WriteByte('\n')
+			continue
+		}
+
+		openIdx := bytes.IndexByte(line, '{')
+		closeIdx := bytes.LastIndexByte(line, '}')
+		if openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx {
+			out.Write(line)
+			out.WriteByte('\n')
+			continue
+		}
+
+		labelSet := line[openIdx+1 : closeIdx]
+		exeName := extractPromLabelValue(labelSet, "exe")
+		if exeName == "" {
+			out.Write(line)
+			out.WriteByte('\n')
+			continue
+		}
+
+		m, found := mappings[strings.ToLower(exeName)]
+		if !found {
+			unknown[exeName] = true
+			out.Write(line)
+			out.WriteByte('\n')
+			continue
+		}
+
+		if m.Ignored {
+			continue // drop line
+		}
+
+		// Only rewrite for manually-reviewed entries; auto-discovered pass through unchanged.
+		if m.Source == "auto" {
+			out.Write(line)
+			out.WriteByte('\n')
+			continue
+		}
+
+		newLabelSet := rewritePromLabelValue(labelSet, "app", m.DisplayName)
+		if m.Category != "" {
+			newLabelSet = rewritePromLabelValue(newLabelSet, "category", m.Category)
+		}
+		out.Write(line[:openIdx+1])
+		out.Write(newLabelSet)
+		out.Write(line[closeIdx:])
+		out.WriteByte('\n')
+	}
+	return out.Bytes(), unknown
+}
+
+// extractPromLabelValue extracts a label value from a Prometheus label set
+// (the bytes between { and }). Returns "" if the label is not present.
+func extractPromLabelValue(labelSet []byte, name string) string {
+	prefix := []byte(name + `="`)
+	idx := 0
+	for {
+		pos := bytes.Index(labelSet[idx:], prefix)
+		if pos < 0 {
+			break
+		}
+		pos += idx
+		// Must be preceded by start-of-set or comma to match whole label name.
+		if pos == 0 || labelSet[pos-1] == ',' {
+			start := pos + len(prefix)
+			for i := start; i < len(labelSet); i++ {
+				if labelSet[i] == '\\' {
+					i++
+					continue
+				}
+				if labelSet[i] == '"' {
+					return string(labelSet[start:i])
+				}
+			}
+		}
+		idx = pos + 1
+	}
+	return ""
+}
+
+// rewritePromLabelValue replaces the value of a named label in a Prometheus
+// label set, returning the modified bytes.
+func rewritePromLabelValue(labelSet []byte, name, newValue string) []byte {
+	prefix := []byte(name + `="`)
+	idx := 0
+	for {
+		pos := bytes.Index(labelSet[idx:], prefix)
+		if pos < 0 {
+			break
+		}
+		pos += idx
+		if pos == 0 || labelSet[pos-1] == ',' {
+			valStart := pos + len(prefix)
+			valEnd := valStart
+			for valEnd < len(labelSet) {
+				if labelSet[valEnd] == '\\' {
+					valEnd += 2
+					continue
+				}
+				if labelSet[valEnd] == '"' {
+					break
+				}
+				valEnd++
+			}
+			escaped := []byte(promLabelEscape(newValue))
+			result := make([]byte, 0, len(labelSet)-(valEnd-valStart)+len(escaped))
+			result = append(result, labelSet[:valStart]...)
+			result = append(result, escaped...)
+			result = append(result, labelSet[valEnd:]...)
+			return result
+		}
+		idx = pos + 1
+	}
+	return labelSet
 }
 
 // ServeAgentMetrics returns all non-stale agent metric snapshots concatenated

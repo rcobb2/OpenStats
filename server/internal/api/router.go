@@ -50,7 +50,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 	r.Use(middleware.Compress(5))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
 		MaxAge:           300,
@@ -94,6 +94,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Post("/", s.CreateMapping)
 			r.Put("/", s.UpdateMapping)
 			r.Delete("/{mappingID}", s.DeleteMapping)
+			r.Patch("/{mappingID}/ignore", s.ToggleMappingIgnored)
 		})
 
 		// Reports

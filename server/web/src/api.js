@@ -34,6 +34,7 @@ export const getMappings = () => request('/mappings');
 export const createMapping = (data) => request('/mappings', { method: 'POST', body: JSON.stringify(data) });
 export const updateMapping = (data) => request('/mappings', { method: 'PUT', body: JSON.stringify(data) });
 export const deleteMapping = (id) => request(`/mappings/${id}`, { method: 'DELETE' });
+export const patchMappingIgnore = (id, ignored) => request(`/mappings/${id}/ignore`, { method: 'PATCH', body: JSON.stringify({ ignored }) });
 
 // Reports
 export const getSummary = () => request('/reports/summary');

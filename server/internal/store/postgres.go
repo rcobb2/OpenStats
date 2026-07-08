@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -72,9 +73,10 @@ func (s *Store) migrate(ctx context.Context) error {
 		exe_name     TEXT NOT NULL UNIQUE,
 		display_name TEXT NOT NULL,
 		category     TEXT NOT NULL DEFAULT 'Unknown',
-		publisher    TEXT NOT NULL DEFAULT 'Unknown',
+		publisher    TEXT NOT NULL DEFAULT '',
 		family       TEXT NOT NULL DEFAULT '',
 		source       TEXT NOT NULL DEFAULT 'manual',
+		ignored      BOOLEAN NOT NULL DEFAULT FALSE,
 		created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
@@ -111,6 +113,9 @@ func (s *Store) migrate(ctx context.Context) error {
 
 	-- Migration: add pending_update column if it doesn't exist
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS pending_update TEXT NOT NULL DEFAULT '';
+
+	-- Migration: add ignored column to software_mappings if it doesn't exist
+	ALTER TABLE software_mappings ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT FALSE;
 	`
 	_, err := s.pool.Exec(ctx, schema)
 	if err != nil {
@@ -353,13 +358,14 @@ type SoftwareMapping struct {
 	Publisher   string    `json:"publisher"`
 	Family      string    `json:"family"`
 	Source      string    `json:"source"`
+	Ignored     bool      `json:"ignored"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 func (s *Store) ListMappings(ctx context.Context) ([]SoftwareMapping, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, exe_name, display_name, category, publisher, family, source, created_at, updated_at
+		SELECT id, exe_name, display_name, category, publisher, family, source, ignored, created_at, updated_at
 		FROM software_mappings ORDER BY exe_name`)
 	if err != nil {
 		return nil, err
@@ -369,7 +375,7 @@ func (s *Store) ListMappings(ctx context.Context) ([]SoftwareMapping, error) {
 	var mappings []SoftwareMapping
 	for rows.Next() {
 		var m SoftwareMapping
-		if err := rows.Scan(&m.ID, &m.ExeName, &m.DisplayName, &m.Category, &m.Publisher, &m.Family, &m.Source, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.ExeName, &m.DisplayName, &m.Category, &m.Publisher, &m.Family, &m.Source, &m.Ignored, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		mappings = append(mappings, m)
@@ -379,18 +385,74 @@ func (s *Store) ListMappings(ctx context.Context) ([]SoftwareMapping, error) {
 
 func (s *Store) UpsertMapping(ctx context.Context, m *SoftwareMapping) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO software_mappings (exe_name, display_name, category, publisher, family, source)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO software_mappings (exe_name, display_name, category, publisher, family, source, ignored)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (exe_name) DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			category = EXCLUDED.category,
 			publisher = EXCLUDED.publisher,
 			family = EXCLUDED.family,
 			source = EXCLUDED.source,
+			ignored = EXCLUDED.ignored,
 			updated_at = NOW()`,
-		m.ExeName, m.DisplayName, m.Category, m.Publisher, m.Family, m.Source,
+		m.ExeName, m.DisplayName, m.Category, m.Publisher, m.Family, m.Source, m.Ignored,
 	)
 	return err
+}
+
+// GetMappingsMap returns all mappings keyed by lowercase exe name for fast lookup.
+func (s *Store) GetMappingsMap(ctx context.Context) (map[string]*SoftwareMapping, error) {
+	mappings, err := s.ListMappings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]*SoftwareMapping, len(mappings))
+	for i := range mappings {
+		m[strings.ToLower(mappings[i].ExeName)] = &mappings[i]
+	}
+	return m, nil
+}
+
+// GetIgnoredExeNames returns all exe names marked as ignored.
+func (s *Store) GetIgnoredExeNames(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT exe_name FROM software_mappings WHERE ignored = true ORDER BY exe_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
+// AutoInsertMapping inserts an exe name with placeholder values if not already present.
+// Called when the server sees an unknown exe in a metrics push.
+func (s *Store) AutoInsertMapping(ctx context.Context, exeName string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO software_mappings (exe_name, display_name, category, publisher, family, source, ignored)
+		VALUES ($1, $1, 'Unknown', '', '', 'auto', false)
+		ON CONFLICT (exe_name) DO NOTHING`,
+		exeName,
+	)
+	return err
+}
+
+// SetMappingIgnored updates only the ignored field for a mapping.
+func (s *Store) SetMappingIgnored(ctx context.Context, id int, ignored bool) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE software_mappings SET ignored = $1, updated_at = NOW() WHERE id = $2`, ignored, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) DeleteMapping(ctx context.Context, id int) error {
