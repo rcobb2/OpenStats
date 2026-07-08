@@ -42,6 +42,7 @@ jobs:
         run: dotnet tool install --global wix --version 5.0.2
 
       - name: Install WiX extensions
+        working-directory: agent/installer
         run: |
           wix extension add WixToolset.Firewall.wixext/5.0.2
           wix extension add WixToolset.Util.wixext/5.0.2
