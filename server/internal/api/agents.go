@@ -439,9 +439,6 @@ func promLabelEscape(s string) string {
 // Only source="manual" mappings trigger rewrites; source="auto" entries are
 // tracked for admin review without altering metric values.
 func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping) ([]byte, map[string]bool) {
-	if len(mappings) == 0 {
-		return body, nil
-	}
 	unknown := make(map[string]bool)
 	var out bytes.Buffer
 	out.Grow(len(body))
