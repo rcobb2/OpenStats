@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"strconv"
@@ -282,8 +283,96 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	// Inject lab/building/room labels so ReportUsageByLab works correctly.
+	// In the pull model these came from file_sd target labels; in the push model
+	// we must enrich the metrics server-side since agents don't know their lab.
+	if labName, building, room, err := s.store.GetAgentLabInfo(r.Context(), agentID); err == nil {
+		extra := map[string]string{}
+		if labName != "" {
+			extra["lab"] = labName
+		}
+		if building != "" {
+			extra["building"] = building
+		}
+		if room != "" {
+			extra["room"] = room
+		}
+		if len(extra) > 0 {
+			body = injectPromLabels(body, extra)
+		}
+	}
+
 	s.metricsStore.Set(agentID, body)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// injectPromLabels adds extra key="value" pairs to every metric line in a
+// Prometheus text-format body. Comment and empty lines are left unchanged.
+func injectPromLabels(body []byte, extras map[string]string) []byte {
+	if len(extras) == 0 {
+		return body
+	}
+
+	// Build the extra label fragment.
+	var sb strings.Builder
+	first := true
+	for k, v := range extras {
+		if !first {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(k)
+		sb.WriteString(`="`)
+		sb.WriteString(promLabelEscape(v))
+		sb.WriteByte('"')
+		first = false
+	}
+	extra := sb.String()
+
+	lines := bytes.Split(body, []byte("\n"))
+	for i, line := range lines {
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+		// Work only in the label portion (before the first space that precedes the value).
+		spaceIdx := bytes.IndexByte(line, ' ')
+		if spaceIdx <= 0 {
+			continue
+		}
+		labelPart := line[:spaceIdx]
+		rest := line[spaceIdx:]
+
+		openIdx := bytes.IndexByte(labelPart, '{')
+		closeIdx := bytes.LastIndexByte(labelPart, '}')
+
+		var newLine []byte
+		if openIdx >= 0 && closeIdx > openIdx {
+			// Existing labels: append before closing }.
+			newLine = make([]byte, 0, len(line)+len(extra)+1)
+			newLine = append(newLine, labelPart[:closeIdx]...)
+			newLine = append(newLine, ',')
+			newLine = append(newLine, extra...)
+			newLine = append(newLine, '}')
+			newLine = append(newLine, rest...)
+		} else {
+			// No labels: insert label set.
+			newLine = make([]byte, 0, len(line)+len(extra)+2)
+			newLine = append(newLine, labelPart...)
+			newLine = append(newLine, '{')
+			newLine = append(newLine, extra...)
+			newLine = append(newLine, '}')
+			newLine = append(newLine, rest...)
+		}
+		lines[i] = newLine
+	}
+	return bytes.Join(lines, []byte("\n"))
+}
+
+// promLabelEscape escapes a string for use as a Prometheus label value.
+func promLabelEscape(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
 }
 
 // ServeAgentMetrics returns all non-stale agent metric snapshots concatenated

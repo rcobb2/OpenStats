@@ -463,6 +463,17 @@ func (s *Store) GetPrometheusTargets(ctx context.Context) ([]AgentTarget, error)
 	return targets, rows.Err()
 }
 
+// GetAgentLabInfo returns the lab name, building, and room for an agent by ID.
+// All three return empty string if the agent has no lab assignment.
+func (s *Store) GetAgentLabInfo(ctx context.Context, agentID string) (labName, building, room string, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(l.name, ''), COALESCE(l.building, ''), COALESCE(l.room, '')
+		FROM agents a
+		LEFT JOIN labs l ON a.lab_id = l.id
+		WHERE a.id = $1`, agentID).Scan(&labName, &building, &room)
+	return
+}
+
 // --- System settings ---
 
 type SystemSettings struct {
