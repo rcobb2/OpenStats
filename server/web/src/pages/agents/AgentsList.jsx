@@ -96,7 +96,7 @@ export default function AgentsList() {
                   ))}
                 </select>
               </td>
-              <td>{new Date(a.lastSeen).toLocaleString()}</td>
+              <td>{a.lastSeen ? new Date(a.lastSeen).toLocaleString() : 'Never'}</td>
               <td style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 {(a.status === 'outdated' || a.status === 'online') && (
                   <button

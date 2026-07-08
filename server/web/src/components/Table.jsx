@@ -7,8 +7,10 @@ export default function ResizableTable({ children, className = "" }) {
     const table = tableRef.current;
     if (!table) return;
 
-    // Wait a bit for children to render if needed, or re-run on children change
-    const headers = table.querySelectorAll('th');
+    const headers = Array.from(table.querySelectorAll('th'));
+    // Track active drag handlers per header so we can remove them on unmount.
+    const active = new Map();
+
     headers.forEach((th) => {
       if (th.querySelector('.resizer')) return;
 
@@ -16,32 +18,32 @@ export default function ResizableTable({ children, className = "" }) {
       resizer.classList.add('resizer');
       th.appendChild(resizer);
 
-      let x = 0;
-      let w = 0;
-
       const onMouseMove = (e) => {
-        const dx = e.clientX - x;
-        th.style.width = `${w + dx}px`;
+        const state = active.get(th);
+        if (state) th.style.width = `${state.w + e.clientX - state.x}px`;
       };
 
       const onMouseUp = () => {
         resizer.classList.remove('resizing');
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        active.delete(th);
       };
 
-      const onMouseDown = (e) => {
-        x = e.clientX;
-        const styles = window.getComputedStyle(th);
-        w = parseInt(styles.width, 10);
-
+      resizer.addEventListener('mousedown', (e) => {
+        active.set(th, { x: e.clientX, w: parseInt(window.getComputedStyle(th).width, 10), onMouseMove, onMouseUp });
         resizer.classList.add('resizing');
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
-      };
-
-      resizer.addEventListener('mousedown', onMouseDown);
+      });
     });
+
+    return () => {
+      active.forEach(({ onMouseMove, onMouseUp }) => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      });
+    };
   }, [children]);
 
   return (

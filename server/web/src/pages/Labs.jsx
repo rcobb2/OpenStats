@@ -6,22 +6,26 @@ export default function Labs() {
   const [labs, setLabs] = useState([]);
   const [form, setForm] = useState({ name: '', building: '', room: '', description: '' });
   const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState('');
 
-  const load = () => getLabs().then(setLabs);
+  const load = () => getLabs().then(setLabs).catch(() => setError('Failed to load labs.'));
   useEffect(() => { load(); }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.name) return;
-
-    if (editingId) {
-      await updateLab(editingId, form);
-    } else {
-      await createLab(form);
+    setError('');
+    try {
+      if (editingId) {
+        await updateLab(editingId, form);
+      } else {
+        await createLab(form);
+      }
+      handleCancel();
+      load();
+    } catch {
+      setError(editingId ? 'Failed to update lab.' : 'Failed to create lab.');
     }
-
-    handleCancel();
-    load();
   };
 
   const handleEdit = (lab) => {
@@ -41,13 +45,20 @@ export default function Labs() {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this lab?')) return;
-    await deleteLab(id);
-    load();
+    setError('');
+    try {
+      await deleteLab(id);
+      load();
+    } catch {
+      setError('Failed to delete lab.');
+    }
   };
 
   return (
     <div>
       <h2>Labs & Rooms</h2>
+
+      {error && <div className="error-banner" style={{ color: 'var(--error, #e55353)', marginBottom: '1rem' }}>{error}</div>}
 
       <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
         <h3 style={{ marginTop: 0 }}>{editingId ? 'Edit Lab' : 'Add New Lab'}</h3>

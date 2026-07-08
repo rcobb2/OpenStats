@@ -16,6 +16,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
 
       - name: Build universal PKG
         working-directory: agent/installer/darwin
@@ -37,6 +38,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
 
       - name: Install WiX Toolset v5
         run: dotnet tool install --global wix --version 5.0.2

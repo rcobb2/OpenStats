@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 )
 
@@ -314,11 +315,14 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 			seen[k] = true
 		}
 	}
+	var extra []string
 	for k := range results[0].Metric {
 		if !seen[k] {
-			cols = append(cols, k)
+			extra = append(extra, k)
 		}
 	}
+	sort.Strings(extra)
+	cols = append(cols, extra...)
 
 	header := append(cols, "value")
 	writer.Write(header)

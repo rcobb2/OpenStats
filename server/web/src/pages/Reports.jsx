@@ -20,7 +20,8 @@ const CHART_COLORS = [
 ];
 
 function HBarChart({ data, valueLabel = 'value', color = '#4f8ff7', height = 300 }) {
-  if (!data) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
+  if (data === null) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
+  if (data === false) return <div style={{ padding: '1rem', color: 'var(--error, #e55353)' }}>Failed to load data.</div>;
   if (data.length === 0) return <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>;
 
   return (
@@ -76,8 +77,8 @@ function UserBehaviorReport({ range }) {
   useEffect(() => {
     setForeground(null);
     setLaunches(null);
-    getTopAppsByForeground(range, 10).then(r => setForeground(parsePromVector(r))).catch(() => setForeground([]));
-    getTopAppsByLaunches(range, 10).then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches([]));
+    getTopAppsByForeground(range, 10).then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
+    getTopAppsByLaunches(range, 10).then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches(false));
   }, [range]);
 
   return (
@@ -109,7 +110,7 @@ function LabUsageReport({ range }) {
         .map(([lab, val]) => ({ name: lab, value: Math.round(val / 3600 * 10) / 10 }))
         .sort((a, b) => b.value - a.value);
       setData(labData);
-    }).catch(() => setData([]));
+    }).catch(() => setData(false));
   }, [range]);
 
   return (
@@ -128,9 +129,9 @@ function SoftwareMeteringReport({ range, exporting, handleExport }) {
     setTopLaunches(null);
     setBottomLaunches(null);
     setTopForeground(null);
-    getTopAppsByLaunches(range, 10).then(r => setTopLaunches(parsePromVector(r))).catch(() => setTopLaunches([]));
-    getBottomAppsByLaunches(range, 10).then(r => setBottomLaunches(parsePromVector(r))).catch(() => setBottomLaunches([]));
-    getTopAppsByForeground(range, 10).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground([]));
+    getTopAppsByLaunches(range, 10).then(r => setTopLaunches(parsePromVector(r))).catch(() => setTopLaunches(false));
+    getBottomAppsByLaunches(range, 10).then(r => setBottomLaunches(parsePromVector(r))).catch(() => setBottomLaunches(false));
+    getTopAppsByForeground(range, 10).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
   }, [range]);
 
   return (

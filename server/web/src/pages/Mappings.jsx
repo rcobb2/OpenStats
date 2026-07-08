@@ -6,22 +6,33 @@ export default function Mappings() {
   const [mappings, setMappings] = useState([]);
   const [filter, setFilter] = useState('');
   const [form, setForm] = useState({ exeName: '', displayName: '', category: '', publisher: '', family: '' });
+  const [error, setError] = useState('');
 
-  const load = () => getMappings().then(setMappings);
+  const load = () => getMappings().then(setMappings).catch(() => setError('Failed to load mappings.'));
   useEffect(() => { load(); }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.exeName || !form.displayName) return;
-    await createMapping(form);
-    setForm({ exeName: '', displayName: '', category: '', publisher: '', family: '' });
-    load();
+    setError('');
+    try {
+      await createMapping(form);
+      setForm({ exeName: '', displayName: '', category: '', publisher: '', family: '' });
+      load();
+    } catch {
+      setError('Failed to create mapping.');
+    }
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this mapping?')) return;
-    await deleteMapping(id);
-    load();
+    setError('');
+    try {
+      await deleteMapping(id);
+      load();
+    } catch {
+      setError('Failed to delete mapping.');
+    }
   };
 
   const filtered = mappings.filter(m =>
@@ -32,6 +43,8 @@ export default function Mappings() {
   return (
     <div>
       <h2>Software Mappings ({mappings.length})</h2>
+
+      {error && <div className="error-banner" style={{ color: 'var(--error, #e55353)', marginBottom: '1rem' }}>{error}</div>}
 
       <form onSubmit={handleSubmit} className="form-inline">
         <input placeholder="Exe name (e.g. EXCEL.EXE)" value={form.exeName}

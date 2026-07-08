@@ -39,7 +39,8 @@ func (p *PEReader) Extract(exePath string) *AppInfo {
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(unsafe.Pointer(&handle)),
 	)
-	if size == 0 {
+	const maxVersionInfoSize = 10 * 1024 * 1024 // sanity cap against malformed PE files
+	if size == 0 || size > maxVersionInfoSize {
 		return nil
 	}
 
