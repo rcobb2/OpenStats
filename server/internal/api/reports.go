@@ -165,7 +165,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
@@ -192,7 +192,7 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
@@ -219,7 +219,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
@@ -246,7 +246,7 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
@@ -358,7 +358,7 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}

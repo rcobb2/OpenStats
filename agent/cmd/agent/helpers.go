@@ -94,7 +94,10 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 				}
 
 				// For total usage, count the checkpoint interval ONCE per unique app/user/host.
-				usageSeconds[key] = s.CheckpointDelta.Seconds()
+				// First-wins: if two groups resolve to the same key, don't double-count.
+				if _, exists := usageSeconds[key]; !exists {
+					usageSeconds[key] = s.CheckpointDelta.Seconds()
+				}
 
 				// For foreground time, only one PID should have a delta anyway, but we sum
 				// to be safe (in case rapid switching happened within the checkpoint window).
@@ -106,7 +109,6 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 			}
 			for key, seconds := range foregroundSeconds {
 				if seconds > 0 {
-					m.AppUsageSeconds.WithLabelValues(key.DisplayName, key.ExeName, key.Category, key.User, hostname).Add(0) // Ensure metric initialized
 					m.AppForegroundSeconds.WithLabelValues(key.DisplayName, key.ExeName, key.Category, key.User, hostname).Add(seconds)
 				}
 			}

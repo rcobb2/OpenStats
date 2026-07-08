@@ -4,6 +4,7 @@ package normalizer
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // PlistReader extracts AppInfo from macOS .app bundle Info.plist files.
@@ -167,19 +169,20 @@ func inferFromBundleID(id string) (category, publisher string) {
 }
 
 // findAppBundle walks up from path until it finds a *.app directory.
-// Stops searching at the filesystem root or /usr or /System to avoid runaway traversal.
+// Stops at filesystem root, /usr, /System, or after 10 levels to bound traversal cost.
 func findAppBundle(path string) string {
 	dir := filepath.Dir(path)
-	for {
+	for depth := 0; depth < 10; depth++ {
 		if strings.HasSuffix(dir, ".app") {
 			return dir
 		}
 		parent := filepath.Dir(dir)
-		if parent == dir || dir == "/" || dir == "/usr" || dir == "/System" {
+		if parent == dir || dir == "/" || dir == "/usr" || dir == "/System" || dir == "/Library" {
 			return ""
 		}
 		dir = parent
 	}
+	return ""
 }
 
 // readPlistDict opens path and returns the top-level dict as a flat string map.
@@ -195,7 +198,9 @@ func readPlistDict(path string) (map[string]string, error) {
 
 	if n >= 6 && string(magic[:6]) == "bplist" {
 		// Convert binary plist to XML using plutil (ships with macOS).
-		out, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", path).Output()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "plutil", "-convert", "xml1", "-o", "-", path).Output()
 		if err != nil {
 			return nil, fmt.Errorf("binary plist conversion failed: %w", err)
 		}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -159,7 +160,7 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 func readJSON(r *http.Request, v interface{}) error {
 	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(v)
+	return json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
