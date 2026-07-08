@@ -2,12 +2,14 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rcobb/openlabstats-server/internal/store"
 )
@@ -53,9 +55,13 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default port if not specified.
+	// Default and validate port.
 	if req.Port == 0 {
 		req.Port = 9183
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		writeError(w, http.StatusBadRequest, "port must be between 1 and 65535")
+		return
 	}
 
 	// Use hostname as ID if not provided.
@@ -65,7 +71,10 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Determine status based on version.
 	status := "online"
-	settings, _ := s.store.GetSettings(r.Context())
+	settings, err := s.store.GetSettings(r.Context())
+	if err != nil {
+		s.logger.Warn("failed to get settings for version check", "error", err)
+	}
 	if settings != nil && settings.MinAgentVersion != "" {
 		if isVersionBelow(req.AgentVersion, settings.MinAgentVersion) {
 			status = "outdated"
@@ -158,7 +167,12 @@ func (s *Server) GetAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "agentID")
 	agent, err := s.store.GetAgent(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "agent not found")
+		} else {
+			s.logger.Error("failed to get agent", "id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to get agent")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, agent)
@@ -276,12 +290,12 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defer r.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read body")
 		return
 	}
-	defer r.Body.Close()
 
 	// Inject lab/building/room labels so ReportUsageByLab works correctly.
 	// In the pull model these came from file_sd target labels; in the push model

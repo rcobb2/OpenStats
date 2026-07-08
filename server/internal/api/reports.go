@@ -134,7 +134,7 @@ func safeTimeRange(s, defaultRange string) string {
 func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
 
-	resp, err := http.Get(promURL)
+	resp, err := s.promClient.Get(promURL)
 	if err != nil {
 		s.logger.Error("prometheus query failed", "error", err, "query", query)
 		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
@@ -261,7 +261,7 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 func (s *Server) queryAndRespond(w http.ResponseWriter, query, format string) {
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
 
-	resp, err := http.Get(promURL)
+	resp, err := s.promClient.Get(promURL)
 	if err != nil {
 		s.logger.Error("prometheus query failed", "error", err, "query", query)
 		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -25,6 +26,7 @@ type Server struct {
 	discovery    *discovery.FileSD
 	logger       *slog.Logger
 	metricsStore *MetricsStore
+	promClient   *http.Client
 }
 
 // NewRouter creates the chi router with all API routes.
@@ -35,6 +37,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		discovery:    disc,
 		logger:       logger,
 		metricsStore: newMetricsStore(),
+		promClient:   &http.Client{Timeout: 15 * time.Second},
 	}
 
 	r := chi.NewRouter()

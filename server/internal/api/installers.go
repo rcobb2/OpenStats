@@ -109,19 +109,9 @@ func (s *Server) DownloadLatestInstaller(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	path := filepath.Join(s.cfg.Server.PublicDir, "installers", filename)
-	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, path)
-}
-
-// forceAgentUpdate marks an agent for update on its next heartbeat by returning
-// the latest installer URL regardless of version.
-func forceAgentUpdateURL(publicDir string) string {
-	filename, err := findLatestMSI(publicDir)
-	if err != nil || filename == "" {
-		return ""
-	}
-	return "/api/v1/installers/latest"
 }
 
 // findLatestInstaller looks in <publicDir>/installers/ for the newest installer
