@@ -5,7 +5,7 @@ server:
   port: 9183
   metricsPath: /metrics
   # Central management server URL (optional, set by MSI SERVERADDRESS property)
-  reportURL: "http://localhost:8080"
+  reportURL: ""
 
 # Process monitoring settings
 monitor:
@@ -79,8 +79,8 @@ monitor:
 normalizer:
   # Path to community/server-managed software mapping file
   mappingFile: configs/software-map.json
-  # URL to pull mapping updates from central server (optional)
-  mappingUpdateURL: "http://localhost:8080/api/v1/mappings/agent"
+  # URL to pull mapping updates from central server (optional, set by MSI SERVERADDRESS property)
+  mappingUpdateURL: ""
   # How often to check for mapping updates
   mappingRefreshInterval: 1h
 

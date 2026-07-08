@@ -124,7 +124,7 @@
          ============================================================ -->
     <CustomAction Id="ConfigureAgent"
                   Directory="INSTALLDIR"
-                  ExeCommand="[SystemFolder]cmd.exe /c powershell -NoProfile -Command &quot;$c = Get-Content '[ConfigDir]agent.yaml' -Raw; $c = $c -replace 'reportURL:\s*&quot;&quot;', 'reportURL: &quot;[SERVERADDRESS]&quot;'; $c = $c -replace 'port:\s*9183', 'port: [PORT]'; $c = $c -replace 'building:\s*&quot;&quot;', 'building: &quot;[BUILDING]&quot;'; $c = $c -replace 'room:\s*&quot;&quot;', 'room: &quot;[ROOM]&quot;'; Set-Content '[ConfigDir]agent.yaml' $c -NoNewline&quot;"
+                  ExeCommand="[SystemFolder]cmd.exe /c powershell -NoProfile -Command &quot;$c = Get-Content '[ConfigDir]agent.yaml' -Raw; $c = $c -replace 'reportURL:\s*&quot;[^&quot;]*&quot;', 'reportURL: &quot;[SERVERADDRESS]&quot;'; $c = $c -replace 'mappingUpdateURL:\s*&quot;[^&quot;]*&quot;', 'mappingUpdateURL: &quot;[SERVERADDRESS]/api/v1/mappings/agent&quot;'; $c = $c -replace 'port:\s*9183', 'port: [PORT]'; $c = $c -replace 'building:\s*&quot;[^&quot;]*&quot;', 'building: &quot;[BUILDING]&quot;'; $c = $c -replace 'room:\s*&quot;[^&quot;]*&quot;', 'room: &quot;[ROOM]&quot;'; Set-Content '[ConfigDir]agent.yaml' $c -NoNewline&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />
