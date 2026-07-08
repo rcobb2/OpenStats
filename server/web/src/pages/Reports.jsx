@@ -169,6 +169,7 @@ export default function Reports() {
   const [range, setRange] = useState('24h');
   const [reportType, setReportType] = useState('user');
   const [exporting, setExporting] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleExport = async (exportFn) => {
     setExporting(true);
@@ -209,13 +210,21 @@ export default function Reports() {
               <option value="30d">Last 30 Days</option>
             </select>
           </div>
+          <button
+            className="btn-secondary"
+            onClick={() => setRefreshKey(k => k + 1)}
+            title="Reload chart data from server"
+            style={{ padding: '0.3rem 0.8rem' }}
+          >
+            ↺ Refresh
+          </button>
         </div>
       </div>
 
-      {reportType === 'user' && <UserBehaviorReport range={range} />}
-      {reportType === 'hardware' && <LabUsageReport range={range} />}
+      {reportType === 'user' && <UserBehaviorReport key={refreshKey} range={range} />}
+      {reportType === 'hardware' && <LabUsageReport key={refreshKey} range={range} />}
       {reportType === 'software' && (
-        <SoftwareMeteringReport range={range} exporting={exporting} handleExport={handleExport} />
+        <SoftwareMeteringReport key={refreshKey} range={range} exporting={exporting} handleExport={handleExport} />
       )}
     </div>
   );
