@@ -90,6 +90,7 @@ func (s *Store) migrate(ctx context.Context) error {
 
 	CREATE INDEX IF NOT EXISTS idx_agents_lab ON agents(lab_id);
 	CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+	CREATE INDEX IF NOT EXISTS idx_agents_last_seen ON agents(last_seen);
 	CREATE INDEX IF NOT EXISTS idx_mappings_exe ON software_mappings(exe_name);
 
 	ALTER TABLE labs ADD COLUMN IF NOT EXISTS room TEXT NOT NULL DEFAULT '';

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import { getSummary, getTopAppsByLaunches, parsePromVector } from '../api';
+import { getSummary, getTopAppsByLaunches, getActiveUsers, parsePromVector } from '../api';
 
 const CHART_COLORS = [
   '#4f8ff7','#43b581','#f0a030','#e55353','#a78bfa',
@@ -65,10 +65,14 @@ function TopAppsChart({ range }) {
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [summaryError, setSummaryError] = useState(null);
+  const [activeUsers, setActiveUsers] = useState(null);
   const [range, setRange] = useState('24h');
 
   useEffect(() => {
     getSummary().then(setSummary).catch(e => setSummaryError(e.message));
+    getActiveUsers()
+      .then(res => setActiveUsers(res?.data?.result?.length ?? 0))
+      .catch(() => setActiveUsers('—'));
   }, []);
 
   return (
@@ -93,6 +97,12 @@ export default function Dashboard() {
           <div className="stat-card">
             <span className="stat-value">{summary.totalMappings}</span>
             <span className="stat-label">Mappings</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-value" style={{ color: 'var(--accent)' }}>
+              {activeUsers === null ? '…' : activeUsers}
+            </span>
+            <span className="stat-label">Active Users</span>
           </div>
         </div>
       )}
