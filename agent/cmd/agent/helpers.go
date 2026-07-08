@@ -21,9 +21,10 @@ func restoreMetrics(db *store.Store, m *metrics.Metrics, logger *slog.Logger) er
 	}
 
 	for _, t := range totals {
-		// Skip entries with exe names as users (legacy data from Caption bug).
+		// Skip system/service accounts — they produce user="" series that waste
+		// Prometheus cardinality and never appear in user-facing reports.
 		if !isValidUser(t.User) {
-			t.User = ""
+			continue
 		}
 		labels := []string{t.DisplayName, t.ExeName, t.Category, t.User, t.Hostname}
 		m.AppUsageSeconds.WithLabelValues(labels...).Add(t.TotalSeconds)

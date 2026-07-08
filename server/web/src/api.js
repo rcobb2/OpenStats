@@ -48,13 +48,33 @@ export const getActiveUsers = () => request('/reports/active-users');
 // Parse a Prometheus instant-query vector response into [{name, category, value}]
 export function parsePromVector(res) {
   if (!res?.data?.result) return [];
-  return res.data.result
-    .map(r => ({
-      name: r.metric?.app ?? r.metric?.__name__ ?? 'unknown',
-      category: r.metric?.category ?? '',
-      lab: r.metric?.lab ?? '',
-      value: parseFloat(r.value?.[1] ?? 0),
-    }))
+  const rows = res.data.result.map(r => ({
+    name: r.metric?.app ?? r.metric?.__name__ ?? 'unknown',
+    category: r.metric?.category ?? '',
+    lab: r.metric?.lab ?? '',
+    value: parseFloat(r.value?.[1] ?? 0),
+  }));
+
+  // Deduplicate: the same app can appear multiple times with different category
+  // labels because Prometheus retains old time series after a mapping change.
+  // Merge by (name, lab): sum values, keep the category from the highest entry.
+  const key = r => `${r.name}\0${r.lab}`;
+  const merged = new Map();
+  for (const r of rows) {
+    const k = key(r);
+    if (!merged.has(k)) {
+      merged.set(k, { ...r });
+    } else {
+      const m = merged.get(k);
+      if (r.value > m.value) {
+        merged.set(k, { ...r, value: m.value + r.value });
+      } else {
+        m.value += r.value;
+      }
+    }
+  }
+
+  return [...merged.values()]
     .filter(r => r.value > 0)
     .sort((a, b) => b.value - a.value);
 }
