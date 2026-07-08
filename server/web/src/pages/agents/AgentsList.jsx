@@ -67,8 +67,9 @@ export default function AgentsList() {
           <tr>
             <th>Hostname</th>
             <th>IP</th>
+            <th>OS Version</th>
             <th>Status</th>
-            <th>Version</th>
+            <th>Agent Ver.</th>
             <th>Lab</th>
             <th>Last Seen</th>
             <th>Actions</th>
@@ -79,6 +80,7 @@ export default function AgentsList() {
             <tr key={a.id}>
               <td>{a.hostname}</td>
               <td>{a.ipAddress}</td>
+              <td style={{ fontSize: '0.85em', color: 'var(--text-dim)' }}>{a.osVersion || '—'}</td>
               <td><span className={`badge ${a.status}`}>{a.status}</span></td>
               <td>{a.agentVersion}</td>
               <td>

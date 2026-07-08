@@ -104,7 +104,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	INSERT INTO settings (key, value) VALUES ('heartbeat_interval_seconds', '120') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('update_interval_seconds', '3600') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('stale_timeout_days', '90') ON CONFLICT DO NOTHING;
-	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.3') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.6') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_start', '') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_end', '') ON CONFLICT DO NOTHING;
 
@@ -248,7 +248,7 @@ func (s *Store) ClearAgentPendingUpdate(ctx context.Context, id string) error {
 func (s *Store) MarkStaleAgents(ctx context.Context, threshold time.Duration) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE agents SET status = 'offline', updated_at = NOW()
-		WHERE status = 'online' AND last_seen < NOW() - ($1 * INTERVAL '1 second')`,
+		WHERE status IN ('online', 'outdated') AND last_seen < NOW() - ($1 * INTERVAL '1 second')`,
 		int64(threshold.Seconds()),
 	)
 	return err

@@ -3,11 +3,13 @@
 package normalizer
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -146,18 +148,27 @@ func readPlistDict(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 
 	var magic [6]byte
 	n, _ := f.Read(magic[:])
+	f.Close()
+
 	if n >= 6 && string(magic[:6]) == "bplist" {
-		return nil, fmt.Errorf("binary plist not supported")
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, err
+		// Convert binary plist to XML using plutil (ships with macOS).
+		out, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", path).Output()
+		if err != nil {
+			return nil, fmt.Errorf("binary plist conversion failed: %w", err)
+		}
+		return parsePlistDict(bytes.NewReader(out))
 	}
 
-	return parsePlistDict(f)
+	// Re-open for XML parsing since we consumed the magic bytes.
+	f2, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f2.Close()
+	return parsePlistDict(f2)
 }
 
 // parsePlistDict parses the top-level <dict> of an Apple XML plist,
