@@ -166,20 +166,28 @@ func (w *PollWatcher) poll() {
 	current := w.currentSnapshot()
 	now := time.Now()
 
-	// Detect new PIDs.
+	// Detect new PIDs and PID reuse (same PID, different startSec = new process).
 	for pid, snap := range current {
-		if _, seen := w.prevPIDs[pid]; !seen {
-			if w.isExcluded(snap.exeName, snap.exePath) {
-				continue
+		prev, seen := w.prevPIDs[pid]
+		if seen && snap.startSec == prev.startSec {
+			continue // same process, no action needed
+		}
+		if w.isExcluded(snap.exeName, snap.exePath) {
+			continue
+		}
+		// PID was reused: stop the old tracked process before starting the new one.
+		if seen {
+			if session := w.tracker.OnProcessStop(pid); session != nil && w.onStop != nil {
+				w.onStop(session)
 			}
-			var familyKey string
-			if w.familyResolver != nil {
-				familyKey = w.familyResolver(snap.exeName, snap.exePath)
-			}
-			isNewGroup := w.tracker.OnProcessStart(pid, snap.ppid, snap.exeName, snap.exePath, snap.user, familyKey)
-			if w.onStart != nil {
-				w.onStart(pid, snap.exeName, isNewGroup)
-			}
+		}
+		var familyKey string
+		if w.familyResolver != nil {
+			familyKey = w.familyResolver(snap.exeName, snap.exePath)
+		}
+		isNewGroup := w.tracker.OnProcessStart(pid, snap.ppid, snap.exeName, snap.exePath, snap.user, familyKey)
+		if w.onStart != nil {
+			w.onStart(pid, snap.exeName, isNewGroup)
 		}
 	}
 

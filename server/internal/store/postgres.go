@@ -105,7 +105,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	INSERT INTO settings (key, value) VALUES ('heartbeat_interval_seconds', '120') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('update_interval_seconds', '3600') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('stale_timeout_days', '90') ON CONFLICT DO NOTHING;
-	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.6') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.7') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_start', '') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_end', '') ON CONFLICT DO NOTHING;
 

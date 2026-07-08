@@ -319,11 +319,13 @@ func (t *Tracker) Reconcile(runningPIDs map[uint32]bool) []*ProcessSession {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// First pass: remove stale member PIDs from all groups.
+	// First pass: remove stale member PIDs from their owning groups.
+	// Use pidToGroup for an O(1) targeted delete instead of scanning all groups.
 	for pid := range t.pidToGroup {
 		if !runningPIDs[pid] {
+			rootPID := t.pidToGroup[pid]
 			delete(t.pidToGroup, pid)
-			for _, group := range t.groups {
+			if group := t.groups[rootPID]; group != nil {
 				delete(group.MemberPIDs, pid)
 			}
 		}
