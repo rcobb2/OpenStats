@@ -12,13 +12,27 @@
     Directory for build artifacts (default: installer\build).
 #>
 param(
-    [string]$Version = "0.1.6",
+    [string]$Version = "",
     [string]$OutputDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
+
+# Auto-detect version from client.go when not provided explicitly.
+if ($Version -eq "") {
+    $clientGo = Join-Path $RepoRoot "internal\enrollment\client.go"
+    $line = Select-String -Path $clientGo -Pattern 'AgentVersion\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if ($line -and $line.Matches.Count -gt 0) {
+        $Version = $line.Matches[0].Groups[1].Value
+    }
+    if ($Version -eq "") {
+        Write-Error "Could not read AgentVersion from $clientGo"
+        exit 1
+    }
+    Write-Host "  Auto-detected version: $Version" -ForegroundColor DarkGray
+}
 
 if ($OutputDir -eq "") {
     $OutputDir = Join-Path $ScriptDir "build"

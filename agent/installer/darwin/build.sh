@@ -22,7 +22,11 @@ INSTALLER_DIR="$SCRIPT_DIR"
 PAYLOAD_DIR="$INSTALLER_DIR/payload"
 SCRIPTS_DIR="$INSTALLER_DIR/scripts"
 BUILD_DIR="$INSTALLER_DIR/build"
-VERSION="0.1.6"
+VERSION="$(grep -E 'AgentVersion\s*=\s*"' "$AGENT_DIR/internal/enrollment/client.go" | sed 's/.*"\(.*\)".*/\1/')"
+if [[ -z "$VERSION" ]]; then
+    echo "ERROR: could not read AgentVersion from client.go" >&2
+    exit 1
+fi
 ARCH="${1:-arm64}"
 
 echo "Building openlabstats-agent v$VERSION for $ARCH ..."

@@ -163,10 +163,13 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 	}
 
 	// Also check for update on startup.
-	// Server-directed updates take priority - always update when server sends URL.
 	if updateURL != "" {
-		c.logger.Info("startup: server-directed update received, initiating self-update", "url", updateURL)
-		go c.executeSelfUpdate(updateURL)
+		if s != nil && IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
+			c.logger.Info("startup: server-directed update received, initiating self-update", "url", updateURL)
+			go c.executeSelfUpdate(updateURL)
+		} else {
+			c.logger.Info("startup: update available but outside maintenance window, deferring", "url", updateURL)
+		}
 	}
 
 	ticker := time.NewTicker(currentInterval)
@@ -190,9 +193,12 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 				}
 
 				if updateURL != "" {
-					// Server-directed update: always update when server sends URL
-					c.logger.Info("server-directed update received, initiating self-update", "url", updateURL)
-					go c.executeSelfUpdate(updateURL)
+					if IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
+						c.logger.Info("server-directed update received, initiating self-update", "url", updateURL)
+						go c.executeSelfUpdate(updateURL)
+					} else {
+						c.logger.Info("update available but outside maintenance window, deferring", "url", updateURL)
+					}
 				}
 			}
 		}
