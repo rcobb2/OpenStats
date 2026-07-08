@@ -120,8 +120,48 @@ func inferFromBundleID(id string) (category, publisher string) {
 		return "Scientific Computing", "Wolfram Research"
 	case id == "com.spotify.client":
 		return "Entertainment", "Spotify AB"
-	case id == "com.jamfsoftware.jamfpro", id == "com.jamfsoftware.remotemgmt":
+	case strings.HasPrefix(id, "com.jamfsoftware."), strings.HasPrefix(id, "com.jamf."):
 		return "System", "Jamf"
+	case strings.HasPrefix(id, "com.panopto."):
+		return "Utility", "Panopto"
+	case id == "com.apple.dt.instruments", id == "com.apple.dt.InstrumentsClient":
+		return "Development", "Apple Inc."
+	case id == "net.sourceforge.skim-app.skim":
+		return "Document Viewer", "Skim Project"
+	case id == "com.readdle.PDFExpert-Mac":
+		return "Document Viewer", "Readdle Inc."
+	case id == "com.microsoft.rdc.macos", id == "com.microsoft.rdc.mac":
+		return "Utility", "Microsoft Corporation"
+	case id == "org.videolan.vlc":
+		return "Entertainment", "VideoLAN"
+	case id == "org.gimp.gimp":
+		return "Creative", "GIMP Project"
+	case id == "com.sublimetext.4", id == "com.sublimetext.3":
+		return "Development", "Sublime HQ"
+	case id == "com.jetbrains.intellij", strings.HasPrefix(id, "com.jetbrains."):
+		return "Development", "JetBrains"
+	case id == "com.github.atom":
+		return "Development", "GitHub Inc."
+	case id == "io.brackets.CEF":
+		return "Development", "Adobe Inc."
+	case id == "com.dropbox.DropboxMacUpdate", strings.HasPrefix(id, "com.getdropbox."),
+		strings.HasPrefix(id, "com.dropbox."):
+		return "Productivity", "Dropbox Inc."
+	case id == "com.box.desktop", strings.HasPrefix(id, "com.box."):
+		return "Productivity", "Box Inc."
+	case strings.HasPrefix(id, "com.vmware."):
+		return "Utility", "VMware Inc."
+	case id == "org.7-zip.7-zip":
+		return "Utility", "7-Zip Project"
+	case id == "fm.receiver.Receiver":
+		return "Utility", "Receiver"
+	case strings.HasPrefix(id, "com.cisco."):
+		return "Communication", "Cisco Systems"
+	case id == "com.webex.meetingmanager", id == "Cisco-Systems.Spark",
+		strings.HasPrefix(id, "com.webex."):
+		return "Communication", "Cisco Systems"
+	case strings.HasPrefix(id, "com.atlassian."):
+		return "Development", "Atlassian"
 	}
 	return "Unknown", ""
 }

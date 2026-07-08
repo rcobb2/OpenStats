@@ -326,6 +326,379 @@
       "displayName": "OpenSSH",
       "category": "Utility",
       "publisher": "OpenSSH Project"
+    },
+    "vpnui.exe": {
+      "displayName": "Cisco AnyConnect",
+      "category": "Utility",
+      "publisher": "Cisco Systems"
+    },
+    "vpnagent.exe": {
+      "displayName": "Cisco AnyConnect",
+      "category": "Utility",
+      "publisher": "Cisco Systems",
+      "family": "anyconnect"
+    },
+    "acwebhelper.exe": {
+      "displayName": "Cisco AnyConnect",
+      "category": "Utility",
+      "publisher": "Cisco Systems",
+      "family": "anyconnect"
+    },
+    "PanGPA.exe": {
+      "displayName": "GlobalProtect",
+      "category": "Utility",
+      "publisher": "Palo Alto Networks",
+      "family": "globalprotect"
+    },
+    "PanGPS.exe": {
+      "displayName": "GlobalProtect",
+      "category": "Utility",
+      "publisher": "Palo Alto Networks",
+      "family": "globalprotect"
+    },
+    "GlobalProtect.exe": {
+      "displayName": "GlobalProtect",
+      "category": "Utility",
+      "publisher": "Palo Alto Networks",
+      "family": "globalprotect"
+    },
+    "brave.exe": {
+      "displayName": "Brave Browser",
+      "category": "Web Browser",
+      "publisher": "Brave Software",
+      "family": "brave"
+    },
+    "opera.exe": {
+      "displayName": "Opera",
+      "category": "Web Browser",
+      "publisher": "Opera Software",
+      "family": "opera"
+    },
+    "vivaldi.exe": {
+      "displayName": "Vivaldi",
+      "category": "Web Browser",
+      "publisher": "Vivaldi Technologies",
+      "family": "vivaldi"
+    },
+    "LightRoom.exe": {
+      "displayName": "Adobe Lightroom Classic",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "lightroom.exe": {
+      "displayName": "Adobe Lightroom",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "Bridge.exe": {
+      "displayName": "Adobe Bridge",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "animate.exe": {
+      "displayName": "Adobe Animate",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "Audition.exe": {
+      "displayName": "Adobe Audition",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "Dreamweaver.exe": {
+      "displayName": "Adobe Dreamweaver",
+      "category": "Development",
+      "publisher": "Adobe Inc."
+    },
+    "XD.exe": {
+      "displayName": "Adobe XD",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "Substance Painter.exe": {
+      "displayName": "Adobe Substance Painter",
+      "category": "Creative",
+      "publisher": "Adobe Inc."
+    },
+    "vlc.exe": {
+      "displayName": "VLC Media Player",
+      "category": "Entertainment",
+      "publisher": "VideoLAN"
+    },
+    "7zFM.exe": {
+      "displayName": "7-Zip File Manager",
+      "category": "Utility",
+      "publisher": "Igor Pavlov"
+    },
+    "7z.exe": {
+      "displayName": "7-Zip",
+      "category": "Utility",
+      "publisher": "Igor Pavlov"
+    },
+    "WinRAR.exe": {
+      "displayName": "WinRAR",
+      "category": "Utility",
+      "publisher": "win.rar GmbH"
+    },
+    "Spotify.exe": {
+      "displayName": "Spotify",
+      "category": "Entertainment",
+      "publisher": "Spotify AB"
+    },
+    "OneDrive.exe": {
+      "displayName": "Microsoft OneDrive",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "ONENOTE.EXE": {
+      "displayName": "Microsoft OneNote",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "MSPUB.EXE": {
+      "displayName": "Microsoft Publisher",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "VISIO.EXE": {
+      "displayName": "Microsoft Visio",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "WINPROJ.EXE": {
+      "displayName": "Microsoft Project",
+      "category": "Productivity",
+      "publisher": "Microsoft Corporation"
+    },
+    "idea64.exe": {
+      "displayName": "IntelliJ IDEA",
+      "category": "Development",
+      "publisher": "JetBrains",
+      "family": "jetbrains"
+    },
+    "pycharm64.exe": {
+      "displayName": "PyCharm",
+      "category": "Development",
+      "publisher": "JetBrains",
+      "family": "jetbrains"
+    },
+    "webstorm64.exe": {
+      "displayName": "WebStorm",
+      "category": "Development",
+      "publisher": "JetBrains",
+      "family": "jetbrains"
+    },
+    "clion64.exe": {
+      "displayName": "CLion",
+      "category": "Development",
+      "publisher": "JetBrains",
+      "family": "jetbrains"
+    },
+    "rubymine64.exe": {
+      "displayName": "RubyMine",
+      "category": "Development",
+      "publisher": "JetBrains",
+      "family": "jetbrains"
+    },
+    "atom.exe": {
+      "displayName": "Atom",
+      "category": "Development",
+      "publisher": "GitHub Inc."
+    },
+    "sublime_text.exe": {
+      "displayName": "Sublime Text",
+      "category": "Development",
+      "publisher": "Sublime HQ"
+    },
+    "GitHubDesktop.exe": {
+      "displayName": "GitHub Desktop",
+      "category": "Development",
+      "publisher": "GitHub Inc."
+    },
+    "SourceTree.exe": {
+      "displayName": "Sourcetree",
+      "category": "Development",
+      "publisher": "Atlassian"
+    },
+    "gitkraken.exe": {
+      "displayName": "GitKraken",
+      "category": "Development",
+      "publisher": "Axosoft LLC"
+    },
+    "WinSCP.exe": {
+      "displayName": "WinSCP",
+      "category": "Utility",
+      "publisher": "Martin Přikryl"
+    },
+    "putty.exe": {
+      "displayName": "PuTTY",
+      "category": "Utility",
+      "publisher": "Simon Tatham"
+    },
+    "RSTUDIO.EXE": {
+      "displayName": "RStudio",
+      "category": "Statistical Analysis",
+      "publisher": "Posit PBC"
+    },
+    "R.exe": {
+      "displayName": "R",
+      "category": "Statistical Analysis",
+      "publisher": "R Project"
+    },
+    "Rterm.exe": {
+      "displayName": "R",
+      "category": "Statistical Analysis",
+      "publisher": "R Project",
+      "family": "r"
+    },
+    "julia.exe": {
+      "displayName": "Julia",
+      "category": "Scientific Computing",
+      "publisher": "JuliaLang"
+    },
+    "Maple.exe": {
+      "displayName": "Maple",
+      "category": "Scientific Computing",
+      "publisher": "Maplesoft"
+    },
+    "SAS.exe": {
+      "displayName": "SAS",
+      "category": "Statistical Analysis",
+      "publisher": "SAS Institute"
+    },
+    "stata.exe": {
+      "displayName": "Stata",
+      "category": "Statistical Analysis",
+      "publisher": "StataCorp"
+    },
+    "StataMP-64.exe": {
+      "displayName": "Stata MP",
+      "category": "Statistical Analysis",
+      "publisher": "StataCorp"
+    },
+    "Tableau.exe": {
+      "displayName": "Tableau Desktop",
+      "category": "Statistical Analysis",
+      "publisher": "Tableau Software"
+    },
+    "tableau.exe": {
+      "displayName": "Tableau Desktop",
+      "category": "Statistical Analysis",
+      "publisher": "Tableau Software"
+    },
+    "NVivo.exe": {
+      "displayName": "NVivo",
+      "category": "Statistical Analysis",
+      "publisher": "QSR International"
+    },
+    "fusion360.exe": {
+      "displayName": "Autodesk Fusion 360",
+      "category": "CAD/Engineering",
+      "publisher": "Autodesk",
+      "family": "fusion360"
+    },
+    "Fusion360.exe": {
+      "displayName": "Autodesk Fusion 360",
+      "category": "CAD/Engineering",
+      "publisher": "Autodesk",
+      "family": "fusion360"
+    },
+    "3dsmax.exe": {
+      "displayName": "Autodesk 3ds Max",
+      "category": "Creative",
+      "publisher": "Autodesk"
+    },
+    "maya.exe": {
+      "displayName": "Autodesk Maya",
+      "category": "Creative",
+      "publisher": "Autodesk"
+    },
+    "blender.exe": {
+      "displayName": "Blender",
+      "category": "Creative",
+      "publisher": "Blender Foundation"
+    },
+    "SketchUp.exe": {
+      "displayName": "SketchUp",
+      "category": "CAD/Engineering",
+      "publisher": "Trimble Inc."
+    },
+    "rhino.exe": {
+      "displayName": "Rhinoceros",
+      "category": "CAD/Engineering",
+      "publisher": "McNeel"
+    },
+    "QGIS.exe": {
+      "displayName": "QGIS",
+      "category": "Scientific Computing",
+      "publisher": "QGIS Project"
+    },
+    "ArcGISPro.exe": {
+      "displayName": "ArcGIS Pro",
+      "category": "Scientific Computing",
+      "publisher": "Esri"
+    },
+    "Panopto.exe": {
+      "displayName": "Panopto",
+      "category": "Utility",
+      "publisher": "Panopto"
+    },
+    "PanoptoRecorder.exe": {
+      "displayName": "Panopto Recorder",
+      "category": "Utility",
+      "publisher": "Panopto"
+    },
+    "obs64.exe": {
+      "displayName": "OBS Studio",
+      "category": "Creative",
+      "publisher": "OBS Project"
+    },
+    "Figma.exe": {
+      "displayName": "Figma",
+      "category": "Creative",
+      "publisher": "Figma Inc."
+    },
+    "inkscape.exe": {
+      "displayName": "Inkscape",
+      "category": "Creative",
+      "publisher": "Inkscape Project"
+    },
+    "gimp-2.10.exe": {
+      "displayName": "GIMP",
+      "category": "Creative",
+      "publisher": "GIMP Project"
+    },
+    "mRemoteNG.exe": {
+      "displayName": "mRemoteNG",
+      "category": "Utility",
+      "publisher": "mRemoteNG Project"
+    },
+    "mstsc.exe": {
+      "displayName": "Remote Desktop Connection",
+      "category": "Utility",
+      "publisher": "Microsoft Corporation"
+    },
+    "vmware.exe": {
+      "displayName": "VMware Workstation",
+      "category": "Utility",
+      "publisher": "VMware Inc."
+    },
+    "vmrun.exe": {
+      "displayName": "VMware Workstation",
+      "category": "Utility",
+      "publisher": "VMware Inc.",
+      "family": "vmware"
+    },
+    "VirtualBoxVM.exe": {
+      "displayName": "VirtualBox",
+      "category": "Utility",
+      "publisher": "Oracle Corporation"
+    },
+    "VirtualBox.exe": {
+      "displayName": "VirtualBox",
+      "category": "Utility",
+      "publisher": "Oracle Corporation",
+      "family": "virtualbox"
     }
   }
 }

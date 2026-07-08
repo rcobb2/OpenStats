@@ -4,6 +4,7 @@ package normalizer
 
 import (
 	"log/slog"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -82,11 +83,83 @@ func (p *PEReader) Extract(exePath string) *AppInfo {
 	info := &AppInfo{
 		DisplayName: description,
 		Publisher:   companyName,
-		Category:    "Unknown", // PE metadata doesn't include category.
+		Category:    inferCategoryFromPublisher(companyName, description),
 	}
 
 	p.logger.Debug("extracted PE metadata", "path", exePath, "name", description, "publisher", companyName)
 	return info
+}
+
+// inferCategoryFromPublisher maps a Windows PE CompanyName to an app category.
+// Called when the app isn't in the software-map.json mapping file.
+func inferCategoryFromPublisher(publisher, displayName string) string {
+	pub := strings.ToLower(publisher)
+	desc := strings.ToLower(displayName)
+
+	switch {
+	case strings.Contains(pub, "adobe"):
+		return "Creative"
+	case strings.Contains(pub, "autodesk"):
+		return "CAD/Engineering"
+	case strings.Contains(pub, "mathworks"):
+		return "Scientific Computing"
+	case strings.Contains(pub, "wolfram"):
+		return "Scientific Computing"
+	case strings.Contains(pub, "ibm") && strings.Contains(desc, "spss"):
+		return "Statistical Analysis"
+	case strings.Contains(pub, "posit") || strings.Contains(pub, "rstudio"):
+		return "Statistical Analysis"
+	case strings.Contains(pub, "jetbrains"):
+		return "Development"
+	case strings.Contains(pub, "oracle") || strings.Contains(pub, "java"):
+		return "Development"
+	case strings.Contains(pub, "zoom video"):
+		return "Communication"
+	case strings.Contains(pub, "slack"):
+		return "Communication"
+	case strings.Contains(pub, "microsoft"):
+		return inferMicrosoftCategory(desc)
+	case strings.Contains(pub, "google llc") || strings.Contains(pub, "google inc"):
+		return "Utility"
+	case strings.Contains(pub, "mozilla"):
+		return "Web Browser"
+	case strings.Contains(pub, "python software"):
+		return "Development"
+	case strings.Contains(pub, "git"):
+		return "Development"
+	case strings.Contains(pub, "docker"):
+		return "Development"
+	case strings.Contains(pub, "atlassian"):
+		return "Development"
+	case strings.Contains(pub, "spotify"):
+		return "Entertainment"
+	case strings.Contains(pub, "dropbox"), strings.Contains(pub, "box, inc"):
+		return "Productivity"
+	case strings.Contains(pub, "vmware"), strings.Contains(pub, "broadcom"):
+		return "Utility"
+	}
+	return "Unknown"
+}
+
+// inferMicrosoftCategory narrows Microsoft apps by display name.
+func inferMicrosoftCategory(descLower string) string {
+	switch {
+	case strings.Contains(descLower, "edge"):
+		return "Web Browser"
+	case strings.Contains(descLower, "visual studio"), strings.Contains(descLower, "vscode"),
+		strings.Contains(descLower, "powershell"), strings.Contains(descLower, "windows terminal"):
+		return "Development"
+	case strings.Contains(descLower, "teams"):
+		return "Communication"
+	case strings.Contains(descLower, "outlook"):
+		return "Communication"
+	case strings.Contains(descLower, "excel"), strings.Contains(descLower, "word"),
+		strings.Contains(descLower, "powerpoint"), strings.Contains(descLower, "onenote"),
+		strings.Contains(descLower, "access"), strings.Contains(descLower, "publisher"),
+		strings.Contains(descLower, "onedrive"):
+		return "Productivity"
+	}
+	return "Productivity"
 }
 
 func queryStringValue(buf []byte, langCodePage, key string) string {
