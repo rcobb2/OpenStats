@@ -130,6 +130,10 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 	installersDir := filepath.Join(s.cfg.Server.PublicDir, "installers")
 	r.Get("/installers/*", func(w http.ResponseWriter, req *http.Request) {
 		filename := filepath.Base(strings.TrimPrefix(req.URL.Path, "/installers/"))
+		if filename == "" || filename == "." {
+			http.NotFound(w, req)
+			return
+		}
 		http.ServeFile(w, req, filepath.Join(installersDir, filename))
 	})
 
@@ -140,14 +144,17 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 }
 
 func spaHandler(publicDir string) http.HandlerFunc {
+	fs := http.FileServer(http.Dir(publicDir))
 	return func(w http.ResponseWriter, r *http.Request) {
-		p := filepath.Join(publicDir, r.URL.Path)
+		// filepath.Clean prevents path traversal before the os.Stat probe.
+		cleaned := filepath.Clean("/" + r.URL.Path)
+		p := filepath.Join(publicDir, cleaned)
 		_, err := os.Stat(p)
 		if os.IsNotExist(err) || r.URL.Path == "/" {
 			http.ServeFile(w, r, filepath.Join(publicDir, "index.html"))
 			return
 		}
-		http.FileServer(http.Dir(publicDir)).ServeHTTP(w, r)
+		fs.ServeHTTP(w, r)
 	}
 }
 

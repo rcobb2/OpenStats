@@ -8,11 +8,14 @@ export default function AgentsList() {
   const [error, setError] = useState(null);
   const [updating, setUpdating] = useState({});
   const [toast, setToast] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const load = () => {
+    setError(null); setLoading(true);
     Promise.all([getAgents(), getLabs()])
       .then(([a, l]) => { setAgents(a); setLabs(l); })
-      .catch(e => setError(e.message));
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
   };
 
   useEffect(load, []);

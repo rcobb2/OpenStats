@@ -20,7 +20,7 @@ func (c *Client) executeSelfUpdate(url string) {
 	// Reject URLs that point to a different host than the configured server.
 	// This prevents a misconfigured or compromised server from redirecting the
 	// agent to download an arbitrary executable.
-	if parsed, err := neturl.Parse(url); err != nil || !c.isTrustedUpdateHost(parsed.Host) {
+	if parsed, err := neturl.Parse(url); err != nil || !c.isTrustedUpdateHost(parsed.Hostname()) {
 		c.logger.Error("untrusted update URL rejected", "url", url)
 		return
 	}
@@ -47,7 +47,7 @@ func (c *Client) executeSelfUpdate(url string) {
 		return
 	}
 
-	_, err = io.Copy(out, resp.Body)
+	_, err = io.Copy(out, io.LimitReader(resp.Body, 200<<20))
 	if err != nil {
 		c.logger.Error("failed to save update to disk", "error", err)
 		return

@@ -7,8 +7,12 @@ export default function Labs() {
   const [form, setForm] = useState({ name: '', building: '', room: '', description: '' });
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const load = () => getLabs().then(setLabs).catch(() => setError('Failed to load labs.'));
+  const load = () => {
+    setError(''); setLoading(true);
+    getLabs().then(setLabs).catch(() => setError('Failed to load labs.')).finally(() => setLoading(false));
+  };
   useEffect(() => { load(); }, []);
 
   const handleSubmit = async (e) => {

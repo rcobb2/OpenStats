@@ -41,6 +41,14 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if settings.HeartbeatIntervalSeconds != 0 && settings.HeartbeatIntervalSeconds < 30 {
+		writeError(w, http.StatusBadRequest, "heartbeatIntervalSeconds must be >= 30")
+		return
+	}
+	if settings.StaleTimeoutDays < 1 {
+		writeError(w, http.StatusBadRequest, "staleTimeoutDays must be >= 1")
+		return
+	}
 
 	if err := s.store.UpdateSettings(r.Context(), &settings); err != nil {
 		s.logger.Error("failed to update settings", "error", err)

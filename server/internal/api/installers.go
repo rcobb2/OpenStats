@@ -55,12 +55,13 @@ func (s *Server) GenerateInstaller(w http.ResponseWriter, r *http.Request) {
 	if latestMSI != "" {
 		msiName = latestMSI
 	}
-	installCmd := fmt.Sprintf(`msiexec /i "%s" /qn SERVERADDRESS="%s" PORT=%d`, msiName, req.ServerAddress, req.Port)
+	sanitize := func(s string) string { return strings.ReplaceAll(s, `"`, ``) }
+	installCmd := fmt.Sprintf(`msiexec /i "%s" /qn SERVERADDRESS="%s" PORT=%d`, sanitize(msiName), sanitize(req.ServerAddress), req.Port)
 	if req.Building != "" {
-		installCmd += fmt.Sprintf(` BUILDING="%s"`, req.Building)
+		installCmd += fmt.Sprintf(` BUILDING="%s"`, sanitize(req.Building))
 	}
 	if req.Room != "" {
-		installCmd += fmt.Sprintf(` ROOM="%s"`, req.Room)
+		installCmd += fmt.Sprintf(` ROOM="%s"`, sanitize(req.Room))
 	}
 
 	response := map[string]string{

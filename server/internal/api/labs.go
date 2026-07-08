@@ -158,7 +158,11 @@ func (s *Server) UpdateLab(w http.ResponseWriter, r *http.Request) {
 func (s *Server) DeleteLab(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "labID")
 	if err := s.store.DeleteLab(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete lab")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "lab not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to delete lab")
+		}
 		return
 	}
 
@@ -172,6 +176,8 @@ func (s *Server) DeleteLab(w http.ResponseWriter, r *http.Request) {
 
 func generateID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }

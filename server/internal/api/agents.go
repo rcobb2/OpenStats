@@ -107,21 +107,15 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("agent registered", "hostname", req.Hostname, "ip", req.IPAddress)
 
-	// Get the agent to check for pending update (cleared after being returned).
-	dbAgent, err := s.store.GetAgent(r.Context(), req.ID)
-	if err != nil {
-		s.logger.Error("failed to get agent after registration", "error", err)
-	}
-
 	// Determine update URL - server-directed takes priority over version-based.
+	// TakeAgentPendingUpdate reads and clears atomically so concurrent heartbeats
+	// cannot both receive the same update command.
 	updateURL := ""
-
-	// First check if server has queued a pending update for this agent.
-	if dbAgent != nil && dbAgent.PendingUpdate != "" {
-		updateURL = dbAgent.PendingUpdate
+	if url, err := s.store.TakeAgentPendingUpdate(r.Context(), req.ID); err != nil {
+		s.logger.Error("failed to check pending update", "error", err)
+	} else if url != "" {
+		updateURL = url
 		s.logger.Info("sending pending update to agent", "agentID", req.ID, "url", updateURL)
-		// Clear the pending update after retrieving it so it won't be sent again.
-		_ = s.store.ClearAgentPendingUpdate(r.Context(), req.ID)
 	} else if status == "outdated" {
 		// Fallback: version-based outdated check.
 		updateURL = s.GetLatestInstallerURL(req.OSVersion)
@@ -241,8 +235,12 @@ func (s *Server) AssignAgentToLab(w http.ResponseWriter, r *http.Request) {
 func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "agentID")
 	if err := s.store.DeleteAgent(r.Context(), id); err != nil {
-		s.logger.Error("failed to delete agent", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "agent not found")
+		} else {
+			s.logger.Error("failed to delete agent", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		}
 		return
 	}
 

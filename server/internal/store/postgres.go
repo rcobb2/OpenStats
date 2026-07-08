@@ -238,8 +238,14 @@ func (s *Store) AssignAgentToLab(ctx context.Context, agentID, labID string) err
 
 // DeleteAgent removes an agent.
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1`, id)
-	return err
+	tag, err := s.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // SetAgentStatus explicitly sets an agent's status field.
@@ -258,6 +264,24 @@ func (s *Store) SetAgentPendingUpdate(ctx context.Context, id, updateURL string)
 func (s *Store) ClearAgentPendingUpdate(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE agents SET pending_update = '', updated_at = NOW() WHERE id = $1`, id)
 	return err
+}
+
+// TakeAgentPendingUpdate atomically clears and returns any pending update URL in
+// a single SQL statement, preventing the TOCTOU race where two concurrent
+// heartbeats both read a non-empty value before either clears it.
+// Returns "" with nil error when no update is pending.
+func (s *Store) TakeAgentPendingUpdate(ctx context.Context, id string) (string, error) {
+	var url string
+	err := s.pool.QueryRow(ctx,
+		`UPDATE agents SET pending_update = '', updated_at = NOW()
+		 WHERE id = $1 AND pending_update != ''
+		 RETURNING pending_update`,
+		id,
+	).Scan(&url)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return url, err
 }
 
 // MarkStaleAgents sets agents that haven't checked in recently to 'offline'.
@@ -344,8 +368,14 @@ func (s *Store) UpdateLab(ctx context.Context, l *Lab) error {
 }
 
 func (s *Store) DeleteLab(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM labs WHERE id = $1`, id)
-	return err
+	tag, err := s.pool.Exec(ctx, `DELETE FROM labs WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // --- Software mapping operations ---
@@ -477,8 +507,14 @@ func (s *Store) SetMappingIgnored(ctx context.Context, id int, ignored bool) err
 }
 
 func (s *Store) DeleteMapping(ctx context.Context, id int) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM software_mappings WHERE id = $1`, id)
-	return err
+	tag, err := s.pool.Exec(ctx, `DELETE FROM software_mappings WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // GetMappingsAsAgentJSON returns mappings in the format agents expect (software-map.json style).

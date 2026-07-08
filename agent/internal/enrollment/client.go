@@ -271,9 +271,7 @@ func (c *Client) isTrustedUpdateHost(host string) bool {
 	if err != nil {
 		return false
 	}
-	// Strip port for comparison if both sides include or omit it consistently.
-	serverHost := parsed.Host
-	return strings.EqualFold(host, serverHost)
+	return strings.EqualFold(host, parsed.Hostname())
 }
 
 // PushMetrics fetches the agent's local /metrics endpoint and pushes the body

@@ -109,6 +109,10 @@ func (s *Server) UpdateMapping(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if req.ExeName == "" || req.DisplayName == "" {
+		writeError(w, http.StatusBadRequest, "exeName and displayName are required")
+		return
+	}
 
 	m := &store.SoftwareMapping{
 		ExeName:     req.ExeName,
@@ -179,7 +183,11 @@ func (s *Server) DeleteMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteMapping(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete mapping")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "mapping not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to delete mapping")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
