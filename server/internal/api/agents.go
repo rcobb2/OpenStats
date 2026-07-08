@@ -333,34 +333,33 @@ func injectPromLabels(body []byte, extras map[string]string) []byte {
 		if len(line) == 0 || line[0] == '#' {
 			continue
 		}
-		// Work only in the label portion (before the first space that precedes the value).
-		spaceIdx := bytes.IndexByte(line, ' ')
-		if spaceIdx <= 0 {
-			continue
-		}
-		labelPart := line[:spaceIdx]
-		rest := line[spaceIdx:]
-
-		openIdx := bytes.IndexByte(labelPart, '{')
-		closeIdx := bytes.LastIndexByte(labelPart, '}')
-
+		// Prometheus text format: metric_name{labels} value [timestamp]
+		// Label values can contain spaces (e.g. app="Acrobat Update Helper"), so we
+		// cannot use the first space as the label-set boundary. Instead, find the
+		// last '}' which is the unambiguous end of the label set.
 		var newLine []byte
-		if openIdx >= 0 && closeIdx > openIdx {
-			// Existing labels: append before closing }.
+		closeIdx := bytes.LastIndexByte(line, '}')
+		if closeIdx >= 0 {
+			// Has label set: insert extra labels before the closing }.
 			newLine = make([]byte, 0, len(line)+len(extra)+1)
-			newLine = append(newLine, labelPart[:closeIdx]...)
+			newLine = append(newLine, line[:closeIdx]...)
 			newLine = append(newLine, ',')
 			newLine = append(newLine, extra...)
 			newLine = append(newLine, '}')
-			newLine = append(newLine, rest...)
+			newLine = append(newLine, line[closeIdx+1:]...)
 		} else {
-			// No labels: insert label set.
+			// No label set: separate metric name from value at the first space,
+			// then insert a label set.
+			spaceIdx := bytes.IndexByte(line, ' ')
+			if spaceIdx <= 0 {
+				continue
+			}
 			newLine = make([]byte, 0, len(line)+len(extra)+2)
-			newLine = append(newLine, labelPart...)
+			newLine = append(newLine, line[:spaceIdx]...)
 			newLine = append(newLine, '{')
 			newLine = append(newLine, extra...)
 			newLine = append(newLine, '}')
-			newLine = append(newLine, rest...)
+			newLine = append(newLine, line[spaceIdx:]...)
 		}
 		lines[i] = newLine
 	}
