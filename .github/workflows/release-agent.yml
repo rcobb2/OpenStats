@@ -38,13 +38,13 @@ jobs:
         with:
           go-version-file: agent/go.mod
 
-      - name: Install WiX Toolset
-        run: dotnet tool install --global wix
+      - name: Install WiX Toolset v5
+        run: dotnet tool install --global wix --version 5.0.2
 
       - name: Install WiX extensions
         run: |
-          wix extension add WixToolset.Firewall.wixext
-          wix extension add WixToolset.Util.wixext
+          wix extension add WixToolset.Firewall.wixext/5.0.2
+          wix extension add WixToolset.Util.wixext/5.0.2
 
       - name: Build MSI
         working-directory: agent/installer
