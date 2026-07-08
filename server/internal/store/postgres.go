@@ -214,9 +214,13 @@ func (s *Store) GetAgent(ctx context.Context, id string) (*Agent, error) {
 	return a, nil
 }
 
-// AssignAgentToLab assigns an agent to a lab.
+// AssignAgentToLab assigns an agent to a lab. Pass labID="" to unassign (sets lab_id to NULL).
 func (s *Store) AssignAgentToLab(ctx context.Context, agentID, labID string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE agents SET lab_id = $1, updated_at = NOW() WHERE id = $2`, labID, agentID)
+	var labIDVal interface{}
+	if labID != "" {
+		labIDVal = labID
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET lab_id = $1, updated_at = NOW() WHERE id = $2`, labIDVal, agentID)
 	return err
 }
 
@@ -420,7 +424,7 @@ func (s *Store) GetPrometheusTargets(ctx context.Context) ([]AgentTarget, error)
 		SELECT a.hostname, a.ip_address, a.port, COALESCE(l.name, '') as lab_name, COALESCE(l.building, '') as building, COALESCE(l.room, '') as room
 		FROM agents a
 		LEFT JOIN labs l ON a.lab_id = l.id
-		WHERE a.status = 'online'`)
+		WHERE a.status IN ('online', 'outdated')`)
 	if err != nil {
 		return nil, err
 	}
@@ -549,9 +553,4 @@ func (s *Store) UpdateSettings(ctx context.Context, settings *SystemSettings) er
 	}
 
 	return tx.Commit(ctx)
-}
-func (s *Store) GetLatestInstaller(ctx context.Context) (string, error) {
-	var filename string
-	err := s.pool.QueryRow(ctx, `SELECT filename FROM installer_builds ORDER BY created_at DESC LIMIT 1`).Scan(&filename)
-	return filename, err
 }

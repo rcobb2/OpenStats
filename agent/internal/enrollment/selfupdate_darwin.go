@@ -24,7 +24,7 @@ func (c *Client) executeSelfUpdate(url string) {
 		c.logger.Error("failed to create temp file for update", "error", err)
 		return
 	}
-	defer out.Close()
+	defer out.Close() // covers error-path early returns
 
 	resp, err := c.client.Get(url)
 	if err != nil {
@@ -43,6 +43,7 @@ func (c *Client) executeSelfUpdate(url string) {
 		c.logger.Error("failed to save update to disk", "error", err)
 		return
 	}
+	// Must close before passing to installer; defer will close again (harmless).
 	out.Close()
 
 	c.logger.Info("update downloaded, launching installer", "path", tempFile)

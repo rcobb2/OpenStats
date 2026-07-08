@@ -254,7 +254,12 @@ func (s *Server) ForceAgentUpdate(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "agentID")
 	dbAgent, err := s.store.GetAgent(r.Context(), agentID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "agent not found")
+		} else {
+			s.logger.Error("failed to get agent for force-update", "id", agentID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to get agent")
+		}
 		return
 	}
 

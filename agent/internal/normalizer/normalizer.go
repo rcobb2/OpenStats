@@ -36,9 +36,12 @@ func NewNormalizer(mapping *MappingFile, pe MetadataReader, logger *slog.Logger)
 // Resolve returns the normalized AppInfo for a given executable.
 // exeName is the process name (e.g., "EXCEL.EXE"), exePath is the full path.
 func (n *Normalizer) Resolve(exeName, exePath string) *AppInfo {
-	// Check cache first.
-	if cached, ok := n.cache.Load(exePath); ok {
-		return cached.(*AppInfo)
+	// Check cache first. Only cache by exePath when it is non-empty — an empty
+	// path is not a stable key and would cause unrelated processes to collide.
+	if exePath != "" {
+		if cached, ok := n.cache.Load(exePath); ok {
+			return cached.(*AppInfo)
+		}
 	}
 
 	var info *AppInfo
@@ -67,8 +70,9 @@ func (n *Normalizer) Resolve(exeName, exePath string) *AppInfo {
 		n.logger.Debug("unresolved executable", "exe", exeName, "path", exePath)
 	}
 
-	// Cache the result.
-	n.cache.Store(exePath, info)
+	if exePath != "" {
+		n.cache.Store(exePath, info)
+	}
 	return info
 }
 

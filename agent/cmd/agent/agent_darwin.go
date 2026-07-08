@@ -25,7 +25,7 @@ import (
 // runAgent returns a function that runs the full agent lifecycle on macOS.
 func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 	return func(ctx context.Context) error {
-		logger.Info("starting OpenLabStats agent (macOS)", "version", "0.1.6")
+		logger.Info("starting OpenLabStats agent (macOS)", "version", enrollment.AgentVersion)
 
 		// Initialize metrics.
 		m := metrics.New()
