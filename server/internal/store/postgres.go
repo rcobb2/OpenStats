@@ -443,6 +443,27 @@ func (s *Store) AutoInsertMapping(ctx context.Context, exeName string) error {
 	return err
 }
 
+// BatchAutoInsertMappings inserts multiple unknown exe names in a single query.
+// Uses ON CONFLICT DO NOTHING so existing entries are unaffected.
+func (s *Store) BatchAutoInsertMappings(ctx context.Context, exeNames map[string]bool) error {
+	if len(exeNames) == 0 {
+		return nil
+	}
+	args := make([]interface{}, 0, len(exeNames))
+	placeholders := make([]string, 0, len(exeNames))
+	i := 1
+	for name := range exeNames {
+		placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, 'Unknown', '', '', 'auto', false)", i, i))
+		args = append(args, name)
+		i++
+	}
+	query := `INSERT INTO software_mappings (exe_name, display_name, category, publisher, family, source, ignored) VALUES ` +
+		strings.Join(placeholders, ", ") +
+		` ON CONFLICT (exe_name) DO NOTHING`
+	_, err := s.pool.Exec(ctx, query, args...)
+	return err
+}
+
 // SetMappingIgnored updates only the ignored field for a mapping.
 func (s *Store) SetMappingIgnored(ctx context.Context, id int, ignored bool) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE software_mappings SET ignored = $1, updated_at = NOW() WHERE id = $2`, ignored, id)
@@ -470,6 +491,9 @@ func (s *Store) GetMappingsAsAgentJSON(ctx context.Context) (map[string]interfac
 	result := make(map[string]interface{})
 	entries := make(map[string]map[string]string)
 	for _, m := range mappings {
+		if m.Ignored {
+			continue
+		}
 		entry := map[string]string{
 			"displayName": m.DisplayName,
 			"category":    m.Category,

@@ -334,10 +334,8 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 	if mappings, err := s.store.GetMappingsMap(r.Context()); err == nil {
 		var unknown map[string]bool
 		body, unknown = applyServerMappings(body, mappings)
-		for exeName := range unknown {
-			if err := s.store.AutoInsertMapping(r.Context(), exeName); err != nil {
-				s.logger.Warn("failed to auto-insert mapping", "exe", exeName, "error", err)
-			}
+		if err := s.store.BatchAutoInsertMappings(r.Context(), unknown); err != nil {
+			s.logger.Warn("failed to auto-insert mappings", "count", len(unknown), "error", err)
 		}
 	} else {
 		s.logger.Warn("failed to load mappings for label rewrite", "error", err)
@@ -543,7 +541,10 @@ func rewritePromLabelValue(labelSet []byte, name, newValue string) []byte {
 			valEnd := valStart
 			for valEnd < len(labelSet) {
 				if labelSet[valEnd] == '\\' {
-					valEnd += 2
+					valEnd++
+					if valEnd < len(labelSet) {
+						valEnd++
+					}
 					continue
 				}
 				if labelSet[valEnd] == '"' {

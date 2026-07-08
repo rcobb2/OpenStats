@@ -12,6 +12,7 @@ import (
 	neturl "net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,8 +33,9 @@ type RegisterRequest struct {
 }
 
 type RegisterAgentResponse struct {
-	Settings  *SystemSettings `json:"settings"`
-	UpdateURL string          `json:"updateUrl,omitempty"`
+	Settings        *SystemSettings `json:"settings"`
+	UpdateURL       string          `json:"updateUrl,omitempty"`
+	IgnoredExeNames []string        `json:"ignoredExeNames,omitempty"`
 }
 
 type SystemSettings struct {
@@ -54,6 +56,9 @@ type Client struct {
 	osVersion string
 	logger    *slog.Logger
 	client    *http.Client
+
+	ignoredMu       sync.RWMutex
+	ignoredExeNames []string
 }
 
 // NewClient creates a new enrollment client.
@@ -78,11 +83,26 @@ func (c *Client) WithOSVersion(v string) *Client {
 
 // Register sends a registration/heartbeat to the central server.
 func (c *Client) Register(ctx context.Context) (*SystemSettings, string) {
-	settings, updateURL, err := c.doRegister(ctx)
+	settings, updateURL, ignored, err := c.doRegister(ctx)
 	if err != nil {
 		c.logger.Warn("registration failed", "error", err)
 	}
+	if ignored != nil {
+		c.ignoredMu.Lock()
+		c.ignoredExeNames = ignored
+		c.ignoredMu.Unlock()
+	}
 	return settings, updateURL
+}
+
+// GetIgnoredExeNames returns the server-provided list of exe names to suppress.
+// Updated on every heartbeat.
+func (c *Client) GetIgnoredExeNames() []string {
+	c.ignoredMu.RLock()
+	defer c.ignoredMu.RUnlock()
+	out := make([]string, len(c.ignoredExeNames))
+	copy(out, c.ignoredExeNames)
+	return out
 }
 
 // GetSettings fetches settings from the server without registering.
@@ -110,7 +130,7 @@ func (c *Client) GetSettings(ctx context.Context) (*SystemSettings, error) {
 	return &settings, nil
 }
 
-func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error) {
+func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, []string, error) {
 	hostname, _ := os.Hostname()
 	ip := getOutboundIP()
 
@@ -127,32 +147,32 @@ func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, error
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("marshal registration: %w", err)
+		return nil, "", nil, fmt.Errorf("marshal registration: %w", err)
 	}
 
 	url := c.serverURL + "/api/v1/agents/register"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, "", fmt.Errorf("create request: %w", err)
+		return nil, "", nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, "", fmt.Errorf("send registration: %w", err)
+		return nil, "", nil, fmt.Errorf("send registration: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("registration failed: status %d", resp.StatusCode)
+		return nil, "", nil, fmt.Errorf("registration failed: status %d", resp.StatusCode)
 	}
 
 	var res RegisterAgentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, "", fmt.Errorf("decode registration response: %w", err)
+		return nil, "", nil, fmt.Errorf("decode registration response: %w", err)
 	}
 
-	return res.Settings, res.UpdateURL, nil
+	return res.Settings, res.UpdateURL, res.IgnoredExeNames, nil
 }
 
 // RunHeartbeat periodically registers with the server.

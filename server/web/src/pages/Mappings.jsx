@@ -75,13 +75,13 @@ export default function Mappings() {
   };
 
   const handleToggleIgnore = async (m) => {
-    setError('');
+    setError(''); setSaving(true);
     try {
       await patchMappingIgnore(m.id, !m.ignored);
-      load();
+      await load();
     } catch {
       setError('Failed to update mapping.');
-    }
+    } finally { setSaving(false); }
   };
 
   const handleDelete = async (id) => {
