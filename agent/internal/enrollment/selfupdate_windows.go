@@ -3,6 +3,7 @@
 package enrollment
 
 import (
+	"fmt"
 	"io"
 	neturl "net/url"
 	"net/http"
@@ -55,7 +56,19 @@ func (c *Client) executeSelfUpdate(url string) {
 
 	c.logger.Info("update downloaded, launching installer", "path", tempFile)
 
-	cmd := exec.Command("msiexec.exe", "/i", tempFile, "/qn", "REBOOT=ReallySuppress")
+	// Pass the current config values as MSI properties so the installer's
+	// PowerShell custom action re-applies them after overwriting agent.yaml.
+	args := []string{"/i", tempFile, "/qn", "REBOOT=ReallySuppress",
+		"SERVERADDRESS=" + c.serverURL,
+		fmt.Sprintf("PORT=%d", c.port),
+	}
+	if c.building != "" {
+		args = append(args, "BUILDING="+c.building)
+	}
+	if c.room != "" {
+		args = append(args, "ROOM="+c.room)
+	}
+	cmd := exec.Command("msiexec.exe", args...)
 	if err := cmd.Start(); err != nil {
 		c.logger.Error("failed to launch msiexec", "error", err)
 		return
