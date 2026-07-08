@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // promQueryInstantResult represents an instant query response.
@@ -28,19 +30,30 @@ type promQueryInstantResult struct {
 // @Description  Returns total app usage hours grouped by lab over the given time range.
 // @Tags         reports
 // @Produce      json
-// @Param        range  query  string  false  "Time range"  default(24h)
-// @Param        format query  string  false  "Output format: json or csv"  default(json)
+// @Param        range    query  string  false  "Time range (e.g. 24h, 7d)"  default(24h)
+// @Param        hostname query  string  false  "Filter to a specific machine hostname"
+// @Param        lab      query  string  false  "Filter to a specific lab name"
+// @Param        start    query  string  false  "Custom range start (unix or RFC3339)"
+// @Param        end      query  string  false  "Custom range end (unix or RFC3339)"
+// @Param        format   query  string  false  "Output format: json or csv"  default(json)
 // @Success      200  {object}  map[string]interface{}
 // @Failure      502  {object}  map[string]string
 // @Router       /api/v1/reports/usage-by-lab [get]
 func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
-	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total{user!=""}[%s]))`,
-		timeRange,
+		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
 // ReportActiveUsers godoc
@@ -106,6 +119,62 @@ func (s *Server) ReportSummary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// safeLabelValue validates and escapes a Prometheus label value to prevent PromQL injection.
+// Returns the escaped value and true if safe, or "", false if the value should be rejected.
+func safeLabelValue(s string) (string, bool) {
+	if s == "" || len(s) > 256 {
+		return "", false
+	}
+	for _, c := range s {
+		if c == '\n' || c == '\r' || c == 0 {
+			return "", false
+		}
+	}
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s, true
+}
+
+// buildLabelFilters returns a Prometheus label selector with user!="" and optional
+// hostname/lab equality matchers.
+func buildLabelFilters(hostname, lab string) string {
+	filters := []string{`user!=""`}
+	if v, ok := safeLabelValue(hostname); ok {
+		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
+	}
+	if v, ok := safeLabelValue(lab); ok {
+		filters = append(filters, fmt.Sprintf(`lab="%s"`, v))
+	}
+	return "{" + strings.Join(filters, ",") + "}"
+}
+
+// parseCustomTimeRange parses start/end query params (unix timestamp integers or RFC3339).
+// Returns the PromQL duration string and end unix timestamp, or "", 0, false if invalid.
+func parseCustomTimeRange(startStr, endStr string) (duration string, endUnix int64, ok bool) {
+	if startStr == "" || endStr == "" {
+		return "", 0, false
+	}
+	parseT := func(s string) (time.Time, error) {
+		if ts, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return time.Unix(ts, 0), nil
+		}
+		return time.Parse(time.RFC3339, s)
+	}
+	startT, err := parseT(startStr)
+	if err != nil {
+		return "", 0, false
+	}
+	endT, err := parseT(endStr)
+	if err != nil {
+		return "", 0, false
+	}
+	d := endT.Sub(startT)
+	if d <= 0 || d > 366*24*time.Hour {
+		return "", 0, false
+	}
+	return fmt.Sprintf("%ds", int64(d.Seconds())), endT.Unix(), true
+}
+
 // validTimeRange returns true if s is a valid Prometheus duration string
 // (one or more digits followed by s/m/h/d/w/y). Used to prevent PromQL injection.
 func validTimeRange(s string) bool {
@@ -161,20 +230,27 @@ func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 // @Success      200
 // @Router       /api/v1/reports/top-apps-by-launches [get]
 func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request) {
-	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 
 	limit := 10
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
 
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_launches_total{user!=""}[%s])))`,
-		limit, timeRange,
+		`topk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
+		limit, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
 // ReportTopAppsByForegroundTime godoc
@@ -188,20 +264,27 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 // @Success      200
 // @Router       /api/v1/reports/top-apps-by-foreground [get]
 func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Request) {
-	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 
 	limit := 10
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
 
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total{user!=""}[%s])) / 3600)`,
-		limit, timeRange,
+		`topk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
+		limit, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
 // ReportBottomAppsByLaunches godoc
@@ -215,20 +298,27 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 // @Success      200
 // @Router       /api/v1/reports/bottom-apps-by-launches [get]
 func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Request) {
-	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 
 	limit := 10
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
 
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_launches_total{user!=""}[%s])) > 0)`,
-		limit, timeRange,
+		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
+		limit, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
 // ReportBottomAppsByForegroundTime godoc
@@ -242,25 +332,41 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 // @Success      200
 // @Router       /api/v1/reports/bottom-apps-by-foreground [get]
 func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http.Request) {
-	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 
 	limit := 10
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
 
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total{user!=""}[%s])) / 3600 > 0)`,
-		limit, timeRange,
+		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
+		limit, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
-// queryAndRespond executes a Prometheus query and returns either JSON or CSV.
+// queryAndRespond executes a Prometheus instant query at the current time.
 func (s *Server) queryAndRespond(w http.ResponseWriter, query, format string) {
+	s.queryAndRespondAt(w, query, format, 0)
+}
+
+// queryAndRespondAt executes a Prometheus instant query at the given unix timestamp
+// (0 means "now") and returns either JSON or CSV.
+func (s *Server) queryAndRespondAt(w http.ResponseWriter, query, format string, atTime int64) {
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
+	if atTime > 0 {
+		promURL += fmt.Sprintf("&time=%d", atTime)
+	}
 
 	resp, err := s.promClient.Get(promURL)
 	if err != nil {
@@ -354,18 +460,25 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 // @Success      200
 // @Router       /api/v1/reports/top-apps [get]
 func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
-	timeRange := safeTimeRange(r.URL.Query().Get("range"), "24h")
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 
 	limit := 20
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
 
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total{user!=""}[%s])))`,
-		limit, timeRange,
+		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0)`,
+		limit, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, r.URL.Query().Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }

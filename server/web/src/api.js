@@ -38,11 +38,40 @@ export const patchMappingIgnore = (id, ignored) => request(`/mappings/${id}/igno
 
 // Reports
 export const getSummary = () => request('/reports/summary');
-export const getTopAppsByLaunches = (range = '24h', limit = 10) => request(`/reports/top-apps-by-launches?range=${range}&limit=${limit}`);
-export const getTopAppsByForeground = (range = '24h', limit = 10) => request(`/reports/top-apps-by-foreground?range=${range}&limit=${limit}`);
-export const getBottomAppsByLaunches = (range = '24h', limit = 10) => request(`/reports/bottom-apps-by-launches?range=${range}&limit=${limit}`);
-export const getBottomAppsByForeground = (range = '24h', limit = 10) => request(`/reports/bottom-apps-by-foreground?range=${range}&limit=${limit}`);
-export const getUsageByLab = (range = '24h') => request(`/reports/usage-by-lab?range=${range}`);
+
+// buildReportParams constructs the query string for report endpoints.
+// If filters.start and filters.end are set (ISO datetime-local strings), they are
+// converted to unix timestamps and sent as start/end; otherwise range is used.
+function buildReportParams(range, limit, filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.start && filters.end) {
+    const s = Math.floor(new Date(filters.start).getTime() / 1000);
+    const e = Math.floor(new Date(filters.end).getTime() / 1000);
+    if (!isNaN(s) && !isNaN(e) && e > s) {
+      params.set('start', s);
+      params.set('end', e);
+    } else {
+      params.set('range', range);
+    }
+  } else {
+    params.set('range', range);
+  }
+  if (limit != null) params.set('limit', limit);
+  if (filters.hostname) params.set('hostname', filters.hostname);
+  if (filters.lab) params.set('lab', filters.lab);
+  return params.toString();
+}
+
+export const getTopAppsByLaunches = (range = '24h', limit = 10, filters = {}) =>
+  request(`/reports/top-apps-by-launches?${buildReportParams(range, limit, filters)}`);
+export const getTopAppsByForeground = (range = '24h', limit = 10, filters = {}) =>
+  request(`/reports/top-apps-by-foreground?${buildReportParams(range, limit, filters)}`);
+export const getBottomAppsByLaunches = (range = '24h', limit = 10, filters = {}) =>
+  request(`/reports/bottom-apps-by-launches?${buildReportParams(range, limit, filters)}`);
+export const getBottomAppsByForeground = (range = '24h', limit = 10, filters = {}) =>
+  request(`/reports/bottom-apps-by-foreground?${buildReportParams(range, limit, filters)}`);
+export const getUsageByLab = (range = '24h', filters = {}) =>
+  request(`/reports/usage-by-lab?${buildReportParams(range, null, filters)}`);
 export const getActiveUsers = () => request('/reports/active-users');
 
 // Parse a Prometheus instant-query vector response into [{name, category, value}]
@@ -100,17 +129,17 @@ async function downloadCSV(path, filename) {
   }
 }
 
-export const exportTopAppsByLaunches = (range = '24h') => 
-  downloadCSV(`/reports/top-apps-by-launches?range=${range}&format=csv`, `top-apps-by-launches-${range}.csv`);
+export const exportTopAppsByLaunches = (range = '24h', filters = {}) =>
+  downloadCSV(`/reports/top-apps-by-launches?${buildReportParams(range, null, filters)}&format=csv`, `top-apps-by-launches.csv`);
 
-export const exportTopAppsByForeground = (range = '24h') => 
-  downloadCSV(`/reports/top-apps-by-foreground?range=${range}&format=csv`, `top-apps-by-foreground-${range}.csv`);
+export const exportTopAppsByForeground = (range = '24h', filters = {}) =>
+  downloadCSV(`/reports/top-apps-by-foreground?${buildReportParams(range, null, filters)}&format=csv`, `top-apps-by-foreground.csv`);
 
-export const exportBottomAppsByLaunches = (range = '24h') => 
-  downloadCSV(`/reports/bottom-apps-by-launches?range=${range}&format=csv`, `bottom-apps-by-launches-${range}.csv`);
+export const exportBottomAppsByLaunches = (range = '24h', filters = {}) =>
+  downloadCSV(`/reports/bottom-apps-by-launches?${buildReportParams(range, null, filters)}&format=csv`, `bottom-apps-by-launches.csv`);
 
-export const exportBottomAppsByForeground = (range = '24h') => 
-  downloadCSV(`/reports/bottom-apps-by-foreground?range=${range}&format=csv`, `bottom-apps-by-foreground-${range}.csv`);
+export const exportBottomAppsByForeground = (range = '24h', filters = {}) =>
+  downloadCSV(`/reports/bottom-apps-by-foreground?${buildReportParams(range, null, filters)}&format=csv`, `bottom-apps-by-foreground.csv`);
 
 // Installers
 export const generateInstaller = (data) =>
