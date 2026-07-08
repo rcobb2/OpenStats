@@ -285,6 +285,9 @@ func (s *Server) queryAndRespond(w http.ResponseWriter, query, format string) {
 }
 
 // writeCSV writes the Prometheus results as CSV.
+// Column names are derived from whichever metric labels are present in the
+// results, so reports that group by different label sets (e.g. lab+app vs
+// app+category) produce the correct columns without hardcoding them.
 func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 	Metric map[string]string `json:"metric"`
 	Value  []interface{}     `json:"value"`
@@ -295,22 +298,44 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
 
-	// Write header
-	writer.Write([]string{"application", "category", "value"})
+	if len(results) == 0 {
+		writer.Write([]string{"value"})
+		return
+	}
 
-	// Write data rows
+	// Collect label names in a stable order from the first result.
+	// Use a preferred ordering for common labels; unknown labels follow.
+	preferred := []string{"lab", "building", "room", "app", "category", "hostname", "user"}
+	seen := make(map[string]bool)
+	var cols []string
+	for _, k := range preferred {
+		if _, ok := results[0].Metric[k]; ok {
+			cols = append(cols, k)
+			seen[k] = true
+		}
+	}
+	for k := range results[0].Metric {
+		if !seen[k] {
+			cols = append(cols, k)
+		}
+	}
+
+	header := append(cols, "value")
+	writer.Write(header)
+
 	for _, r := range results {
-		app := r.Metric["app"]
-		category := r.Metric["category"]
-
 		var value float64
 		if len(r.Value) >= 2 {
 			if v, ok := r.Value[1].(string); ok {
 				value, _ = strconv.ParseFloat(v, 64)
 			}
 		}
-
-		writer.Write([]string{app, category, fmt.Sprintf("%.0f", value)})
+		row := make([]string, 0, len(cols)+1)
+		for _, col := range cols {
+			row = append(row, r.Metric[col])
+		}
+		row = append(row, fmt.Sprintf("%.2f", value))
+		writer.Write(row)
 	}
 }
 
