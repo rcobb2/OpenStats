@@ -451,8 +451,11 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 
 // buildUserSessionFilters returns a label selector for user session metrics.
 // Session metrics only carry user and hostname labels (no lab), so lab is not filtered.
+// The regex exclusion purges system accounts that accumulated in Prometheus before the
+// agent-side isValidUser guard was deployed.
 func buildUserSessionFilters(hostname string) string {
-	filters := []string{`user!=""`}
+	const sysExclude = `Font Driver Host.*|Window Manager.*|.*UMFD.*|panopto_upload|System|Local Service|Network Service|TrustedInstaller`
+	filters := []string{`user!=""`, fmt.Sprintf(`user!~"%s"`, sysExclude)}
 	if v, ok := safeLabelValue(hostname); ok {
 		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
 	}
@@ -484,9 +487,10 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 		}
 	}
 	lf := buildUserSessionFilters(q.Get("hostname"))
+	// Login events are sparse — use cumulative counters so any historical data shows.
 	query := fmt.Sprintf(
-		`topk(%d, sum by (hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
-		limit, lf, timeRange,
+		`topk(%d, sum by (hostname) (openlabstats_user_session_logins_total%s) > 0)`,
+		limit, lf,
 	)
 	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
@@ -516,9 +520,10 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	lf := buildUserSessionFilters(q.Get("hostname"))
+	// Login events are sparse — use cumulative counters so any historical data shows.
 	query := fmt.Sprintf(
-		`topk(%d, sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
-		limit, lf, timeRange,
+		`topk(%d, sum by (user) (openlabstats_user_session_logins_total%s) > 0)`,
+		limit, lf,
 	)
 	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
@@ -580,9 +585,10 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	lf := buildUserSessionFilters(q.Get("hostname"))
+	// Divide cumulative session seconds by cumulative login count to get average session minutes.
 	query := fmt.Sprintf(
-		`topk(%d, (sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / sum by (user) (increase(openlabstats_user_session_logins_total%s[%s]))) / 60 > 0)`,
-		limit, lf, timeRange, lf, timeRange,
+		`topk(%d, (sum by (user) (openlabstats_user_session_seconds_total%s) / sum by (user) (openlabstats_user_session_logins_total%s)) / 60 > 0)`,
+		limit, lf, lf,
 	)
 	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
