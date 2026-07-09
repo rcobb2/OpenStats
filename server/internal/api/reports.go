@@ -914,11 +914,20 @@ func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Reques
 	}
 	labFilter := q.Get("lab")
 
-	// Query per-machine utilisation: fraction of the step window with an active session.
+	// Query raw per-(hostname, app, user) series so we can apply the app whitelist
+	// and system-account exclusion server-side before aggregating.
+	// We intentionally do NOT sum by hostname in PromQL — that would prevent filtering.
+	const sysUserExclude = `Font Driver Host.*|Window Manager.*|.*UMFD.*|panopto_upload|System|Local Service|Network Service|TrustedInstaller`
 	stepStr := fmt.Sprintf("%ds", step)
-	hf := buildLabelFilters(q.Get("hostname"), "")
+	hn := q.Get("hostname")
+	var hfParts []string
+	hfParts = append(hfParts, `user!=""`, fmt.Sprintf(`user!~"%s"`, sysUserExclude))
+	if v, ok := safeLabelValue(hn); ok {
+		hfParts = append(hfParts, fmt.Sprintf(`hostname="%s"`, v))
+	}
+	hf := "{" + strings.Join(hfParts, ",") + "}"
 	promQuery := fmt.Sprintf(
-		`avg_over_time(openlabstats_user_session_active%s[%s])`,
+		`rate(openlabstats_app_usage_seconds_total%s[%s])`,
 		hf, stepStr,
 	)
 
@@ -940,25 +949,28 @@ func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Aggregate: for each (lab, timestamp) accumulate sum + count.
-	type key struct {
-		lab string
-		t   int64
+	allowedApps := s.allowedAppSet(ctx)
+
+	// Pass 1: for each (hostname, timestamp), sum app-usage rates for whitelisted apps only.
+	type hostTime struct {
+		hostname string
+		t        int64
 	}
-	sumMap := make(map[key]float64)
-	cntMap := make(map[key]int)
-	labSet := make(map[string]struct{})
+	hostTimeRate := make(map[hostTime]float64)
 
 	for _, series := range raw.Data.Result {
 		hostname := strings.ToLower(series.Metric["hostname"])
-		labName := hostnameToLab[hostname]
-		if labName == "" {
-			labName = "Unassigned"
+		app := series.Metric["app"]
+		if _, inLab := hostnameToLab[hostname]; !inLab {
+			continue // machine not registered in DB
 		}
+		if len(allowedApps) > 0 && !allowedApps[strings.ToLower(app)] {
+			continue // unmapped or ignored app
+		}
+		labName := hostnameToLab[hostname]
 		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
 			continue
 		}
-		labSet[labName] = struct{}{}
 		for _, pt := range series.Values {
 			if len(pt) < 2 {
 				continue
@@ -972,39 +984,71 @@ func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Reques
 				continue
 			}
 			v, _ := strconv.ParseFloat(vs, 64)
-			k := key{labName, int64(tsF)}
-			sumMap[k] += v
-			cntMap[k]++
+			hostTimeRate[hostTime{hostname, int64(tsF)}] += v
 		}
 	}
 
-	// Collect and sort all timestamps.
-	tsSet := make(map[int64]struct{})
-	for k := range sumMap {
-		tsSet[k.t] = struct{}{}
+	// Denominator: total DB-registered machines per lab (idle machines count as 0%).
+	machinesPerLab := make(map[string]int)
+	for hostname, labName := range hostnameToLab {
+		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
+			continue
+		}
+		_ = hostname
+		machinesPerLab[labName]++
 	}
+
+	// Pass 2: clamp each (hostname, timestamp) rate to [0,1], then sum by (lab, timestamp).
+	type labTime struct {
+		lab string
+		t   int64
+	}
+	labTimeSum := make(map[labTime]float64)
+	tsSet := make(map[int64]struct{})
+
+	for ht, rateVal := range hostTimeRate {
+		labName := hostnameToLab[ht.hostname]
+		clamped := rateVal
+		if clamped > 1 {
+			clamped = 1
+		}
+		k := labTime{labName, ht.t}
+		labTimeSum[k] += clamped
+		tsSet[ht.t] = struct{}{}
+	}
+
+	// Also populate tsSet from all series timestamps so we can emit 0% points.
+	for _, series := range raw.Data.Result {
+		for _, pt := range series.Values {
+			if tsF, ok := pt[0].(float64); ok {
+				tsSet[int64(tsF)] = struct{}{}
+			}
+		}
+	}
+
 	timestamps := make([]int64, 0, len(tsSet))
 	for t := range tsSet {
 		timestamps = append(timestamps, t)
 	}
 	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
 
-	// Build per-lab series.
-	labs := make([]string, 0, len(labSet))
-	for lab := range labSet {
+	labs := make([]string, 0, len(machinesPerLab))
+	for lab := range machinesPerLab {
 		labs = append(labs, lab)
 	}
 	sort.Strings(labs)
 
 	var result []utilizationSeries
 	for _, lab := range labs {
+		total := machinesPerLab[lab]
+		if total == 0 {
+			continue
+		}
 		var data []utilizationPoint
 		for _, t := range timestamps {
-			k := key{lab, t}
-			if cnt := cntMap[k]; cnt > 0 {
-				pct := math.Round((sumMap[k]/float64(cnt))*1000) / 10 // one decimal place
-				data = append(data, utilizationPoint{T: t, V: pct})
-			}
+			k := labTime{lab, t}
+			pct := math.Round((labTimeSum[k]/float64(total))*1000) / 10
+			data = append(data, utilizationPoint{T: t, V: pct})
 		}
 		if len(data) > 0 {
 			result = append(result, utilizationSeries{Lab: lab, Data: data})
