@@ -820,8 +820,9 @@ type utilizationPoint struct {
 }
 
 type utilizationSeries struct {
-	Lab  string             `json:"lab"`
-	Data []utilizationPoint `json:"data"`
+	Lab   string             `json:"lab"`
+	Total int                `json:"total"`
+	Data  []utilizationPoint `json:"data"`
 }
 
 type utilizationResponse struct {
@@ -1047,11 +1048,13 @@ func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Reques
 		var data []utilizationPoint
 		for _, t := range timestamps {
 			k := labTime{lab, t}
-			pct := math.Round((labTimeSum[k]/float64(total))*1000) / 10
-			data = append(data, utilizationPoint{T: t, V: pct})
+			// Send raw machine count (sum of per-machine [0,1] values); frontend
+			// computes % using Total so it can toggle between the two views.
+			raw := math.Round(labTimeSum[k]*10) / 10
+			data = append(data, utilizationPoint{T: t, V: raw})
 		}
 		if len(data) > 0 {
-			result = append(result, utilizationSeries{Lab: lab, Data: data})
+			result = append(result, utilizationSeries{Lab: lab, Total: total, Data: data})
 		}
 	}
 

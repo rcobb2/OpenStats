@@ -172,6 +172,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
 
 function UtilizationChart({ range, filters }) {
   const [resp, setResp] = useState(null);
+  const [mode, setMode] = useState('pct'); // 'pct' | 'count'
 
   useEffect(() => {
     setResp(null);
@@ -180,22 +181,43 @@ function UtilizationChart({ range, filters }) {
       .catch(() => setResp(false));
   }, [range, filters]);
 
-  const { chartData, labs } = useMemo(() => {
-    if (!resp?.series?.length) return { chartData: [], labs: [] };
+  const { chartData, labs, totals } = useMemo(() => {
+    if (!resp?.series?.length) return { chartData: [], labs: [], totals: {} };
     const labs = resp.series.map(s => s.lab);
+    const totals = {};
     const lookup = {};
     resp.series.forEach(s => {
+      totals[s.lab] = s.total;
       lookup[s.lab] = {};
       s.data.forEach(p => { lookup[s.lab][p.t] = p.v; });
     });
     const allTs = [...new Set(resp.series.flatMap(s => s.data.map(p => p.t)))].sort((a, b) => a - b);
     const chartData = allTs.map(t => {
       const row = { t };
-      labs.forEach(lab => { if (lookup[lab][t] != null) row[lab] = lookup[lab][t]; });
+      labs.forEach(lab => {
+        if (lookup[lab][t] != null) {
+          const raw = lookup[lab][t];
+          row[lab] = raw; // raw count stored; mode transforms for display
+        }
+      });
       return row;
     });
-    return { chartData, labs };
+    return { chartData, labs, totals };
   }, [resp]);
+
+  // Transform values based on mode before passing to Recharts
+  const displayData = useMemo(() => {
+    if (mode === 'pct') {
+      return chartData.map(row => {
+        const r = { t: row.t };
+        labs.forEach(lab => {
+          if (row[lab] != null) r[lab] = Math.round((row[lab] / totals[lab]) * 1000) / 10;
+        });
+        return r;
+      });
+    }
+    return chartData;
+  }, [chartData, labs, totals, mode]);
 
   const rangeSecs = range ? (
     range.endsWith('d') ? parseInt(range) * 86400 :
@@ -209,13 +231,29 @@ function UtilizationChart({ range, filters }) {
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
+  const toggleStyle = (active) => ({
+    padding: '2px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 4,
+    border: '1px solid var(--border,#444)',
+    background: active ? 'var(--accent,#1e90ff)' : 'transparent',
+    color: active ? '#fff' : undefined,
+  });
+
   if (resp === null) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
   if (resp === false) return <div style={{ padding: '1rem', color: 'var(--error,#e55353)' }}>Failed to load data.</div>;
   if (!chartData.length) return <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>;
 
+  const maxCount = mode === 'count'
+    ? Math.max(...labs.map(l => totals[l] ?? 0))
+    : 100;
+
   return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, marginBottom: 8 }}>
+        <button style={toggleStyle(mode === 'pct')} onClick={() => setMode('pct')}>%</button>
+        <button style={toggleStyle(mode === 'count')} onClick={() => setMode('count')}>#</button>
+      </div>
     <ResponsiveContainer width="100%" height={260}>
-      <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+      <LineChart data={displayData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border,#333)" />
         <XAxis
           dataKey="t"
@@ -224,13 +262,13 @@ function UtilizationChart({ range, filters }) {
           minTickGap={40}
         />
         <YAxis
-          domain={[0, 100]}
-          tickFormatter={v => `${v}%`}
+          domain={[0, maxCount]}
+          tickFormatter={v => mode === 'pct' ? `${v}%` : v}
           tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
           width={42}
         />
         <Tooltip
-          formatter={(v, name) => [`${v}%`, name]}
+          formatter={(v, name) => [mode === 'pct' ? `${v}%` : `${v} machines`, name]}
           labelFormatter={fmtTime}
           contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
         />
@@ -248,6 +286,7 @@ function UtilizationChart({ range, filters }) {
         ))}
       </LineChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
