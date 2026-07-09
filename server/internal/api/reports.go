@@ -296,13 +296,6 @@ func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 // @Router       /api/v1/reports/top-apps-by-launches [get]
 func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	timeRange := safeTimeRange(q.Get("range"), "24h")
-	atTime := int64(0)
-	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
-		timeRange = dur
-		atTime = end
-	}
-
 	limit := 10
 	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
@@ -365,13 +358,6 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 // @Router       /api/v1/reports/bottom-apps-by-launches [get]
 func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	timeRange := safeTimeRange(q.Get("range"), "24h")
-	atTime := int64(0)
-	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
-		timeRange = dur
-		atTime = end
-	}
-
 	limit := 10
 	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
