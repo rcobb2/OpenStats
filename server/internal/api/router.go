@@ -97,6 +97,9 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Patch("/{mappingID}/ignore", s.ToggleMappingIgnored)
 		})
 
+		// Quick-ignore from reports page (creates or updates mapping to ignored=true)
+		r.Post("/reports/ignore-app", s.QuickIgnoreApp)
+
 		// Reports
 		r.Route("/reports", func(r chi.Router) {
 			r.Get("/top-apps", s.ReportTopAppsUsage)

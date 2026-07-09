@@ -19,6 +19,7 @@ import {
   getTopUsersByLogins,
   getTopUsersBySessionTime,
   getAvgSessionTime,
+  ignoreApp,
 } from '../api';
 
 const CHART_COLORS = [
@@ -32,10 +33,32 @@ function defaultDatetime(offsetHours = 0) {
   return d.toISOString().slice(0, 16);
 }
 
-function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 300 }) {
+function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 300, onIgnore }) {
   if (data === null) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
   if (data === false) return <div style={{ padding: '1rem', color: 'var(--error, #e55353)' }}>Failed to load data.</div>;
   if (data.length === 0) return <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>;
+
+  const CustomTooltip = ({ active, payload }) => {
+    if (!active || !payload?.[0]) return null;
+    const { name, value, category } = payload[0].payload;
+    const display = typeof value === 'number'
+      ? value.toLocaleString(undefined, { maximumFractionDigits: roundValues ? 0 : 1 })
+      : value;
+    return (
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '0.5rem 0.75rem', fontSize: 13, maxWidth: 220 }}>
+        <div style={{ color: 'var(--text)', fontWeight: 500, marginBottom: 2 }}>{name}</div>
+        <div style={{ color: 'var(--text-dim)' }}>{category || valueLabel}: {display}</div>
+        {onIgnore && (
+          <button
+            onClick={e => { e.stopPropagation(); onIgnore(name); }}
+            style={{ marginTop: '0.4rem', fontSize: 11, color: 'var(--error, #e55353)', background: 'none', border: '1px solid var(--error, #e55353)', borderRadius: 3, cursor: 'pointer', padding: '1px 6px' }}
+          >
+            Ignore this app
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -56,17 +79,7 @@ function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 3
           axisLine={false}
           tickLine={false}
         />
-        <Tooltip
-          cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-          contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
-          labelStyle={{ color: 'var(--text)' }}
-          formatter={(v, _name, { payload }) => [
-            typeof v === 'number'
-              ? v.toLocaleString(undefined, { maximumFractionDigits: roundValues ? 0 : 1 })
-              : v,
-            payload.category || valueLabel,
-          ]}
-        />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
         <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={22} fill={CHART_COLORS[0]}>
           {data.map((_, i) => (
             <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
@@ -92,7 +105,7 @@ function applyAppFilter(data, appFilter) {
   return data.filter(r => r.name.toLowerCase().includes(q));
 }
 
-function UserBehaviorReport({ range, filters, appFilter }) {
+function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const [foreground, setForeground] = useState(null);
   const [launches, setLaunches] = useState(null);
   const [topDevices, setTopDevices] = useState(null);
@@ -126,10 +139,10 @@ function UserBehaviorReport({ range, filters, appFilter }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
         <ChartCard title="Top 10 Apps by Active Time">
-          <HBarChart data={applyAppFilter(foreground, appFilter)} valueLabel="hours" height={300} />
+          <HBarChart data={applyAppFilter(foreground, appFilter)} valueLabel="hours" height={300} onIgnore={onIgnore} />
         </ChartCard>
         <ChartCard title="Top 10 Apps by Launch Count">
-          <HBarChart data={applyAppFilter(launches, appFilter)} valueLabel="launches" roundValues height={300} />
+          <HBarChart data={applyAppFilter(launches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />
         </ChartCard>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
@@ -182,7 +195,7 @@ function LabUsageReport({ range, filters, appFilter }) {
   );
 }
 
-function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleExport }) {
+function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleExport, onIgnore }) {
   const [topLaunches, setTopLaunches] = useState(null);
   const [bottomLaunches, setBottomLaunches] = useState(null);
   const [topForeground, setTopForeground] = useState(null);
@@ -214,14 +227,14 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
         <ChartCard title="Top 10 Apps — Launch Count">
-          <HBarChart data={applyAppFilter(topLaunches, appFilter)} valueLabel="launches" roundValues height={300} />
+          <HBarChart data={applyAppFilter(topLaunches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />
         </ChartCard>
         <ChartCard title="Top 10 Apps — Active Time">
-          <HBarChart data={applyAppFilter(topForeground, appFilter)} valueLabel="hours" height={300} />
+          <HBarChart data={applyAppFilter(topForeground, appFilter)} valueLabel="hours" height={300} onIgnore={onIgnore} />
         </ChartCard>
       </div>
       <ChartCard title="Bottom 10 Apps — Launch Count (Underutilized)">
-        <HBarChart data={applyAppFilter(bottomLaunches, appFilter)} valueLabel="launches" roundValues height={300} />
+        <HBarChart data={applyAppFilter(bottomLaunches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />
       </ChartCard>
     </div>
   );
@@ -262,6 +275,16 @@ export default function Reports() {
   // Encode all active filter params into the key so chart components reload on any filter change.
   const effectiveRange = isCustomReady ? `${customStart}~${customEnd}` : range;
   const chartKey = `${refreshKey}-${effectiveRange}-${hostname}-${lab}`;
+
+  const handleIgnore = async (name) => {
+    if (!window.confirm(`Hide "${name}" from all charts?\nYou can re-enable it in the Mappings page.`)) return;
+    try {
+      await ignoreApp(name);
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      alert('Failed to ignore app: ' + err.message);
+    }
+  };
 
   const handleExport = async (exportFn) => {
     setExporting(true);
@@ -379,7 +402,7 @@ export default function Reports() {
       {(range !== 'custom' || isCustomReady) && (
         <>
           {reportType === 'user' && (
-            <UserBehaviorReport key={chartKey} range={effectiveRange} filters={filters} appFilter={appFilter} />
+            <UserBehaviorReport key={chartKey} range={effectiveRange} filters={filters} appFilter={appFilter} onIgnore={handleIgnore} />
           )}
           {reportType === 'hardware' && (
             <LabUsageReport key={chartKey} range={effectiveRange} filters={filters} appFilter={appFilter} />
@@ -392,6 +415,7 @@ export default function Reports() {
               appFilter={appFilter}
               exporting={exporting}
               handleExport={handleExport}
+              onIgnore={handleIgnore}
             />
           )}
         </>

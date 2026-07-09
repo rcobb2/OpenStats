@@ -75,6 +75,7 @@ export const getBottomAppsByForeground = (range = '24h', limit = 10, filters = {
 export const getUsageByLab = (range = '24h', filters = {}) =>
   request(`/reports/usage-by-lab?${buildReportParams(range, null, filters)}`);
 export const getActiveUsers = () => request('/reports/active-users');
+export const ignoreApp = (name) => request('/reports/ignore-app', { method: 'POST', body: JSON.stringify({ name }) });
 export const getTopDevicesBySessions = (range = '24h', limit = 10, filters = {}) =>
   request(`/reports/top-devices-by-sessions?${buildReportParams(range, limit, filters)}`);
 export const getTopUsersByLogins = (range = '24h', limit = 10, filters = {}) =>

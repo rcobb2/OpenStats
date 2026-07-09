@@ -149,7 +149,8 @@ func buildLabelFilters(hostname, lab string) string {
 	return "{" + strings.Join(filters, ",") + "}"
 }
 
-// ignoredAppSet returns a set of ignored app display names for fast O(1) lookup.
+// ignoredAppSet returns a set of lowercased ignored app names (both display name
+// and exe name) for case-insensitive O(1) lookup against Prometheus app labels.
 func (s *Server) ignoredAppSet(ctx context.Context) map[string]bool {
 	mappings, err := s.store.ListMappings(ctx)
 	if err != nil {
@@ -157,8 +158,14 @@ func (s *Server) ignoredAppSet(ctx context.Context) map[string]bool {
 	}
 	set := make(map[string]bool)
 	for _, m := range mappings {
-		if m.Ignored && m.DisplayName != "" {
-			set[m.DisplayName] = true
+		if !m.Ignored {
+			continue
+		}
+		if m.DisplayName != "" {
+			set[strings.ToLower(m.DisplayName)] = true
+		}
+		if m.ExeName != "" {
+			set[strings.ToLower(m.ExeName)] = true
 		}
 	}
 	return set
@@ -191,7 +198,7 @@ func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format st
 	if len(ignoredApps) > 0 {
 		filtered := result.Data.Result[:0]
 		for _, r := range result.Data.Result {
-			if !ignoredApps[r.Metric["app"]] {
+			if !ignoredApps[strings.ToLower(r.Metric["app"])] {
 				filtered = append(filtered, r)
 			}
 		}
@@ -304,11 +311,12 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 	}
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	// Use cumulative counters — apps that started before the time window still show launches.
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
-		limit, lf, timeRange,
+		`topk(%d, sum by (app, category) (openlabstats_app_launches_total%s) > 0)`,
+		limit, lf,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.ignoredAppSet(r.Context()))
 }
 
 // ReportTopAppsByForegroundTime godoc
@@ -373,10 +381,10 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
-		limit, lf, timeRange,
+		`bottomk(%d, sum by (app, category) (openlabstats_app_launches_total%s) > 0)`,
+		limit, lf,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.ignoredAppSet(r.Context()))
 }
 
 // ReportBottomAppsByForegroundTime godoc

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -167,6 +168,51 @@ func (s *Server) ToggleMappingIgnored(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// QuickIgnoreApp finds or creates a mapping by display name and marks it ignored.
+// Called from the reports page "Ignore" button on chart bars for unmapped apps.
+func (s *Server) QuickIgnoreApp(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := readJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	ctx := r.Context()
+	lowerName := strings.ToLower(name)
+
+	mappings, err := s.store.ListMappings(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list mappings")
+		return
+	}
+
+	// Find existing mapping by display name or exe name (case-insensitive).
+	for _, m := range mappings {
+		if strings.ToLower(m.DisplayName) == lowerName || strings.ToLower(m.ExeName) == lowerName {
+			if err := s.store.SetMappingIgnored(ctx, m.ID, true); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update mapping")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+			return
+		}
+	}
+
+	// No existing mapping — create one marked ignored.
+	if err := s.store.UpsertMapping(ctx, &store.SoftwareMapping{
+		ExeName:     name,
+		DisplayName: name,
+		Ignored:     true,
+		Source:      "user",
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create mapping")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "created"})
 }
 
 // DeleteMapping godoc
