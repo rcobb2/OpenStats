@@ -24,10 +24,12 @@ export default function Mappings() {
 
   const reviewCount = mappings.filter(m => m.source === 'auto' && !m.ignored).length;
   const ignoredCount = mappings.filter(m => m.ignored).length;
+  const allowedCount = mappings.filter(m => !m.ignored && m.source !== 'auto').length;
 
   const tabFiltered = mappings.filter(m => {
     if (tab === 'review') return m.source === 'auto' && !m.ignored;
     if (tab === 'ignored') return m.ignored;
+    if (tab === 'allowed') return !m.ignored && m.source !== 'auto';
     return true;
   });
 
@@ -126,6 +128,10 @@ export default function Mappings() {
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <TabButton active={tab === 'all'} onClick={() => setTab('all')}>
           All <span className="badge">{mappings.length}</span>
+        </TabButton>
+        <TabButton active={tab === 'allowed'} onClick={() => setTab('allowed')}>
+          Allowed
+          {allowedCount > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{allowedCount}</span>}
         </TabButton>
         <TabButton active={tab === 'review'} onClick={() => setTab('review')}>
           Needs Review
@@ -226,7 +232,7 @@ export default function Mappings() {
           ))}
           {filtered.length === 0 && (
             <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted, #aaa)', padding: '1.5rem' }}>
-              {filter ? 'No mappings match the filter.' : tab === 'review' ? 'No auto-discovered processes to review.' : tab === 'ignored' ? 'No ignored processes.' : 'No mappings yet.'}
+              {filter ? 'No mappings match the filter.' : tab === 'review' ? 'No auto-discovered processes to review.' : tab === 'ignored' ? 'No ignored processes.' : tab === 'allowed' ? 'No approved mappings yet.' : 'No mappings yet.'}
             </td></tr>
           )}
         </tbody>
