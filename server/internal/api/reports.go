@@ -41,6 +41,7 @@ type promQueryInstantResult struct {
 // @Failure      502  {object}  map[string]string
 // @Router       /api/v1/reports/usage-by-lab [get]
 func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	q := r.URL.Query()
 	timeRange := safeTimeRange(q.Get("range"), "24h")
 	atTime := int64(0)
@@ -49,12 +50,119 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 		atTime = end
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	// Build hostname→labName from current DB assignments so that reassigned
+	// machines are immediately reflected without waiting for Prometheus labels
+	// to rotate out.
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		return
+	}
+
+	// Query by hostname — ignore the Prometheus lab label entirely.
+	hf := buildLabelFilters(q.Get("hostname"), "")
 	query := fmt.Sprintf(
-		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
-		lf, timeRange,
+		`sum by (hostname, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
+		hf, timeRange,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), 0, false)
+
+	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
+	if atTime > 0 {
+		promURL += fmt.Sprintf("&time=%d", atTime)
+	}
+	resp, err := s.promClient.Get(promURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+	defer resp.Body.Close()
+
+	var raw promQueryInstantResult
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse Prometheus response")
+		return
+	}
+
+	allowedApps := s.allowedAppSet(ctx)
+	labFilter := q.Get("lab")
+
+	// Aggregate (lab, app) → total seconds using current DB lab assignments.
+	type labAppKey struct{ lab, app string }
+	agg := make(map[labAppKey]float64)
+	for _, entry := range raw.Data.Result {
+		app := entry.Metric["app"]
+		if len(allowedApps) > 0 && !allowedApps[strings.ToLower(app)] {
+			continue
+		}
+		labName := hostnameToLab[strings.ToLower(entry.Metric["hostname"])]
+		if labName == "" {
+			labName = "Unassigned"
+		}
+		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
+			continue
+		}
+		if len(entry.Value) < 2 {
+			continue
+		}
+		v, ok := entry.Value[1].(string)
+		if !ok {
+			continue
+		}
+		val, _ := strconv.ParseFloat(v, 64)
+		if val > 0 {
+			agg[labAppKey{labName, app}] += val
+		}
+	}
+
+	// Reconstruct as Prometheus vector format so the existing frontend works unchanged.
+	now := time.Now().Unix()
+	var result promQueryInstantResult
+	result.Status = "success"
+	result.Data.ResultType = "vector"
+	for k, v := range agg {
+		result.Data.Result = append(result.Data.Result, struct {
+			Metric map[string]string `json:"metric"`
+			Value  []interface{}     `json:"value"`
+		}{
+			Metric: map[string]string{"lab": k.lab, "app": k.app},
+			Value:  []interface{}{now, fmt.Sprintf("%g", v)},
+		})
+	}
+
+	if q.Get("format") == "csv" {
+		s.writeCSV(w, result.Data.Result)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}
+}
+
+// buildHostnameLabMap returns a lowercased-hostname → lab-name map using current DB
+// lab assignments. Unassigned machines map to "Unassigned".
+func (s *Server) buildHostnameLabMap(ctx context.Context) (map[string]string, error) {
+	agents, err := s.store.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	labs, err := s.store.ListLabs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	labByID := make(map[string]string, len(labs))
+	for _, l := range labs {
+		labByID[l.ID] = l.Name
+	}
+	m := make(map[string]string, len(agents))
+	for _, a := range agents {
+		labName := "Unassigned"
+		if a.LabID != nil && *a.LabID != "" {
+			if name, ok := labByID[*a.LabID]; ok {
+				labName = name
+			}
+		}
+		m[strings.ToLower(a.Hostname)] = labName
+	}
+	return m, nil
 }
 
 // ReportActiveUsers godoc
