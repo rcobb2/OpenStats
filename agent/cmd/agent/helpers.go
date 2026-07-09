@@ -198,6 +198,24 @@ func isValidUser(user string) bool {
 		"daemon",
 		"nobody",
 		"wheel",
+		// macOS app/service daemons (no _ prefix but not human users)
+		"panopto_upload",
+		"lp",
+		"sshd",
+		"postfix",
+		"www",
+		"eppc",
+		"qtss",
+		"cyrus",
+		"vpn",
+		"tokend",
+		"securityagent",
+		"apple_remote_desktop",
+		"windowserver",
+		"spotlight",
+		"netinfo",
+		"installer",
+		"ard",
 	}
 
 	// Check for exact match or suffix (to handle DOMAIN\Account or NT AUTHORITY\Account)
@@ -262,6 +280,11 @@ func newUserSessionManager(m *metrics.Metrics, logger *slog.Logger) *userSession
 }
 
 func (usm *userSessionManager) onProcessStart(user string, pid uint32) {
+	// Ignore system/service processes — only track real human user sessions.
+	if !isValidUser(user) {
+		return
+	}
+
 	usm.mu.Lock()
 	defer usm.mu.Unlock()
 
@@ -283,6 +306,10 @@ func (usm *userSessionManager) onProcessStart(user string, pid uint32) {
 }
 
 func (usm *userSessionManager) onProcessStop(user string, pid uint32) {
+	if !isValidUser(user) {
+		return
+	}
+
 	usm.mu.Lock()
 	defer usm.mu.Unlock()
 

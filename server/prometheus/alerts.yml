@@ -30,17 +30,17 @@ groups:
     rules:
       # Pre-computed recording rules for faster dashboard queries.
 
-      # Total app usage seconds per app over the last 24 hours.
+      # Total app usage seconds per app over the last 24 hours (human users only).
       - record: openlabstats:app_usage_24h:sum
-        expr: sum by (app, category) (increase(openlabstats_app_usage_seconds_total[24h]))
+        expr: sum by (app, category) (increase(openlabstats_app_usage_seconds_total{user!=""}[24h]))
 
-      # Total app launches per app over the last 24 hours.
+      # Total app launches per app over the last 24 hours (human users only).
       - record: openlabstats:app_launches_24h:sum
-        expr: sum by (app, category) (increase(openlabstats_app_launches_total[24h]))
+        expr: sum by (app, category) (increase(openlabstats_app_launches_total{user!=""}[24h]))
 
-      # Total app usage per lab over the last 24 hours.
+      # Total app usage per lab over the last 24 hours (human users only).
       - record: openlabstats:lab_usage_24h:sum
-        expr: sum by (lab, app) (increase(openlabstats_app_usage_seconds_total[24h]))
+        expr: sum by (lab, app) (increase(openlabstats_app_usage_seconds_total{user!=""}[24h]))
 
       # Active device count.
       - record: openlabstats:active_devices:count
