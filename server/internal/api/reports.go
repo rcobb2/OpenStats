@@ -1009,12 +1009,12 @@ func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Reques
 
 	for ht, rateVal := range hostTimeRate {
 		labName := hostnameToLab[ht.hostname]
-		clamped := rateVal
-		if clamped > 1 {
-			clamped = 1
+		var active float64
+		if rateVal > 0 {
+			active = 1
 		}
 		k := labTime{labName, ht.t}
-		labTimeSum[k] += clamped
+		labTimeSum[k] += active
 		tsSet[ht.t] = struct{}{}
 	}
 
