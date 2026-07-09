@@ -87,7 +87,7 @@ export const getAvgSessionTime = (range = '24h', limit = 10, filters = {}) =>
 
 // Parse a Prometheus instant-query vector response into [{name, category, value}]
 // nameLabel controls which metric label becomes the display name (default: 'app').
-export function parsePromVector(res, nameLabel = 'app') {
+export function parsePromVector(res, nameLabel = 'app', ascending = false) {
   if (!res?.data?.result) return [];
   const rows = res.data.result.map(r => ({
     name: r.metric?.[nameLabel] ?? r.metric?.app ?? r.metric?.user ?? r.metric?.hostname ?? r.metric?.__name__ ?? 'unknown',
@@ -117,7 +117,7 @@ export function parsePromVector(res, nameLabel = 'app') {
 
   return [...merged.values()]
     .filter(r => r.value > 0)
-    .sort((a, b) => b.value - a.value);
+    .sort((a, b) => ascending ? a.value - b.value : b.value - a.value);
 }
 
 // CSV Export helpers

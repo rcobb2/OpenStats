@@ -205,7 +205,7 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
     setBottomLaunches(null);
     setTopForeground(null);
     getTopAppsByLaunches(range, 10, filters).then(r => setTopLaunches(parsePromVector(r))).catch(() => setTopLaunches(false));
-    getBottomAppsByLaunches(range, 10, filters).then(r => setBottomLaunches(parsePromVector(r))).catch(() => setBottomLaunches(false));
+    getBottomAppsByLaunches(range, 10, filters).then(r => setBottomLaunches(parsePromVector(r, 'app', true))).catch(() => setBottomLaunches(false));
     getTopAppsByUsage(range, 10, filters).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
   }, [range, filters]);
 
