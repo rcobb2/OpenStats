@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,12 +49,12 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 		atTime = end
 	}
 
-	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
 		lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
 }
 
 // ReportActiveUsers godoc
@@ -150,35 +149,61 @@ func buildLabelFilters(hostname, lab string) string {
 	return "{" + strings.Join(filters, ",") + "}"
 }
 
-// ignoredAppNames returns a slice of RE2-escaped display names for all ignored mappings.
-func (s *Server) ignoredAppNames(ctx context.Context) []string {
+// ignoredAppSet returns a set of ignored app display names for fast O(1) lookup.
+func (s *Server) ignoredAppSet(ctx context.Context) map[string]bool {
 	mappings, err := s.store.ListMappings(ctx)
 	if err != nil {
 		return nil
 	}
-	var names []string
+	set := make(map[string]bool)
 	for _, m := range mappings {
 		if m.Ignored && m.DisplayName != "" {
-			names = append(names, regexp.QuoteMeta(m.DisplayName))
+			set[m.DisplayName] = true
 		}
 	}
-	sort.Strings(names)
-	return names
+	return set
 }
 
-// buildAppLabelFilters is like buildLabelFilters but also excludes ignored app display names.
-func buildAppLabelFilters(hostname, lab string, ignoredApps []string) string {
-	filters := []string{`user!=""`}
-	if v, ok := safeLabelValue(hostname); ok {
-		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
+// queryAndRespondFiltered queries Prometheus and removes any result whose "app" label
+// is in the ignored set before writing the response. This avoids injecting a large
+// regex into the PromQL query string (which can exceed URL/query length limits).
+func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format string, atTime int64, ignoredApps map[string]bool) {
+	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
+	if atTime > 0 {
+		promURL += fmt.Sprintf("&time=%d", atTime)
 	}
-	if v, ok := safeLabelValue(lab); ok {
-		filters = append(filters, fmt.Sprintf(`lab="%s"`, v))
+
+	resp, err := s.promClient.Get(promURL)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
 	}
+	defer resp.Body.Close()
+
+	var result promQueryInstantResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		s.logger.Error("failed to decode prometheus response", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to parse Prometheus response")
+		return
+	}
+
 	if len(ignoredApps) > 0 {
-		filters = append(filters, fmt.Sprintf(`app!~"%s"`, strings.Join(ignoredApps, "|")))
+		filtered := result.Data.Result[:0]
+		for _, r := range result.Data.Result {
+			if !ignoredApps[r.Metric["app"]] {
+				filtered = append(filtered, r)
+			}
+		}
+		result.Data.Result = filtered
 	}
-	return "{" + strings.Join(filters, ",") + "}"
+
+	if format == "csv" {
+		s.writeCSV(w, result.Data.Result)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}
 }
 
 // parseCustomTimeRange parses start/end query params (unix timestamp integers or RFC3339).
@@ -278,12 +303,12 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`topk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
 		limit, lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
 }
 
 // ReportTopAppsByForegroundTime godoc
@@ -312,12 +337,12 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`topk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
 		limit, lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
 }
 
 // ReportBottomAppsByLaunches godoc
@@ -346,12 +371,12 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
 		limit, lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
 }
 
 // ReportBottomAppsByForegroundTime godoc
@@ -380,12 +405,12 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 		}
 	}
 
-	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
 		limit, lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
 }
 
 // queryAndRespond executes a Prometheus instant query at the current time.
@@ -634,10 +659,10 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
+	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) / 3600 > 0)`,
 		limit, lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.ignoredAppSet(r.Context()))
 }
