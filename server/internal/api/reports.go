@@ -54,7 +54,7 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
 		lf, timeRange,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), 0, false)
 }
 
 // ReportActiveUsers godoc
@@ -176,10 +176,11 @@ func (s *Server) allowedAppSet(ctx context.Context) map[string]bool {
 	return set
 }
 
-// queryAndRespondFiltered queries Prometheus and keeps only results whose "app" label
-// is in the allowed set. This is a whitelist: unmapped apps and ignored apps are both
-// excluded. Pass nil to skip filtering (used when no mappings exist yet).
-func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format string, atTime int64, allowedApps map[string]bool) {
+// queryAndRespondFiltered queries Prometheus, applies the whitelist, sorts by value,
+// and limits to the top/bottom N results. This must be done server-side because topk/
+// bottomk in PromQL runs before filtering — unmapped apps can crowd out mapped ones.
+// Pass limit=0 to skip server-side limiting. Pass ascending=true for bottomk semantics.
+func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format string, atTime int64, allowedApps map[string]bool, limit int, ascending bool) {
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
 	if atTime > 0 {
 		promURL += fmt.Sprintf("&time=%d", atTime)
@@ -200,6 +201,7 @@ func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format st
 		return
 	}
 
+	// Whitelist: keep only apps with an active mapping entry.
 	if len(allowedApps) > 0 {
 		filtered := result.Data.Result[:0]
 		for _, r := range result.Data.Result {
@@ -208,6 +210,30 @@ func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format st
 			}
 		}
 		result.Data.Result = filtered
+	}
+
+	// Server-side sort + limit (replaces PromQL topk/bottomk).
+	if limit > 0 || ascending {
+		parseVal := func(idx int) float64 {
+			r := result.Data.Result[idx]
+			if len(r.Value) < 2 {
+				return 0
+			}
+			if v, ok := r.Value[1].(string); ok {
+				f, _ := strconv.ParseFloat(v, 64)
+				return f
+			}
+			return 0
+		}
+		sort.SliceStable(result.Data.Result, func(i, j int) bool {
+			if ascending {
+				return parseVal(i) < parseVal(j)
+			}
+			return parseVal(i) > parseVal(j)
+		})
+		if limit > 0 && len(result.Data.Result) > limit {
+			result.Data.Result = result.Data.Result[:limit]
+		}
 	}
 
 	if format == "csv" {
@@ -310,11 +336,12 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	// Use cumulative counters — apps that started before the time window still show launches.
+	// topk is applied server-side after whitelist filtering.
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (openlabstats_app_launches_total%s) > 0)`,
-		limit, lf,
+		`sum by (app, category) (openlabstats_app_launches_total%s) > 0`,
+		lf,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.allowedAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.allowedAppSet(r.Context()), limit, false)
 }
 
 // ReportTopAppsByForegroundTime godoc
@@ -345,10 +372,10 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
-		limit, lf, timeRange,
+		`sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
 }
 
 // ReportBottomAppsByLaunches godoc
@@ -372,10 +399,10 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`bottomk(%d, sum by (app, category) (openlabstats_app_launches_total%s) > 0)`,
-		limit, lf,
+		`sum by (app, category) (openlabstats_app_launches_total%s) > 0`,
+		lf,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.allowedAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.allowedAppSet(r.Context()), limit, true)
 }
 
 // ReportBottomAppsByForegroundTime godoc
@@ -406,10 +433,10 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
-		limit, lf, timeRange,
+		`sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, true)
 }
 
 // queryAndRespond executes a Prometheus instant query at the current time.
@@ -660,8 +687,8 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) / 3600 > 0)`,
-		limit, lf, timeRange,
+		`sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) / 3600 > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()))
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
 }
