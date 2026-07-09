@@ -106,6 +106,10 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Get("/bottom-apps-by-foreground", s.ReportBottomAppsByForegroundTime)
 			r.Get("/usage-by-lab", s.ReportUsageByLab)
 			r.Get("/active-users", s.ReportActiveUsers)
+			r.Get("/top-devices-by-sessions", s.ReportTopDevicesBySessionCount)
+			r.Get("/top-users-by-logins", s.ReportTopUsersByLoginCount)
+			r.Get("/top-users-by-session-time", s.ReportTopUsersBySessionTime)
+			r.Get("/avg-session-time", s.ReportAvgSessionTime)
 			r.Get("/summary", s.ReportSummary)
 		})
 

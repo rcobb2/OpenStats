@@ -449,6 +449,144 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 	}
 }
 
+// buildUserSessionFilters returns a label selector for user session metrics.
+// Session metrics only carry user and hostname labels (no lab), so lab is not filtered.
+func buildUserSessionFilters(hostname string) string {
+	filters := []string{`user!=""`}
+	if v, ok := safeLabelValue(hostname); ok {
+		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
+	}
+	return "{" + strings.Join(filters, ",") + "}"
+}
+
+// ReportTopDevicesBySessionCount godoc
+// @Summary      Top devices by session count
+// @Description  Returns the top N hostnames ranked by user login count over the time range.
+// @Tags         reports
+// @Produce      json
+// @Param        range    query  string  false  "Time range"  default(24h)
+// @Param        limit    query  int     false  "Max results"  default(10)
+// @Param        hostname query  string  false  "Filter to a specific machine"
+// @Success      200
+// @Router       /api/v1/reports/top-devices-by-sessions [get]
+func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+	limit := 10
+	if l := q.Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+	lf := buildUserSessionFilters(q.Get("hostname"))
+	query := fmt.Sprintf(
+		`topk(%d, sum by (hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
+		limit, lf, timeRange,
+	)
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+}
+
+// ReportTopUsersByLoginCount godoc
+// @Summary      Top users by login count
+// @Description  Returns the top N users ranked by total login sessions over the time range.
+// @Tags         reports
+// @Produce      json
+// @Param        range    query  string  false  "Time range"  default(24h)
+// @Param        limit    query  int     false  "Max results"  default(10)
+// @Param        hostname query  string  false  "Filter to a specific machine"
+// @Success      200
+// @Router       /api/v1/reports/top-users-by-logins [get]
+func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+	limit := 10
+	if l := q.Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+	lf := buildUserSessionFilters(q.Get("hostname"))
+	query := fmt.Sprintf(
+		`topk(%d, sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
+		limit, lf, timeRange,
+	)
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+}
+
+// ReportTopUsersBySessionTime godoc
+// @Summary      Top users by total session time
+// @Description  Returns the top N users ranked by total session hours over the time range.
+// @Tags         reports
+// @Produce      json
+// @Param        range    query  string  false  "Time range"  default(24h)
+// @Param        limit    query  int     false  "Max results"  default(10)
+// @Param        hostname query  string  false  "Filter to a specific machine"
+// @Success      200
+// @Router       /api/v1/reports/top-users-by-session-time [get]
+func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+	limit := 10
+	if l := q.Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+	lf := buildUserSessionFilters(q.Get("hostname"))
+	query := fmt.Sprintf(
+		`topk(%d, sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / 3600 > 0)`,
+		limit, lf, timeRange,
+	)
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+}
+
+// ReportAvgSessionTime godoc
+// @Summary      Average session duration per user
+// @Description  Returns top N users ranked by average session duration in minutes.
+// @Tags         reports
+// @Produce      json
+// @Param        range    query  string  false  "Time range"  default(24h)
+// @Param        limit    query  int     false  "Max results"  default(10)
+// @Param        hostname query  string  false  "Filter to a specific machine"
+// @Success      200
+// @Router       /api/v1/reports/avg-session-time [get]
+func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+	limit := 10
+	if l := q.Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+	lf := buildUserSessionFilters(q.Get("hostname"))
+	query := fmt.Sprintf(
+		`topk(%d, (sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / sum by (user) (increase(openlabstats_user_session_logins_total%s[%s]))) / 60 > 0)`,
+		limit, lf, timeRange, lf, timeRange,
+	)
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+}
+
 // ReportTopAppsUsage godoc
 // @Summary      Top applications by usage time
 // @Description  Returns the top applications by total usage seconds over the given time range.
@@ -477,7 +615,7 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0)`,
+		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) / 3600 > 0)`,
 		limit, lf, timeRange,
 	)
 	s.queryAndRespondAt(w, query, q.Get("format"), atTime)

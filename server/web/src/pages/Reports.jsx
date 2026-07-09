@@ -4,6 +4,7 @@ import {
 } from 'recharts';
 import {
   getTopAppsByLaunches,
+  getTopAppsByUsage,
   getTopAppsByForeground,
   getBottomAppsByLaunches,
   getUsageByLab,
@@ -14,6 +15,10 @@ import {
   exportBottomAppsByForeground,
   getAgents,
   getLabs,
+  getTopDevicesBySessions,
+  getTopUsersByLogins,
+  getTopUsersBySessionTime,
+  getAvgSessionTime,
 } from '../api';
 
 const CHART_COLORS = [
@@ -89,22 +94,59 @@ function applyAppFilter(data, appFilter) {
 function UserBehaviorReport({ range, filters, appFilter }) {
   const [foreground, setForeground] = useState(null);
   const [launches, setLaunches] = useState(null);
+  const [topDevices, setTopDevices] = useState(null);
+  const [topUserLogins, setTopUserLogins] = useState(null);
+  const [userSessionTime, setUserSessionTime] = useState(null);
+  const [avgSession, setAvgSession] = useState(null);
 
   useEffect(() => {
     setForeground(null);
     setLaunches(null);
-    getTopAppsByForeground(range, 10, filters).then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
-    getTopAppsByLaunches(range, 10, filters).then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches(false));
+    setTopDevices(null);
+    setTopUserLogins(null);
+    setUserSessionTime(null);
+    setAvgSession(null);
+
+    getTopAppsByUsage(range, 10, filters)
+      .then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
+    getTopAppsByLaunches(range, 10, filters)
+      .then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches(false));
+    getTopDevicesBySessions(range, 10, filters)
+      .then(r => setTopDevices(parsePromVector(r, 'hostname'))).catch(() => setTopDevices(false));
+    getTopUsersByLogins(range, 10, filters)
+      .then(r => setTopUserLogins(parsePromVector(r, 'user'))).catch(() => setTopUserLogins(false));
+    getTopUsersBySessionTime(range, 10, filters)
+      .then(r => setUserSessionTime(parsePromVector(r, 'user'))).catch(() => setUserSessionTime(false));
+    getAvgSessionTime(range, 10, filters)
+      .then(r => setAvgSession(parsePromVector(r, 'user'))).catch(() => setAvgSession(false));
   }, [range, filters]);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
-      <ChartCard title="Top 10 Apps by Active Time">
-        <HBarChart data={applyAppFilter(foreground, appFilter)} valueLabel="hours" height={300} />
-      </ChartCard>
-      <ChartCard title="Top 10 Apps by Launch Count">
-        <HBarChart data={applyAppFilter(launches, appFilter)} valueLabel="launches" roundValues height={300} />
-      </ChartCard>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
+        <ChartCard title="Top 10 Apps by Active Time">
+          <HBarChart data={applyAppFilter(foreground, appFilter)} valueLabel="hours" height={300} />
+        </ChartCard>
+        <ChartCard title="Top 10 Apps by Launch Count">
+          <HBarChart data={applyAppFilter(launches, appFilter)} valueLabel="launches" roundValues height={300} />
+        </ChartCard>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
+        <ChartCard title="Top 10 Most Signed-In Devices">
+          <HBarChart data={topDevices} valueLabel="logins" roundValues height={300} />
+        </ChartCard>
+        <ChartCard title="Top 10 Users by Login Count">
+          <HBarChart data={topUserLogins} valueLabel="logins" roundValues height={300} />
+        </ChartCard>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
+        <ChartCard title="Top 10 Users by Total Session Time">
+          <HBarChart data={userSessionTime} valueLabel="hours" height={300} />
+        </ChartCard>
+        <ChartCard title="Average Session Duration per User">
+          <HBarChart data={avgSession} valueLabel="minutes" height={300} />
+        </ChartCard>
+      </div>
     </div>
   );
 }
@@ -150,7 +192,7 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
     setTopForeground(null);
     getTopAppsByLaunches(range, 10, filters).then(r => setTopLaunches(parsePromVector(r))).catch(() => setTopLaunches(false));
     getBottomAppsByLaunches(range, 10, filters).then(r => setBottomLaunches(parsePromVector(r))).catch(() => setBottomLaunches(false));
-    getTopAppsByForeground(range, 10, filters).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
+    getTopAppsByUsage(range, 10, filters).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
   }, [range, filters]);
 
   return (
