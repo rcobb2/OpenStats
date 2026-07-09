@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -799,4 +800,216 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 		lf, timeRange,
 	)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
+}
+
+// promQueryRangeResult represents a Prometheus range query (matrix) response.
+type promQueryRangeResult struct {
+	Status string `json:"status"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Values [][]interface{}   `json:"values"`
+		} `json:"result"`
+	} `json:"data"`
+}
+
+type utilizationPoint struct {
+	T int64   `json:"t"`
+	V float64 `json:"v"`
+}
+
+type utilizationSeries struct {
+	Lab  string             `json:"lab"`
+	Data []utilizationPoint `json:"data"`
+}
+
+type utilizationResponse struct {
+	Step   int64               `json:"step"`
+	Series []utilizationSeries `json:"series"`
+}
+
+// parseDurationToSecs converts a Prometheus duration string (e.g. "24h", "7d") to seconds.
+func parseDurationToSecs(s string) int64 {
+	if !validTimeRange(s) || len(s) < 2 {
+		return 86400
+	}
+	val, _ := strconv.ParseInt(s[:len(s)-1], 10, 64)
+	switch s[len(s)-1] {
+	case 's':
+		return val
+	case 'm':
+		return val * 60
+	case 'h':
+		return val * 3600
+	case 'd':
+		return val * 86400
+	case 'w':
+		return val * 7 * 86400
+	case 'y':
+		return val * 365 * 86400
+	}
+	return 86400
+}
+
+// ReportUtilizationOverTime godoc
+// @Summary      Machine utilization % over time
+// @Description  Returns per-lab utilization percentage as a time series. Utilization is
+//               the average fraction of machines with an active user session, as a percentage.
+//               Lab assignment uses current DB state, so reassigned machines are reflected immediately.
+// @Tags         reports
+// @Produce      json
+// @Param        range    query  string  false  "Time range (e.g. 24h, 7d, 30d)"  default(24h)
+// @Param        hostname query  string  false  "Filter to a specific machine"
+// @Param        lab      query  string  false  "Filter to a specific lab"
+// @Param        start    query  string  false  "Custom range start (unix or RFC3339)"
+// @Param        end      query  string  false  "Custom range end (unix or RFC3339)"
+// @Success      200  {object}  utilizationResponse
+// @Router       /api/v1/reports/utilization-over-time [get]
+func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+
+	// Determine time window.
+	now := time.Now().Unix()
+	endUnix := now
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	startUnix := now - parseDurationToSecs(timeRange)
+
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		_ = dur
+		endUnix = end
+		startUnix = end - parseDurationToSecs(timeRange)
+		// If both start and end are given as absolute timestamps, honour them directly.
+		if startStr, endStr := q.Get("start"), q.Get("end"); startStr != "" && endStr != "" {
+			parseT := func(str string) (int64, bool) {
+				if ts, err := strconv.ParseInt(str, 10, 64); err == nil {
+					return ts, true
+				}
+				if t, err := time.Parse(time.RFC3339, str); err == nil {
+					return t.Unix(), true
+				}
+				return 0, false
+			}
+			if s, ok := parseT(startStr); ok {
+				startUnix = s
+			}
+			if e, ok := parseT(endStr); ok {
+				endUnix = e
+			}
+		}
+	}
+
+	// Auto-step: ~48 data points, minimum 5 min.
+	rangeDur := endUnix - startUnix
+	step := rangeDur / 48
+	if step < 300 {
+		step = 300
+	}
+
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		return
+	}
+	labFilter := q.Get("lab")
+
+	// Query per-machine utilisation: fraction of the step window with an active session.
+	stepStr := fmt.Sprintf("%ds", step)
+	hf := buildLabelFilters(q.Get("hostname"), "")
+	promQuery := fmt.Sprintf(
+		`avg_over_time(openlabstats_user_session_active%s[%s])`,
+		hf, stepStr,
+	)
+
+	promURL := fmt.Sprintf(
+		"%s/api/v1/query_range?query=%s&start=%d&end=%d&step=%d",
+		s.cfg.Prom.URL, url.QueryEscape(promQuery), startUnix, endUnix, step,
+	)
+
+	resp, err := s.promClient.Get(promURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+	defer resp.Body.Close()
+
+	var raw promQueryRangeResult
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse Prometheus response")
+		return
+	}
+
+	// Aggregate: for each (lab, timestamp) accumulate sum + count.
+	type key struct {
+		lab string
+		t   int64
+	}
+	sumMap := make(map[key]float64)
+	cntMap := make(map[key]int)
+	labSet := make(map[string]struct{})
+
+	for _, series := range raw.Data.Result {
+		hostname := strings.ToLower(series.Metric["hostname"])
+		labName := hostnameToLab[hostname]
+		if labName == "" {
+			labName = "Unassigned"
+		}
+		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
+			continue
+		}
+		labSet[labName] = struct{}{}
+		for _, pt := range series.Values {
+			if len(pt) < 2 {
+				continue
+			}
+			tsF, ok := pt[0].(float64)
+			if !ok {
+				continue
+			}
+			vs, ok := pt[1].(string)
+			if !ok {
+				continue
+			}
+			v, _ := strconv.ParseFloat(vs, 64)
+			k := key{labName, int64(tsF)}
+			sumMap[k] += v
+			cntMap[k]++
+		}
+	}
+
+	// Collect and sort all timestamps.
+	tsSet := make(map[int64]struct{})
+	for k := range sumMap {
+		tsSet[k.t] = struct{}{}
+	}
+	timestamps := make([]int64, 0, len(tsSet))
+	for t := range tsSet {
+		timestamps = append(timestamps, t)
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+
+	// Build per-lab series.
+	labs := make([]string, 0, len(labSet))
+	for lab := range labSet {
+		labs = append(labs, lab)
+	}
+	sort.Strings(labs)
+
+	var result []utilizationSeries
+	for _, lab := range labs {
+		var data []utilizationPoint
+		for _, t := range timestamps {
+			k := key{lab, t}
+			if cnt := cntMap[k]; cnt > 0 {
+				pct := math.Round((sumMap[k]/float64(cnt))*1000) / 10 // one decimal place
+				data = append(data, utilizationPoint{T: t, V: pct})
+			}
+		}
+		if len(data) > 0 {
+			result = append(result, utilizationSeries{Lab: lab, Data: data})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, utilizationResponse{Step: step, Series: result})
 }

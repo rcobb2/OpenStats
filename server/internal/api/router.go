@@ -108,6 +108,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Get("/bottom-apps-by-launches", s.ReportBottomAppsByLaunches)
 			r.Get("/bottom-apps-by-foreground", s.ReportBottomAppsByForegroundTime)
 			r.Get("/usage-by-lab", s.ReportUsageByLab)
+			r.Get("/utilization-over-time", s.ReportUtilizationOverTime)
 			r.Get("/active-users", s.ReportActiveUsers)
 			r.Get("/top-devices-by-sessions", s.ReportTopDevicesBySessionCount)
 			r.Get("/top-users-by-logins", s.ReportTopUsersByLoginCount)

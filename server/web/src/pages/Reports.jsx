@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  LineChart, Line, CartesianGrid, Legend,
 } from 'recharts';
 import {
   getTopAppsByLaunches,
@@ -20,6 +21,7 @@ import {
   getTopUsersBySessionTime,
   getAvgSessionTime,
   ignoreApp,
+  getUtilizationOverTime,
 } from '../api';
 
 const CHART_COLORS = [
@@ -90,10 +92,13 @@ function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 3
   );
 }
 
-function ChartCard({ title, children }) {
+function ChartCard({ title, subtitle, children }) {
   return (
     <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', padding: '1.25rem' }}>
-      <h3 style={{ margin: '0 0 1rem' }}>{title}</h3>
+      <div style={{ marginBottom: '1rem' }}>
+        <h3 style={{ margin: 0 }}>{title}</h3>
+        {subtitle && <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>{subtitle}</div>}
+      </div>
       {children}
     </div>
   );
@@ -165,6 +170,87 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   );
 }
 
+function UtilizationChart({ range, filters }) {
+  const [resp, setResp] = useState(null);
+
+  useEffect(() => {
+    setResp(null);
+    getUtilizationOverTime(range, filters)
+      .then(r => setResp(r))
+      .catch(() => setResp(false));
+  }, [range, filters]);
+
+  const { chartData, labs } = useMemo(() => {
+    if (!resp?.series?.length) return { chartData: [], labs: [] };
+    const labs = resp.series.map(s => s.lab);
+    const lookup = {};
+    resp.series.forEach(s => {
+      lookup[s.lab] = {};
+      s.data.forEach(p => { lookup[s.lab][p.t] = p.v; });
+    });
+    const allTs = [...new Set(resp.series.flatMap(s => s.data.map(p => p.t)))].sort((a, b) => a - b);
+    const chartData = allTs.map(t => {
+      const row = { t };
+      labs.forEach(lab => { if (lookup[lab][t] != null) row[lab] = lookup[lab][t]; });
+      return row;
+    });
+    return { chartData, labs };
+  }, [resp]);
+
+  const rangeSecs = range ? (
+    range.endsWith('d') ? parseInt(range) * 86400 :
+    range.endsWith('h') ? parseInt(range) * 3600 : 86400
+  ) : 86400;
+
+  const fmtTime = (t) => {
+    const d = new Date(t * 1000);
+    if (rangeSecs <= 86400) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (rangeSecs <= 7 * 86400) return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  if (resp === null) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
+  if (resp === false) return <div style={{ padding: '1rem', color: 'var(--error,#e55353)' }}>Failed to load data.</div>;
+  if (!chartData.length) return <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>;
+
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border,#333)" />
+        <XAxis
+          dataKey="t"
+          tickFormatter={fmtTime}
+          tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
+          minTickGap={40}
+        />
+        <YAxis
+          domain={[0, 100]}
+          tickFormatter={v => `${v}%`}
+          tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
+          width={42}
+        />
+        <Tooltip
+          formatter={(v, name) => [`${v}%`, name]}
+          labelFormatter={fmtTime}
+          contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+        />
+        {labs.length > 1 && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 4 }} />}
+        {labs.map((lab, i) => (
+          <Line
+            key={lab}
+            type="monotone"
+            dataKey={lab}
+            stroke={CHART_COLORS[i % CHART_COLORS.length]}
+            dot={false}
+            strokeWidth={2}
+            connectNulls
+          />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
 function LabUsageReport({ range, filters, appFilter }) {
   const [data, setData] = useState(null);
 
@@ -185,13 +271,18 @@ function LabUsageReport({ range, filters, appFilter }) {
   }, [range, filters]);
 
   return (
-    <ChartCard title="Usage Hours by Lab">
-      <HBarChart
-        data={applyAppFilter(data, appFilter)}
-        valueLabel="hours"
-        height={Math.max(240, (data?.length ?? 5) * 36)}
-      />
-    </ChartCard>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <ChartCard title="Usage Hours by Lab">
+        <HBarChart
+          data={applyAppFilter(data, appFilter)}
+          valueLabel="hours"
+          height={Math.max(240, (data?.length ?? 5) * 36)}
+        />
+      </ChartCard>
+      <ChartCard title="Machine Utilization Over Time" subtitle="% of machines with an active session">
+        <UtilizationChart range={range} filters={filters} />
+      </ChartCard>
+    </div>
   );
 }
 
