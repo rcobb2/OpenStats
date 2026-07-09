@@ -45,7 +45,7 @@ function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 3
           tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
           axisLine={{ stroke: 'var(--border)' }}
           tickLine={false}
-          tickFormatter={roundValues ? v => Math.round(v) : undefined}
+          allowDecimals={!roundValues}
           label={{ value: valueLabel, position: 'insideBottomRight', offset: -4, fill: 'var(--text-dim)', fontSize: 11 }}
         />
         <YAxis

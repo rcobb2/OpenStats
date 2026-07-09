@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,7 +50,7 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 		atTime = end
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
 	query := fmt.Sprintf(
 		`sum by (lab, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
 		lf, timeRange,
@@ -144,6 +146,37 @@ func buildLabelFilters(hostname, lab string) string {
 	}
 	if v, ok := safeLabelValue(lab); ok {
 		filters = append(filters, fmt.Sprintf(`lab="%s"`, v))
+	}
+	return "{" + strings.Join(filters, ",") + "}"
+}
+
+// ignoredAppNames returns a slice of RE2-escaped display names for all ignored mappings.
+func (s *Server) ignoredAppNames(ctx context.Context) []string {
+	mappings, err := s.store.ListMappings(ctx)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, m := range mappings {
+		if m.Ignored && m.DisplayName != "" {
+			names = append(names, regexp.QuoteMeta(m.DisplayName))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// buildAppLabelFilters is like buildLabelFilters but also excludes ignored app display names.
+func buildAppLabelFilters(hostname, lab string, ignoredApps []string) string {
+	filters := []string{`user!=""`}
+	if v, ok := safeLabelValue(hostname); ok {
+		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
+	}
+	if v, ok := safeLabelValue(lab); ok {
+		filters = append(filters, fmt.Sprintf(`lab="%s"`, v))
+	}
+	if len(ignoredApps) > 0 {
+		filters = append(filters, fmt.Sprintf(`app!~"%s"`, strings.Join(ignoredApps, "|")))
 	}
 	return "{" + strings.Join(filters, ",") + "}"
 }
@@ -245,7 +278,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
 	query := fmt.Sprintf(
 		`topk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
 		limit, lf, timeRange,
@@ -279,7 +312,7 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
 	query := fmt.Sprintf(
 		`topk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
 		limit, lf, timeRange,
@@ -313,7 +346,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
 	query := fmt.Sprintf(
 		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0)`,
 		limit, lf, timeRange,
@@ -347,7 +380,7 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
 	query := fmt.Sprintf(
 		`bottomk(%d, sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0)`,
 		limit, lf, timeRange,
@@ -601,7 +634,7 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := buildAppLabelFilters(q.Get("hostname"), q.Get("lab"), s.ignoredAppNames(r.Context()))
 	query := fmt.Sprintf(
 		`topk(%d, sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) / 3600 > 0)`,
 		limit, lf, timeRange,
