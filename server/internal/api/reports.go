@@ -436,6 +436,13 @@ func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 // @Router       /api/v1/reports/top-apps-by-launches [get]
 func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+
 	limit := 10
 	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
@@ -444,13 +451,12 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 	}
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
-	// Use cumulative counters — apps that started before the time window still show launches.
 	// topk is applied server-side after whitelist filtering.
 	query := fmt.Sprintf(
-		`sum by (app, category) (openlabstats_app_launches_total%s) > 0`,
-		lf,
+		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.allowedAppSet(r.Context()), limit, false)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
 }
 
 // ReportTopAppsByForegroundTime godoc
@@ -499,6 +505,13 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 // @Router       /api/v1/reports/bottom-apps-by-launches [get]
 func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+
 	limit := 10
 	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
@@ -508,10 +521,10 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 
 	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`sum by (app, category) (openlabstats_app_launches_total%s) > 0`,
-		lf,
+		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondFiltered(w, query, q.Get("format"), 0, s.allowedAppSet(r.Context()), limit, true)
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, true)
 }
 
 // ReportBottomAppsByForegroundTime godoc
@@ -667,6 +680,12 @@ func buildUserSessionFilters(hostname string) string {
 // @Router       /api/v1/reports/top-devices-by-sessions [get]
 func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 	limit := 10
 	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
@@ -674,12 +693,11 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 		}
 	}
 	lf := buildUserSessionFilters(q.Get("hostname"))
-	// Login events are sparse — use cumulative counters so any historical data shows.
 	query := fmt.Sprintf(
-		`topk(%d, sum by (hostname) (openlabstats_user_session_logins_total%s) > 0)`,
-		limit, lf,
+		`topk(%d, sum by (hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
+		limit, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, q.Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
 // ReportTopUsersByLoginCount godoc
@@ -694,6 +712,12 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 // @Router       /api/v1/reports/top-users-by-logins [get]
 func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 	limit := 10
 	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
@@ -701,12 +725,11 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	lf := buildUserSessionFilters(q.Get("hostname"))
-	// Login events are sparse — use cumulative counters so any historical data shows.
 	query := fmt.Sprintf(
-		`topk(%d, sum by (user) (openlabstats_user_session_logins_total%s) > 0)`,
-		limit, lf,
+		`topk(%d, sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
+		limit, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, q.Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
 // ReportTopUsersBySessionTime godoc
@@ -753,6 +776,12 @@ func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Requ
 // @Router       /api/v1/reports/avg-session-time [get]
 func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
 	limit := 10
 	if l := q.Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
@@ -760,12 +789,14 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	lf := buildUserSessionFilters(q.Get("hostname"))
-	// Divide cumulative session seconds by cumulative login count to get average session minutes.
+	// Divide session seconds accrued in the window by logins in the window to get average
+	// session minutes. The "> 0" guard on the denominator avoids +Inf for users with an
+	// ongoing session but no fresh login inside the window.
 	query := fmt.Sprintf(
-		`topk(%d, (sum by (user) (openlabstats_user_session_seconds_total%s) / sum by (user) (openlabstats_user_session_logins_total%s)) / 60 > 0)`,
-		limit, lf, lf,
+		`topk(%d, (sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / (sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)) / 60 > 0)`,
+		limit, lf, timeRange, lf, timeRange,
 	)
-	s.queryAndRespond(w, query, q.Get("format"))
+	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
 }
 
 // ReportTopAppsUsage godoc
