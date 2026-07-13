@@ -67,6 +67,9 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 
 	// API v1 routes.
 	r.Route("/api/v1", func(r chi.Router) {
+		// Build info
+		r.Get("/version", s.ReportBuildInfo)
+
 		// Agents
 		r.Route("/agents", func(r chi.Router) {
 			r.Post("/register", s.RegisterAgent)

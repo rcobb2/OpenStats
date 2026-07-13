@@ -15,6 +15,9 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+// Build info
+export const getBuildInfo = () => request('/version');
+
 // Agents
 export const getAgents = () => request('/agents');
 export const getAgent = (id) => request(`/agents/${id}`);

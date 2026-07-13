@@ -28,6 +28,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .sidebar-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.4rem; }
 .sidebar-footer a { color: var(--text-dim); text-decoration: none; font-size: 0.8rem; }
 .sidebar-footer a:hover { color: var(--accent); }
+.sidebar-footer .build-info { color: var(--text-dim); font-size: 0.7rem; opacity: 0.7; }
 
 /* Sub nav styles */
 .nav-group-label { display: block; padding: 0.6rem 1.25rem; color: var(--text-dim); font-size: 0.9rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; margin-top: 0.5rem; }

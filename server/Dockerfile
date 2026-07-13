@@ -12,7 +12,14 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /openlabstats-server ./cmd/server/
+ARG VERSION=0.1.3
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "\
+    -X github.com/rcobb/openlabstats-server/internal/version.Version=${VERSION} \
+    -X github.com/rcobb/openlabstats-server/internal/version.GitCommit=${GIT_COMMIT} \
+    -X github.com/rcobb/openlabstats-server/internal/version.BuildDate=${BUILD_DATE}" \
+    -o /openlabstats-server ./cmd/server/
 
 # Stage 3: Final lightweight image
 FROM docker.io/library/alpine:3.21

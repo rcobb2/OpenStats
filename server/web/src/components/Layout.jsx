@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { getBuildInfo } from '../api';
 
 const navItems = [
   { to: '/', label: 'Dashboard' },
@@ -18,6 +20,11 @@ const navItems = [
 
 export default function Layout() {
   const location = useLocation();
+  const [buildInfo, setBuildInfo] = useState(null);
+
+  useEffect(() => {
+    getBuildInfo().then(setBuildInfo).catch(() => {});
+  }, []);
 
   return (
     <div className="app">
@@ -59,6 +66,11 @@ export default function Layout() {
         </ul>
         <div className="sidebar-footer">
           <a href="/api/docs/" target="_blank" rel="noreferrer">API Docs</a>
+          {buildInfo && (
+            <span className="build-info" title={`Built ${buildInfo.buildDate} · ${buildInfo.goVersion}`}>
+              v{buildInfo.version} · {buildInfo.gitCommit.slice(0, 7)}
+            </span>
+          )}
         </div>
       </nav>
       <main className="content">

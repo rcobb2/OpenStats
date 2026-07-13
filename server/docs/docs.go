@@ -173,6 +173,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/agents/{agentID}/force-update": {
+            "post": {
+                "description": "Queues an update for the specified agent which will be delivered on its next heartbeat.",
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Force an agent to update immediately",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "agentID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/agents/{agentID}/lab": {
             "put": {
                 "description": "Associates an agent with a lab/room for grouping.",
@@ -228,7 +275,7 @@ const docTemplate = `{
         },
         "/api/v1/installers/generate": {
             "post": {
-                "description": "Generates an MSI installer pre-configured with the given server address and port. Returns a download URL. NOTE: Full MSI generation requires WiX Toolset on the server; this endpoint currently returns the install command with the appropriate properties.",
+                "description": "Returns a download URL for the latest pre-built MSI with an msiexec command.",
                 "consumes": [
                     "application/json"
                 ],
@@ -270,6 +317,11 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/api/v1/installers/latest": {
+            "get": {
+                "responses": {}
             }
         },
         "/api/v1/labs": {
@@ -591,6 +643,68 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/mappings/{mappingID}/ignore": {
+            "patch": {
+                "description": "Sets or clears the ignored flag for a mapping without changing other fields.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mappings"
+                ],
+                "summary": "Toggle mapping ignored state",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Mapping ID",
+                        "name": "mappingID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Ignored state {ignored: bool}",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/reports/active-users": {
             "get": {
                 "description": "Returns users with active sessions right now.",
@@ -608,6 +722,125 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": true
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/avg-session-time": {
+            "get": {
+                "description": "Returns top N users ranked by average session duration in minutes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Average session duration per user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine",
+                        "name": "hostname",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/bottom-apps-by-foreground": {
+            "get": {
+                "description": "Returns bottom (least used) applications by foreground time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Bottom applications by foreground time",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "json",
+                        "description": "Output format: json or csv",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/bottom-apps-by-launches": {
+            "get": {
+                "description": "Returns bottom (least used) applications by launch count.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Bottom applications by launch count",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "json",
+                        "description": "Output format: json or csv",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
                     }
                 }
             }
@@ -634,27 +867,191 @@ const docTemplate = `{
         },
         "/api/v1/reports/top-apps": {
             "get": {
-                "description": "Returns the top applications by total usage hours over the given time range. Defaults to last 24 hours.",
+                "description": "Returns the top applications by total usage seconds over the given time range.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "reports"
                 ],
-                "summary": "Top applications by usage",
+                "summary": "Top applications by usage time",
                 "parameters": [
                     {
                         "type": "string",
                         "default": "24h",
-                        "description": "Time range for the query (e.g. 24h, 7d, 30d)",
+                        "description": "Time range",
                         "name": "range",
                         "in": "query"
                     },
                     {
                         "type": "integer",
                         "default": 20,
-                        "description": "Max number of results",
+                        "description": "Max results",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "json",
+                        "description": "Output format: json or csv",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/top-apps-by-foreground": {
+            "get": {
+                "description": "Returns top applications by total foreground (active) time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top applications by foreground time",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "json",
+                        "description": "Output format: json or csv",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/top-apps-by-launches": {
+            "get": {
+                "description": "Returns top applications by total launch count over the given time range.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top applications by launch count",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range (e.g. 24h, 7d, 30d)",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "json",
+                        "description": "Output format: json or csv",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/top-devices-by-sessions": {
+            "get": {
+                "description": "Returns the top N hostnames ranked by user login count over the time range.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top devices by session count",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine",
+                        "name": "hostname",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/top-labs-by-utilization": {
+            "get": {
+                "description": "Returns labs ranked by average utilization % over the time range, top 10.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top labs by average utilization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range (e.g. 24h, 7d, 30d)",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Custom range start (unix or RFC3339)",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Custom range end (unix or RFC3339)",
+                        "name": "end",
                         "in": "query"
                     }
                 ],
@@ -662,18 +1059,89 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.labAvgUtilization"
                             }
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/top-users-by-logins": {
+            "get": {
+                "description": "Returns the top N users ranked by total login sessions over the time range.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top users by login count",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine",
+                        "name": "hostname",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/top-users-by-session-time": {
+            "get": {
+                "description": "Returns the top N users ranked by total session hours over the time range.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top users by total session time",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine",
+                        "name": "hostname",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
                     }
                 }
             }
@@ -692,8 +1160,39 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "default": "24h",
-                        "description": "Time range",
+                        "description": "Time range (e.g. 24h, 7d)",
                         "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine hostname",
+                        "name": "hostname",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab name",
+                        "name": "lab",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Custom range start (unix or RFC3339)",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Custom range end (unix or RFC3339)",
+                        "name": "end",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "json",
+                        "description": "Output format: json or csv",
+                        "name": "format",
                         "in": "query"
                     }
                 ],
@@ -717,22 +1216,156 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/reports/utilization-over-time": {
+            "get": {
+                "description": "Returns per-lab utilization percentage as a time series.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Machine utilization % over time",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range (e.g. 24h, 7d, 30d)",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine",
+                        "name": "hostname",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab",
+                        "name": "lab",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Custom range start (unix or RFC3339)",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Custom range end (unix or RFC3339)",
+                        "name": "end",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.utilizationResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/settings": {
             "get": {
-                "description": "Returns the current server configuration (non-sensitive fields).",
+                "description": "Returns global configuration for agents and server.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "settings"
                 ],
-                "summary": "Get server settings",
+                "summary": "Get system settings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/store.SystemSettings"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Updates global configuration for agents and server.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "settings"
+                ],
+                "summary": "Update system settings",
+                "parameters": [
+                    {
+                        "description": "Settings payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/store.SystemSettings"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": true
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/version": {
+            "get": {
+                "description": "Returns the running server's version, git commit, build date, and Go runtime version.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "meta"
+                ],
+                "summary": "Server build information",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.buildInfoResponse"
                         }
                     }
                 }
@@ -759,17 +1392,23 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "room": {
+                    "type": "string"
                 }
             }
         },
         "api.GenerateInstallerRequest": {
             "type": "object",
             "properties": {
-                "labName": {
+                "building": {
                     "type": "string"
                 },
                 "port": {
                     "type": "integer"
+                },
+                "room": {
+                    "type": "string"
                 },
                 "serverAddress": {
                     "type": "string"
@@ -791,6 +1430,9 @@ const docTemplate = `{
                 "family": {
                     "type": "string"
                 },
+                "ignored": {
+                    "type": "boolean"
+                },
                 "publisher": {
                     "type": "string"
                 }
@@ -800,6 +1442,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "agentVersion": {
+                    "type": "string"
+                },
+                "building": {
                     "type": "string"
                 },
                 "hostname": {
@@ -816,6 +1461,9 @@ const docTemplate = `{
                 },
                 "port": {
                     "type": "integer"
+                },
+                "room": {
+                    "type": "string"
                 }
             }
         },
@@ -836,10 +1484,86 @@ const docTemplate = `{
                 }
             }
         },
+        "api.buildInfoResponse": {
+            "type": "object",
+            "properties": {
+                "buildDate": {
+                    "type": "string"
+                },
+                "gitCommit": {
+                    "type": "string"
+                },
+                "goVersion": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.labAvgUtilization": {
+            "type": "object",
+            "properties": {
+                "avgPct": {
+                    "type": "number"
+                },
+                "lab": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.utilizationPoint": {
+            "type": "object",
+            "properties": {
+                "t": {
+                    "type": "integer"
+                },
+                "v": {
+                    "type": "number"
+                }
+            }
+        },
+        "api.utilizationResponse": {
+            "type": "object",
+            "properties": {
+                "series": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.utilizationSeries"
+                    }
+                },
+                "step": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.utilizationSeries": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.utilizationPoint"
+                    }
+                },
+                "lab": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "store.Agent": {
             "type": "object",
             "properties": {
                 "agentVersion": {
+                    "type": "string"
+                },
+                "building": {
                     "type": "string"
                 },
                 "createdAt": {
@@ -863,8 +1587,14 @@ const docTemplate = `{
                 "osVersion": {
                     "type": "string"
                 },
+                "pendingUpdate": {
+                    "type": "string"
+                },
                 "port": {
                     "type": "integer"
+                },
+                "room": {
+                    "type": "string"
                 },
                 "status": {
                     "type": "string"
@@ -890,6 +1620,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "room": {
                     "type": "string"
                 },
                 "updatedAt": {
@@ -918,6 +1651,9 @@ const docTemplate = `{
                 "id": {
                     "type": "integer"
                 },
+                "ignored": {
+                    "type": "boolean"
+                },
                 "publisher": {
                     "type": "string"
                 },
@@ -928,13 +1664,38 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "store.SystemSettings": {
+            "type": "object",
+            "properties": {
+                "heartbeatIntervalSeconds": {
+                    "type": "integer"
+                },
+                "maintenanceWindowEnd": {
+                    "description": "HH:mm",
+                    "type": "string"
+                },
+                "maintenanceWindowStart": {
+                    "description": "HH:mm",
+                    "type": "string"
+                },
+                "minAgentVersion": {
+                    "type": "string"
+                },
+                "staleTimeoutDays": {
+                    "type": "integer"
+                },
+                "updateIntervalSeconds": {
+                    "type": "integer"
+                }
+            }
         }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.1.0",
+	Version:          "0.1.3",
 	Host:             "localhost:8080",
 	BasePath:         "/",
 	Schemes:          []string{},

@@ -830,6 +830,147 @@ type utilizationResponse struct {
 	Series []utilizationSeries `json:"series"`
 }
 
+type labAvgUtilization struct {
+	Lab    string  `json:"lab"`
+	AvgPct float64 `json:"avgPct"`
+	Total  int     `json:"total"`
+}
+
+type labTimeKey struct {
+	lab string
+	t   int64
+}
+
+// utilLabTimeData holds the computed per-lab, per-timestamp active machine counts.
+type utilLabTimeData struct {
+	labTimeSum     map[labTimeKey]float64
+	machinesPerLab map[string]int
+	timestamps     []int64
+	labs           []string
+}
+
+// buildUtilizationData runs the Prometheus range query and computes per-(lab, timestamp)
+// active machine counts. It is the shared core for both utilization endpoints.
+func (s *Server) buildUtilizationData(ctx context.Context, startUnix, endUnix, step int64, labFilter, hnFilter string) (*utilLabTimeData, error) {
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	const sysUserExclude = `Font Driver Host.*|Window Manager.*|.*UMFD.*|panopto_upload|System|Local Service|Network Service|TrustedInstaller`
+	stepStr := fmt.Sprintf("%ds", step)
+	var hfParts []string
+	hfParts = append(hfParts, `user!=""`, fmt.Sprintf(`user!~"%s"`, sysUserExclude))
+	if v, ok := safeLabelValue(hnFilter); ok {
+		hfParts = append(hfParts, fmt.Sprintf(`hostname="%s"`, v))
+	}
+	hf := "{" + strings.Join(hfParts, ",") + "}"
+	promQuery := fmt.Sprintf(`rate(openlabstats_app_usage_seconds_total%s[%s])`, hf, stepStr)
+
+	promURL := fmt.Sprintf(
+		"%s/api/v1/query_range?query=%s&start=%d&end=%d&step=%d",
+		s.cfg.Prom.URL, url.QueryEscape(promQuery), startUnix, endUnix, step,
+	)
+
+	resp, err := s.promClient.Get(promURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var raw promQueryRangeResult
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+
+	allowedApps := s.allowedAppSet(ctx)
+
+	// Pass 1: sum app-usage rates per (hostname, timestamp) for whitelisted apps only.
+	type hostTime struct{ hostname string; t int64 }
+	hostTimeRate := make(map[hostTime]float64)
+
+	for _, series := range raw.Data.Result {
+		hostname := strings.ToLower(series.Metric["hostname"])
+		app := series.Metric["app"]
+		if _, inLab := hostnameToLab[hostname]; !inLab {
+			continue
+		}
+		if len(allowedApps) > 0 && !allowedApps[strings.ToLower(app)] {
+			continue
+		}
+		labName := hostnameToLab[hostname]
+		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
+			continue
+		}
+		for _, pt := range series.Values {
+			if len(pt) < 2 {
+				continue
+			}
+			tsF, ok := pt[0].(float64)
+			if !ok {
+				continue
+			}
+			vs, ok := pt[1].(string)
+			if !ok {
+				continue
+			}
+			v, _ := strconv.ParseFloat(vs, 64)
+			hostTimeRate[hostTime{hostname, int64(tsF)}] += v
+		}
+	}
+
+	// Denominator: total DB-registered machines per lab.
+	machinesPerLab := make(map[string]int)
+	for hostname, labName := range hostnameToLab {
+		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
+			continue
+		}
+		_ = hostname
+		machinesPerLab[labName]++
+	}
+
+	// Pass 2: threshold rate > 0 → 1 machine active, then sum by (lab, timestamp).
+	labTimeSum := make(map[labTimeKey]float64)
+	tsSet := make(map[int64]struct{})
+
+	for ht, rateVal := range hostTimeRate {
+		labName := hostnameToLab[ht.hostname]
+		var active float64
+		if rateVal > 0 {
+			active = 1
+		}
+		labTimeSum[labTimeKey{labName, ht.t}] += active
+		tsSet[ht.t] = struct{}{}
+	}
+
+	for _, series := range raw.Data.Result {
+		for _, pt := range series.Values {
+			if tsF, ok := pt[0].(float64); ok {
+				tsSet[int64(tsF)] = struct{}{}
+			}
+		}
+	}
+
+	timestamps := make([]int64, 0, len(tsSet))
+	for t := range tsSet {
+		timestamps = append(timestamps, t)
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+
+	labs := make([]string, 0, len(machinesPerLab))
+	for lab := range machinesPerLab {
+		labs = append(labs, lab)
+	}
+	sort.Strings(labs)
+
+	return &utilLabTimeData{
+		labTimeSum:     labTimeSum,
+		machinesPerLab: machinesPerLab,
+		timestamps:     timestamps,
+		labs:           labs,
+	}, nil
+}
+
 // parseDurationToSecs converts a Prometheus duration string (e.g. "24h", "7d") to seconds.
 func parseDurationToSecs(s string) int64 {
 	if !validTimeRange(s) || len(s) < 2 {
@@ -853,11 +994,48 @@ func parseDurationToSecs(s string) int64 {
 	return 86400
 }
 
+// parseUtilTimeWindow extracts and validates the time window from query params.
+func parseUtilTimeWindow(q url.Values) (startUnix, endUnix, step int64) {
+	now := time.Now().Unix()
+	endUnix = now
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	startUnix = now - parseDurationToSecs(timeRange)
+
+	if _, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		endUnix = end
+		startUnix = end - parseDurationToSecs(timeRange)
+		parseT := func(str string) (int64, bool) {
+			if ts, err := strconv.ParseInt(str, 10, 64); err == nil {
+				return ts, true
+			}
+			if t, err := time.Parse(time.RFC3339, str); err == nil {
+				return t.Unix(), true
+			}
+			return 0, false
+		}
+		if startStr := q.Get("start"); startStr != "" {
+			if s, ok := parseT(startStr); ok {
+				startUnix = s
+			}
+		}
+		if endStr := q.Get("end"); endStr != "" {
+			if e, ok := parseT(endStr); ok {
+				endUnix = e
+			}
+		}
+	}
+
+	rangeDur := endUnix - startUnix
+	step = rangeDur / 48
+	if step < 300 {
+		step = 300
+	}
+	return
+}
+
 // ReportUtilizationOverTime godoc
 // @Summary      Machine utilization % over time
-// @Description  Returns per-lab utilization percentage as a time series. Utilization is
-//               the average fraction of machines with an active user session, as a percentage.
-//               Lab assignment uses current DB state, so reassigned machines are reflected immediately.
+// @Description  Returns per-lab utilization percentage as a time series.
 // @Tags         reports
 // @Produce      json
 // @Param        range    query  string  false  "Time range (e.g. 24h, 7d, 30d)"  default(24h)
@@ -870,188 +1048,24 @@ func parseDurationToSecs(s string) int64 {
 func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := r.URL.Query()
+	startUnix, endUnix, step := parseUtilTimeWindow(q)
 
-	// Determine time window.
-	now := time.Now().Unix()
-	endUnix := now
-	timeRange := safeTimeRange(q.Get("range"), "24h")
-	startUnix := now - parseDurationToSecs(timeRange)
-
-	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
-		_ = dur
-		endUnix = end
-		startUnix = end - parseDurationToSecs(timeRange)
-		// If both start and end are given as absolute timestamps, honour them directly.
-		if startStr, endStr := q.Get("start"), q.Get("end"); startStr != "" && endStr != "" {
-			parseT := func(str string) (int64, bool) {
-				if ts, err := strconv.ParseInt(str, 10, 64); err == nil {
-					return ts, true
-				}
-				if t, err := time.Parse(time.RFC3339, str); err == nil {
-					return t.Unix(), true
-				}
-				return 0, false
-			}
-			if s, ok := parseT(startStr); ok {
-				startUnix = s
-			}
-			if e, ok := parseT(endStr); ok {
-				endUnix = e
-			}
-		}
-	}
-
-	// Auto-step: ~48 data points, minimum 5 min.
-	rangeDur := endUnix - startUnix
-	step := rangeDur / 48
-	if step < 300 {
-		step = 300
-	}
-
-	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	d, err := s.buildUtilizationData(ctx, startUnix, endUnix, step, q.Get("lab"), q.Get("hostname"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		writeError(w, http.StatusBadGateway, "failed to query utilization data")
 		return
 	}
-	labFilter := q.Get("lab")
-
-	// Query raw per-(hostname, app, user) series so we can apply the app whitelist
-	// and system-account exclusion server-side before aggregating.
-	// We intentionally do NOT sum by hostname in PromQL — that would prevent filtering.
-	const sysUserExclude = `Font Driver Host.*|Window Manager.*|.*UMFD.*|panopto_upload|System|Local Service|Network Service|TrustedInstaller`
-	stepStr := fmt.Sprintf("%ds", step)
-	hn := q.Get("hostname")
-	var hfParts []string
-	hfParts = append(hfParts, `user!=""`, fmt.Sprintf(`user!~"%s"`, sysUserExclude))
-	if v, ok := safeLabelValue(hn); ok {
-		hfParts = append(hfParts, fmt.Sprintf(`hostname="%s"`, v))
-	}
-	hf := "{" + strings.Join(hfParts, ",") + "}"
-	promQuery := fmt.Sprintf(
-		`rate(openlabstats_app_usage_seconds_total%s[%s])`,
-		hf, stepStr,
-	)
-
-	promURL := fmt.Sprintf(
-		"%s/api/v1/query_range?query=%s&start=%d&end=%d&step=%d",
-		s.cfg.Prom.URL, url.QueryEscape(promQuery), startUnix, endUnix, step,
-	)
-
-	resp, err := s.promClient.Get(promURL)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
-		return
-	}
-	defer resp.Body.Close()
-
-	var raw promQueryRangeResult
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Prometheus response")
-		return
-	}
-
-	allowedApps := s.allowedAppSet(ctx)
-
-	// Pass 1: for each (hostname, timestamp), sum app-usage rates for whitelisted apps only.
-	type hostTime struct {
-		hostname string
-		t        int64
-	}
-	hostTimeRate := make(map[hostTime]float64)
-
-	for _, series := range raw.Data.Result {
-		hostname := strings.ToLower(series.Metric["hostname"])
-		app := series.Metric["app"]
-		if _, inLab := hostnameToLab[hostname]; !inLab {
-			continue // machine not registered in DB
-		}
-		if len(allowedApps) > 0 && !allowedApps[strings.ToLower(app)] {
-			continue // unmapped or ignored app
-		}
-		labName := hostnameToLab[hostname]
-		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
-			continue
-		}
-		for _, pt := range series.Values {
-			if len(pt) < 2 {
-				continue
-			}
-			tsF, ok := pt[0].(float64)
-			if !ok {
-				continue
-			}
-			vs, ok := pt[1].(string)
-			if !ok {
-				continue
-			}
-			v, _ := strconv.ParseFloat(vs, 64)
-			hostTimeRate[hostTime{hostname, int64(tsF)}] += v
-		}
-	}
-
-	// Denominator: total DB-registered machines per lab (idle machines count as 0%).
-	machinesPerLab := make(map[string]int)
-	for hostname, labName := range hostnameToLab {
-		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
-			continue
-		}
-		_ = hostname
-		machinesPerLab[labName]++
-	}
-
-	// Pass 2: clamp each (hostname, timestamp) rate to [0,1], then sum by (lab, timestamp).
-	type labTime struct {
-		lab string
-		t   int64
-	}
-	labTimeSum := make(map[labTime]float64)
-	tsSet := make(map[int64]struct{})
-
-	for ht, rateVal := range hostTimeRate {
-		labName := hostnameToLab[ht.hostname]
-		var active float64
-		if rateVal > 0 {
-			active = 1
-		}
-		k := labTime{labName, ht.t}
-		labTimeSum[k] += active
-		tsSet[ht.t] = struct{}{}
-	}
-
-	// Also populate tsSet from all series timestamps so we can emit 0% points.
-	for _, series := range raw.Data.Result {
-		for _, pt := range series.Values {
-			if tsF, ok := pt[0].(float64); ok {
-				tsSet[int64(tsF)] = struct{}{}
-			}
-		}
-	}
-
-	timestamps := make([]int64, 0, len(tsSet))
-	for t := range tsSet {
-		timestamps = append(timestamps, t)
-	}
-	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
-
-	labs := make([]string, 0, len(machinesPerLab))
-	for lab := range machinesPerLab {
-		labs = append(labs, lab)
-	}
-	sort.Strings(labs)
 
 	var result []utilizationSeries
-	for _, lab := range labs {
-		total := machinesPerLab[lab]
+	for _, lab := range d.labs {
+		total := d.machinesPerLab[lab]
 		if total == 0 {
 			continue
 		}
 		var data []utilizationPoint
-		for _, t := range timestamps {
-			k := labTime{lab, t}
-			// Send raw machine count (sum of per-machine [0,1] values); frontend
-			// computes % using Total so it can toggle between the two views.
-			raw := math.Round(labTimeSum[k]*10) / 10
-			data = append(data, utilizationPoint{T: t, V: raw})
+		for _, t := range d.timestamps {
+			v := math.Round(d.labTimeSum[labTimeKey{lab, t}]*10) / 10
+			data = append(data, utilizationPoint{T: t, V: v})
 		}
 		if len(data) > 0 {
 			result = append(result, utilizationSeries{Lab: lab, Total: total, Data: data})
@@ -1059,4 +1073,48 @@ func (s *Server) ReportUtilizationOverTime(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, utilizationResponse{Step: step, Series: result})
+}
+
+// ReportTopLabsByUtilization godoc
+// @Summary      Top labs by average utilization
+// @Description  Returns labs ranked by average utilization % over the time range, top 10.
+// @Tags         reports
+// @Produce      json
+// @Param        range  query  string  false  "Time range (e.g. 24h, 7d, 30d)"  default(24h)
+// @Param        start  query  string  false  "Custom range start (unix or RFC3339)"
+// @Param        end    query  string  false  "Custom range end (unix or RFC3339)"
+// @Success      200  {array}  labAvgUtilization
+// @Router       /api/v1/reports/top-labs-by-utilization [get]
+func (s *Server) ReportTopLabsByUtilization(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	startUnix, endUnix, step := parseUtilTimeWindow(q)
+
+	d, err := s.buildUtilizationData(ctx, startUnix, endUnix, step, "", q.Get("hostname"))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to query utilization data")
+		return
+	}
+
+	nTs := len(d.timestamps)
+	var result []labAvgUtilization
+	for _, lab := range d.labs {
+		total := d.machinesPerLab[lab]
+		if total == 0 || nTs == 0 {
+			continue
+		}
+		var sumPct float64
+		for _, t := range d.timestamps {
+			sumPct += (d.labTimeSum[labTimeKey{lab, t}] / float64(total)) * 100
+		}
+		avg := math.Round(sumPct/float64(nTs)*10) / 10
+		result = append(result, labAvgUtilization{Lab: lab, AvgPct: avg, Total: total})
+	}
+
+	sort.Slice(result, func(i, j int) bool { return result[i].AvgPct > result[j].AvgPct })
+	if len(result) > 10 {
+		result = result[:10]
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }

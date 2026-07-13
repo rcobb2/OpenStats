@@ -13,13 +13,17 @@ definitions:
         type: string
       name:
         type: string
+      room:
+        type: string
     type: object
   api.GenerateInstallerRequest:
     properties:
-      labName:
+      building:
         type: string
       port:
         type: integer
+      room:
+        type: string
       serverAddress:
         type: string
     type: object
@@ -33,12 +37,16 @@ definitions:
         type: string
       family:
         type: string
+      ignored:
+        type: boolean
       publisher:
         type: string
     type: object
   api.RegisterAgentRequest:
     properties:
       agentVersion:
+        type: string
+      building:
         type: string
       hostname:
         type: string
@@ -50,6 +58,8 @@ definitions:
         type: string
       port:
         type: integer
+      room:
+        type: string
     type: object
   api.SummaryResponse:
     properties:
@@ -62,9 +72,58 @@ definitions:
       totalMappings:
         type: integer
     type: object
+  api.buildInfoResponse:
+    properties:
+      buildDate:
+        type: string
+      gitCommit:
+        type: string
+      goVersion:
+        type: string
+      version:
+        type: string
+    type: object
+  api.labAvgUtilization:
+    properties:
+      avgPct:
+        type: number
+      lab:
+        type: string
+      total:
+        type: integer
+    type: object
+  api.utilizationPoint:
+    properties:
+      t:
+        type: integer
+      v:
+        type: number
+    type: object
+  api.utilizationResponse:
+    properties:
+      series:
+        items:
+          $ref: '#/definitions/api.utilizationSeries'
+        type: array
+      step:
+        type: integer
+    type: object
+  api.utilizationSeries:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.utilizationPoint'
+        type: array
+      lab:
+        type: string
+      total:
+        type: integer
+    type: object
   store.Agent:
     properties:
       agentVersion:
+        type: string
+      building:
         type: string
       createdAt:
         type: string
@@ -80,8 +139,12 @@ definitions:
         type: string
       osVersion:
         type: string
+      pendingUpdate:
+        type: string
       port:
         type: integer
+      room:
+        type: string
       status:
         type: string
       updatedAt:
@@ -98,6 +161,8 @@ definitions:
       id:
         type: string
       name:
+        type: string
+      room:
         type: string
       updatedAt:
         type: string
@@ -116,6 +181,8 @@ definitions:
         type: string
       id:
         type: integer
+      ignored:
+        type: boolean
       publisher:
         type: string
       source:
@@ -123,13 +190,30 @@ definitions:
       updatedAt:
         type: string
     type: object
+  store.SystemSettings:
+    properties:
+      heartbeatIntervalSeconds:
+        type: integer
+      maintenanceWindowEnd:
+        description: HH:mm
+        type: string
+      maintenanceWindowStart:
+        description: HH:mm
+        type: string
+      minAgentVersion:
+        type: string
+      staleTimeoutDays:
+        type: integer
+      updateIntervalSeconds:
+        type: integer
+    type: object
 host: localhost:8080
 info:
   contact: {}
   description: Central management server for the OpenLabStats fleet. Manages agent
     enrollment, software mappings, lab groupings, and reporting.
   title: OpenLabStats Server API
-  version: 0.1.0
+  version: 0.1.3
 paths:
   /api/v1/agents:
     get:
@@ -199,6 +283,38 @@ paths:
               type: string
             type: object
       summary: Get agent by ID
+      tags:
+      - agents
+  /api/v1/agents/{agentID}/force-update:
+    post:
+      description: Queues an update for the specified agent which will be delivered
+        on its next heartbeat.
+      parameters:
+      - description: Agent ID
+        in: path
+        name: agentID
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Force an agent to update immediately
       tags:
       - agents
   /api/v1/agents/{agentID}/lab:
@@ -275,10 +391,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Generates an MSI installer pre-configured with the given server
-        address and port. Returns a download URL. NOTE: Full MSI generation requires
-        WiX Toolset on the server; this endpoint currently returns the install command
-        with the appropriate properties.'
+      description: Returns a download URL for the latest pre-built MSI with an msiexec
+        command.
       parameters:
       - description: Installer configuration
         in: body
@@ -304,6 +418,9 @@ paths:
       summary: Generate a custom MSI installer
       tags:
       - installers
+  /api/v1/installers/latest:
+    get:
+      responses: {}
   /api/v1/labs:
     get:
       description: Returns all configured labs/rooms.
@@ -499,6 +616,48 @@ paths:
       summary: Delete a software mapping
       tags:
       - mappings
+  /api/v1/mappings/{mappingID}/ignore:
+    patch:
+      consumes:
+      - application/json
+      description: Sets or clears the ignored flag for a mapping without changing
+        other fields.
+      parameters:
+      - description: Mapping ID
+        in: path
+        name: mappingID
+        required: true
+        type: integer
+      - description: 'Ignored state {ignored: bool}'
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Toggle mapping ignored state
+      tags:
+      - mappings
   /api/v1/mappings/agent:
     get:
       description: Returns all software mappings in the format agents expect (software-map.json
@@ -528,6 +687,86 @@ paths:
       summary: Currently active users
       tags:
       - reports
+  /api/v1/reports/avg-session-time:
+    get:
+      description: Returns top N users ranked by average session duration in minutes.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - description: Filter to a specific machine
+        in: query
+        name: hostname
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Average session duration per user
+      tags:
+      - reports
+  /api/v1/reports/bottom-apps-by-foreground:
+    get:
+      description: Returns bottom (least used) applications by foreground time.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - default: json
+        description: 'Output format: json or csv'
+        in: query
+        name: format
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Bottom applications by foreground time
+      tags:
+      - reports
+  /api/v1/reports/bottom-apps-by-launches:
+    get:
+      description: Returns bottom (least used) applications by launch count.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - default: json
+        description: 'Output format: json or csv'
+        in: query
+        name: format
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Bottom applications by launch count
+      tags:
+      - reports
   /api/v1/reports/summary:
     get:
       description: 'Returns high-level fleet stats: total agents, online count, labs,
@@ -544,34 +783,196 @@ paths:
       - reports
   /api/v1/reports/top-apps:
     get:
-      description: Returns the top applications by total usage hours over the given
-        time range. Defaults to last 24 hours.
+      description: Returns the top applications by total usage seconds over the given
+        time range.
       parameters:
       - default: 24h
-        description: Time range for the query (e.g. 24h, 7d, 30d)
+        description: Time range
         in: query
         name: range
         type: string
       - default: 20
-        description: Max number of results
+        description: Max results
         in: query
         name: limit
         type: integer
+      - default: json
+        description: 'Output format: json or csv'
+        in: query
+        name: format
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top applications by usage time
+      tags:
+      - reports
+  /api/v1/reports/top-apps-by-foreground:
+    get:
+      description: Returns top applications by total foreground (active) time.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - default: json
+        description: 'Output format: json or csv'
+        in: query
+        name: format
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top applications by foreground time
+      tags:
+      - reports
+  /api/v1/reports/top-apps-by-launches:
+    get:
+      description: Returns top applications by total launch count over the given time
+        range.
+      parameters:
+      - default: 24h
+        description: Time range (e.g. 24h, 7d, 30d)
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - default: json
+        description: 'Output format: json or csv'
+        in: query
+        name: format
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top applications by launch count
+      tags:
+      - reports
+  /api/v1/reports/top-devices-by-sessions:
+    get:
+      description: Returns the top N hostnames ranked by user login count over the
+        time range.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - description: Filter to a specific machine
+        in: query
+        name: hostname
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top devices by session count
+      tags:
+      - reports
+  /api/v1/reports/top-labs-by-utilization:
+    get:
+      description: Returns labs ranked by average utilization % over the time range,
+        top 10.
+      parameters:
+      - default: 24h
+        description: Time range (e.g. 24h, 7d, 30d)
+        in: query
+        name: range
+        type: string
+      - description: Custom range start (unix or RFC3339)
+        in: query
+        name: start
+        type: string
+      - description: Custom range end (unix or RFC3339)
+        in: query
+        name: end
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
-        "502":
-          description: Bad Gateway
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Top applications by usage
+            items:
+              $ref: '#/definitions/api.labAvgUtilization'
+            type: array
+      summary: Top labs by average utilization
+      tags:
+      - reports
+  /api/v1/reports/top-users-by-logins:
+    get:
+      description: Returns the top N users ranked by total login sessions over the
+        time range.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - description: Filter to a specific machine
+        in: query
+        name: hostname
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top users by login count
+      tags:
+      - reports
+  /api/v1/reports/top-users-by-session-time:
+    get:
+      description: Returns the top N users ranked by total session hours over the
+        time range.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - description: Filter to a specific machine
+        in: query
+        name: hostname
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top users by total session time
       tags:
       - reports
   /api/v1/reports/usage-by-lab:
@@ -580,9 +981,30 @@ paths:
         range.
       parameters:
       - default: 24h
-        description: Time range
+        description: Time range (e.g. 24h, 7d)
         in: query
         name: range
+        type: string
+      - description: Filter to a specific machine hostname
+        in: query
+        name: hostname
+        type: string
+      - description: Filter to a specific lab name
+        in: query
+        name: lab
+        type: string
+      - description: Custom range start (unix or RFC3339)
+        in: query
+        name: start
+        type: string
+      - description: Custom range end (unix or RFC3339)
+        in: query
+        name: end
+        type: string
+      - default: json
+        description: 'Output format: json or csv'
+        in: query
+        name: format
         type: string
       produces:
       - application/json
@@ -601,18 +1023,107 @@ paths:
       summary: Usage breakdown by lab
       tags:
       - reports
-  /api/v1/settings:
+  /api/v1/reports/utilization-over-time:
     get:
-      description: Returns the current server configuration (non-sensitive fields).
+      description: Returns per-lab utilization percentage as a time series.
+      parameters:
+      - default: 24h
+        description: Time range (e.g. 24h, 7d, 30d)
+        in: query
+        name: range
+        type: string
+      - description: Filter to a specific machine
+        in: query
+        name: hostname
+        type: string
+      - description: Filter to a specific lab
+        in: query
+        name: lab
+        type: string
+      - description: Custom range start (unix or RFC3339)
+        in: query
+        name: start
+        type: string
+      - description: Custom range end (unix or RFC3339)
+        in: query
+        name: end
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties: true
+            $ref: '#/definitions/api.utilizationResponse'
+      summary: Machine utilization % over time
+      tags:
+      - reports
+  /api/v1/settings:
+    get:
+      description: Returns global configuration for agents and server.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.SystemSettings'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
             type: object
-      summary: Get server settings
+      summary: Get system settings
       tags:
       - settings
+    put:
+      consumes:
+      - application/json
+      description: Updates global configuration for agents and server.
+      parameters:
+      - description: Settings payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/store.SystemSettings'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update system settings
+      tags:
+      - settings
+  /api/v1/version:
+    get:
+      description: Returns the running server's version, git commit, build date, and
+        Go runtime version.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.buildInfoResponse'
+      summary: Server build information
+      tags:
+      - meta
 swagger: "2.0"
