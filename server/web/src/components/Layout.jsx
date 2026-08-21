@@ -15,6 +15,7 @@ const navItems = [
   },
   { to: '/labs', label: 'Labs' },
   { to: '/mappings', label: 'Mappings' },
+  { to: '/users', label: 'Users' },
   { to: '/reports', label: 'Reports' },
 ];
 

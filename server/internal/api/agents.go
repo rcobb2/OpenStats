@@ -31,6 +31,7 @@ type RegisterAgentResponse struct {
 	Settings        *store.SystemSettings `json:"settings"`
 	UpdateURL       string                `json:"updateUrl,omitempty"`
 	IgnoredExeNames []string              `json:"ignoredExeNames,omitempty"`
+	UserPolicy      *AgentUserPolicy      `json:"userPolicy,omitempty"`
 }
 
 // RegisterAgent godoc
@@ -128,11 +129,19 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("failed to get ignored exe names for heartbeat", "error", err)
 	}
 
+	// User policy travels with every heartbeat so ignore rules and identity
+	// merges take effect fleet-wide without waiting for an agent restart.
+	userPolicy, err := s.buildAgentUserPolicy(r.Context())
+	if err != nil {
+		s.logger.Warn("failed to build user policy for heartbeat", "error", err)
+	}
+
 	writeJSON(w, http.StatusOK, RegisterAgentResponse{
 		Agent:           agent,
 		Settings:        settings,
 		UpdateURL:       updateURL,
 		IgnoredExeNames: ignoredExeNames,
+		UserPolicy:      userPolicy,
 	})
 }
 

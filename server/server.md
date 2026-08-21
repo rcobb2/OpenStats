@@ -35,6 +35,12 @@ Main HTTP router using chi:
 | `/api/v1/mappings` | GET, POST | List/create mappings |
 | `/api/v1/mappings/agent` | GET | Agent-facing mapping JSON |
 | `/api/v1/mappings` | PUT | Bulk update mappings |
+| `/api/v1/users` | GET | Users seen in metrics, grouped by canonical identity |
+| `/api/v1/users/policy` | GET, PUT | User policy (domain stripping); GET is also the agent-facing endpoint |
+| `/api/v1/users/ignore` | POST | Ignore a username (quick action) |
+| `/api/v1/users/mappings` | GET, POST, PUT | User ignore/correlation rules |
+| `/api/v1/users/mappings/{id}` | DELETE | Delete a user rule |
+| `/api/v1/users/mappings/{id}/ignore` | PATCH | Toggle a rule's ignored flag |
 | `/api/v1/reports/top-apps` | GET | Top applications by usage |
 | `/api/v1/reports/usage-by-lab` | GET | Usage grouped by lab |
 | `/api/v1/reports/active-users` | GET | Currently active users |
@@ -53,6 +59,7 @@ PostgreSQL connection and migrations:
 - `labs` - Lab/room definitions
 - `agents` - Registered agents with status, lab assignment
 - `software_mappings` - Software name normalization rules
+- `user_mappings` - User ignore rules and cross-platform identity correlation
 - `installer_builds` - Generated installer records
 
 ### `internal/discovery/file_sd.go`
@@ -70,6 +77,28 @@ Agent registration handler:
 - Upserts agent to DB
 - Triggers target refresh on change
 - Handles heartbeat (re-registration)
+
+### `internal/userid/`
+
+User identity resolution, shared in spirit with `agent/internal/userid` (the two
+copies are deliberate — agent and server are separate Go modules; keep
+`Canonicalize` and `MatchGlob` in sync):
+
+- `Canonicalize` strips a `DOMAIN\` prefix and an `@domain` suffix and lowercases,
+  so `COLGATE\JDoe`, `jdoe@colgate.edu`, and `jdoe` resolve to one identity.
+- `Policy.Resolve` returns the canonical username and whether the account is
+  ignored. Admin rules are evaluated first (so a rule can rescue an account the
+  built-in list would drop), then the built-in defaults.
+- `Policy.IgnoreMatcher` renders the ignore set as a PromQL `user!~` matcher.
+  This is required for app-level reports, which aggregate the user label away and
+  therefore cannot filter ignored accounts after the fact. Patterns with
+  characters that cannot appear in a username are dropped, not escaped.
+
+### `internal/api/users.go`
+
+Users page and agent-facing policy: discovered-user listing (Prometheus `user`
+label values grouped by canonical identity), rule CRUD, and the policy payload
+that rides along with every agent heartbeat.
 
 ### `internal/api/reports.go`
 
@@ -140,6 +169,12 @@ software_mappings:
   id, exe_name (UNIQUE), display_name, category, publisher,
   family, source, created_at, updated_at
 
+user_mappings:
+  id, pattern (UNIQUE, lowercased), canonical_user, display_name,
+  notes, source, ignored, created_at, updated_at
+  (ignored=true drops the account entirely; canonical_user merges it
+   into another identity. Patterns support "*" wildcards.)
+
 installer_builds:
   id, server_address, port, version, filename, created_at
 ```
@@ -161,6 +196,15 @@ installer_builds:
 - Agent client: `agent/internal/enrollment/client.go`
 - DB: `store/postgres.go` (UpsertAgent)
 - Prometheus: `discovery/file_sd.go`
+
+### Changing user filtering or correlation
+
+1. `server/internal/userid/` — resolution rules (mirror in `agent/internal/userid/`)
+2. `server/internal/store/postgres.go` — `user_mappings` operations
+3. `server/internal/api/users.go` — handlers and the agent policy payload
+4. `server/internal/api/reports.go` — user-keyed reports merge by canonical name
+   in Go rather than using PromQL `topk`, because ranking has to happen after the
+   merge
 
 ### Adding a Report
 

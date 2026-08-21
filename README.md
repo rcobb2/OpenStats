@@ -10,6 +10,7 @@ The OpenLabStats agent runs as a Windows service on lab and classroom computers.
 - **Launch counts** — how many times each application is opened
 - **Foreground tracking** — active vs background usage for precise analytics
 - **User sessions** — when users log in and out
+- **User identity** — service accounts (e.g. `zabbix`) can be ignored, and one person's Windows domain account (`COLGATE\jdoe`) and macOS username (`jdoe`) are reported as a single user. Managed under **Users** in the web portal.
 - **Software inventory** — what's installed on each machine
 
 Data is exposed as Prometheus metrics, ready for scraping into your existing Prometheus + Grafana stack.

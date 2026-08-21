@@ -67,10 +67,11 @@ cd server && go test ./...
 - **Two-tier name normalization** in the agent: (1) server-managed `software-map.json` looked up by exe name, (2) PE metadata (`FileDescription`) extracted from the executable. See `agent/internal/normalizer/`.
 - **Prometheus service discovery**: The server writes a `file_sd` JSON file to `fileSD.outputPath` (configured in `server.yaml`). This file is auto-refreshed whenever lab/agent assignments change — no manual Prometheus config needed per agent.
 - **SQLite on agent** — Local persistence for metric restoration across restarts (`agent/internal/store/sqlite.go`).
-- **User filtering**: Agent only records metrics for human users — system accounts (`SYSTEM`, `DWM`, `NT SERVICE`, computer accounts ending in `$`) are excluded in `tracker.go`.
+- **User filtering & correlation**: Usernames are resolved through `userid` before they reach a metric label. Built-in rules exclude system/service accounts (`SYSTEM`, `DWM`, `NT SERVICE`, computer accounts ending in `$`); admins add more ignore patterns (e.g. `zabbix`, `svc-*`) and identity aliases under **Users** in the portal. Domain stripping is on by default, so `COLGATE\jdoe`, `jdoe@colgate.edu`, and `jdoe` are one identity. The rules live in **two mirrored copies** — `agent/internal/userid/` (applied at collection) and `server/internal/userid/` (applied at query time, so pre-existing data is filtered and merged too). Keep them in sync; the separate modules prevent sharing.
 - **Swagger docs** — Regenerate with `swag init` from `server/` after changing API handler annotations. Docs served at `/api/docs`.
 - **Version constants** — Agent version is in `agent/cmd/agent/main.go` AND `agent/internal/enrollment/client.go`; keep both in sync.
-- **Fleet Settings** — Server pushes global config to agents at registration: heartbeat interval, update interval, min agent version, stale timeout. Managed via **Agents > Settings** in the web portal.
+- **Fleet Settings** — Server pushes global config to agents at registration: heartbeat interval, update interval, min agent version, stale timeout. Managed via **Agents > Settings** in the web portal. The same response carries the **user policy** (ignore patterns, aliases, domain stripping) from **Users**.
+- **User-keyed reports don't use PromQL `topk`** — identities are merged by canonical name in Go first, then ranked; ranking before the merge would double-count or drop a user split across platforms. See `sumByCanonicalUser` in `server/internal/api/reports.go`.
 
 ## Key Files
 
@@ -86,9 +87,12 @@ cd server && go test ./...
 | `agent/internal/monitor/foreground.go` | Foreground window polling (Windows: Win32; macOS: CoreGraphics) |
 | `agent/internal/metrics/prometheus.go` | All Prometheus metric definitions and labels |
 | `agent/internal/normalizer/normalizer.go` | Name resolution orchestration |
+| `agent/internal/userid/` | Username canonicalization + ignore policy (mirror of server copy) |
 | `agent/internal/enrollment/client.go` | Server registration + heartbeat; also holds `agentVersion` const |
 | `agent/internal/store/sqlite.go` | SQLite local persistence |
 | `server/internal/api/router.go` | chi router, all routes, CORS, Swagger, SPA |
+| `server/internal/api/users.go` | User rules, discovered-user listing, agent policy payload |
+| `server/internal/userid/` | Username canonicalization, ignore policy, PromQL ignore matcher |
 | `server/internal/store/postgres.go` | pgxpool connection, `migrate()`, all queries |
 | `server/internal/discovery/file_sd.go` | Prometheus file_sd target generation |
 | `server/web/src/api.js` | All frontend API calls |
@@ -97,7 +101,8 @@ cd server && go test ./...
 
 ## API Contract (Agent ↔ Server)
 
-- **Registration/heartbeat**: `POST /api/v1/agents/register` — payload: `{ id, hostname, ipAddress, osVersion, agentVersion, port, building, room }`
+- **Registration/heartbeat**: `POST /api/v1/agents/register` — payload: `{ id, hostname, ipAddress, osVersion, agentVersion, port, building, room }`; response: `{ agent, settings, updateUrl, ignoredExeNames, userPolicy }`
+- **User policy** (fetched once at agent startup): `GET /api/v1/users/policy`
 - All server API routes are under `/api/v1/*` returning JSON
 - Agent metrics at `http://<agent>:9183/metrics`, health at `http://<agent>:9183/health`
 
@@ -117,6 +122,14 @@ cd server && go test ./...
 5. `server/docs/swagger.yaml` — regenerated docs
 6. `server/web/src/api.js` — add client function
 7. `server/web/src/pages/` and `server/web/src/main.jsx` / `server/web/src/components/Layout.jsx` if a new page/nav link is needed
+
+### Changing User Filtering or Correlation
+1. `server/internal/userid/` — rules and PromQL ignore matcher
+2. `agent/internal/userid/` — mirror the same change
+3. `server/internal/store/postgres.go` — `user_mappings` operations
+4. `server/internal/api/users.go` — handlers / agent policy payload
+5. `server/web/src/pages/Users.jsx` — admin UI
+6. Bump `enrollment.AgentVersion` if agent behavior changed
 
 ### Adding a New Frontend Page
 1. `server/web/src/pages/<Name>.jsx`

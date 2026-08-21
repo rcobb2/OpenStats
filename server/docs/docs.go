@@ -1351,6 +1351,258 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/users": {
+            "get": {
+                "description": "Returns every username Prometheus has recorded, grouped by the canonical identity it resolves to, with its ignore state and recent session hours.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "List users seen in metrics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "30d",
+                        "description": "Time range for session hours",
+                        "name": "range",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.DiscoveredUser"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/ignore": {
+            "post": {
+                "description": "Marks a username as ignored, creating the rule if needed. Used by the ignore action on the users and reports pages.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Ignore a user",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/mappings": {
+            "get": {
+                "description": "Returns all user ignore/correlation rules.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "List user rules",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/store.UserMapping"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Adds or replaces the rule for a username pattern. Patterns may contain \"*\" wildcards and match case-insensitively against the raw username and its canonical form.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Create or update a user rule",
+                "parameters": [
+                    {
+                        "description": "Rule details",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UserMappingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/mappings/{mappingID}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Delete a user rule",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Rule ID",
+                        "name": "mappingID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/mappings/{mappingID}/ignore": {
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Toggle a user rule's ignored flag",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Rule ID",
+                        "name": "mappingID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/policy": {
+            "get": {
+                "description": "Returns the policy agents apply at collection time: domain stripping, ignore patterns, and alias mappings. Agents also receive this in the registration response.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get the effective user policy",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.AgentUserPolicy"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Sets whether domain prefixes and UPN suffixes are stripped when correlating identities across Windows and macOS.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Update user policy options",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/version": {
             "get": {
                 "description": "Returns the running server's version, git commit, build date, and Go runtime version.",
@@ -1373,6 +1625,26 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "api.AgentUserPolicy": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "ignorePatterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "stripDomain": {
+                    "type": "boolean"
+                }
+            }
+        },
         "api.AssignLabRequest": {
             "type": "object",
             "properties": {
@@ -1395,6 +1667,38 @@ const docTemplate = `{
                 },
                 "room": {
                     "type": "string"
+                }
+            }
+        },
+        "api.DiscoveredUser": {
+            "type": "object",
+            "properties": {
+                "activeNow": {
+                    "type": "boolean"
+                },
+                "canonicalUser": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string"
+                },
+                "ignored": {
+                    "type": "boolean"
+                },
+                "matchedRule": {
+                    "type": "string"
+                },
+                "rawUsers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "ruleId": {
+                    "type": "integer"
+                },
+                "sessionHours": {
+                    "type": "number"
                 }
             }
         },
@@ -1481,6 +1785,26 @@ const docTemplate = `{
                 },
                 "totalMappings": {
                     "type": "integer"
+                }
+            }
+        },
+        "api.UserMappingRequest": {
+            "type": "object",
+            "properties": {
+                "canonicalUser": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string"
+                },
+                "ignored": {
+                    "type": "boolean"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "pattern": {
+                    "type": "string"
                 }
             }
         },
@@ -1687,6 +2011,38 @@ const docTemplate = `{
                 },
                 "updateIntervalSeconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "store.UserMapping": {
+            "type": "object",
+            "properties": {
+                "canonicalUser": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "ignored": {
+                    "type": "boolean"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "pattern": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
                 }
             }
         }

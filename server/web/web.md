@@ -25,6 +25,7 @@ server/web/
 │   │   ├── Labs.jsx
 │   │   ├── Agents.jsx
 │   │   ├── Mappings.jsx
+│   │   ├── Users.jsx
 │   │   ├── Reports.jsx
 │   │   └── Installer.jsx
 │   └── components/      # Shared components
@@ -51,6 +52,10 @@ getLabs()
 createLab(data)
 updateLab(id, data)
 deleteLab(id)
+
+// Users
+getUsers(), getUserRules(), saveUserRule(), deleteUserRule(),
+patchUserRuleIgnore(), ignoreUser(), getUserPolicy(), updateUserPolicy()
 
 // Mappings
 getMappings()
@@ -111,6 +116,15 @@ Base URL: `/api/v1` (proxied by server)
 - Create/edit/delete mappings
 - Fields: exe name, display name, category, publisher, family
 
+### Users (`pages/Users.jsx`)
+- Lists every username seen in metrics, grouped by the canonical identity it
+  resolves to (`Seen As` shows the raw names that were merged)
+- Ignore/unignore accounts such as service accounts (e.g. `zabbix`)
+- Merge an identity into another username, for cases where a macOS shortname
+  differs from the AD account name
+- Toggles cross-platform correlation (domain/UPN stripping) fleet-wide
+- Tabs: All, Tracked, Ignored, Merged, Rules
+
 ### Reports (`pages/Reports.jsx`)
 - Top applications by usage time
 - Usage by lab
@@ -123,7 +137,7 @@ Base URL: `/api/v1` (proxied by server)
 ### Layout (`components/Layout.jsx`)
 - Sidebar navigation
 - Page title
-- Routes: Dashboard, Labs, Agents, Mappings, Reports, Installer
+- Routes: Dashboard, Labs, Agents, Mappings, Users, Reports, Installer
 
 ### Table (`components/Table.jsx`)
 - `ResizableTable` component
@@ -144,6 +158,7 @@ Uses React Router:
     <Route path="agents/settings" element={<Settings />} />
     <Route path="labs" element={<Labs />} />
     <Route path="mappings" element={<Mappings />} />
+    <Route path="users" element={<Users />} />
     <Route path="reports" element={<Reports />} />
   </Route>
 </Routes>

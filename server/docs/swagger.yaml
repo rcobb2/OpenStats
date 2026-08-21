@@ -1,5 +1,18 @@
 basePath: /
 definitions:
+  api.AgentUserPolicy:
+    properties:
+      aliases:
+        additionalProperties:
+          type: string
+        type: object
+      ignorePatterns:
+        items:
+          type: string
+        type: array
+      stripDomain:
+        type: boolean
+    type: object
   api.AssignLabRequest:
     properties:
       labId:
@@ -15,6 +28,27 @@ definitions:
         type: string
       room:
         type: string
+    type: object
+  api.DiscoveredUser:
+    properties:
+      activeNow:
+        type: boolean
+      canonicalUser:
+        type: string
+      displayName:
+        type: string
+      ignored:
+        type: boolean
+      matchedRule:
+        type: string
+      rawUsers:
+        items:
+          type: string
+        type: array
+      ruleId:
+        type: integer
+      sessionHours:
+        type: number
     type: object
   api.GenerateInstallerRequest:
     properties:
@@ -71,6 +105,19 @@ definitions:
         type: integer
       totalMappings:
         type: integer
+    type: object
+  api.UserMappingRequest:
+    properties:
+      canonicalUser:
+        type: string
+      displayName:
+        type: string
+      ignored:
+        type: boolean
+      notes:
+        type: string
+      pattern:
+        type: string
     type: object
   api.buildInfoResponse:
     properties:
@@ -206,6 +253,27 @@ definitions:
         type: integer
       updateIntervalSeconds:
         type: integer
+    type: object
+  store.UserMapping:
+    properties:
+      canonicalUser:
+        type: string
+      createdAt:
+        type: string
+      displayName:
+        type: string
+      id:
+        type: integer
+      ignored:
+        type: boolean
+      notes:
+        type: string
+      pattern:
+        type: string
+      source:
+        type: string
+      updatedAt:
+        type: string
     type: object
 host: localhost:8080
 info:
@@ -1112,6 +1180,179 @@ paths:
       summary: Update system settings
       tags:
       - settings
+  /api/v1/users:
+    get:
+      description: Returns every username Prometheus has recorded, grouped by the
+        canonical identity it resolves to, with its ignore state and recent session
+        hours.
+      parameters:
+      - default: 30d
+        description: Time range for session hours
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.DiscoveredUser'
+            type: array
+      summary: List users seen in metrics
+      tags:
+      - users
+  /api/v1/users/ignore:
+    post:
+      consumes:
+      - application/json
+      description: Marks a username as ignored, creating the rule if needed. Used
+        by the ignore action on the users and reports pages.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Ignore a user
+      tags:
+      - users
+  /api/v1/users/mappings:
+    get:
+      description: Returns all user ignore/correlation rules.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.UserMapping'
+            type: array
+      summary: List user rules
+      tags:
+      - users
+    put:
+      consumes:
+      - application/json
+      description: Adds or replaces the rule for a username pattern. Patterns may
+        contain "*" wildcards and match case-insensitively against the raw username
+        and its canonical form.
+      parameters:
+      - description: Rule details
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.UserMappingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create or update a user rule
+      tags:
+      - users
+  /api/v1/users/mappings/{mappingID}:
+    delete:
+      parameters:
+      - description: Rule ID
+        in: path
+        name: mappingID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a user rule
+      tags:
+      - users
+  /api/v1/users/mappings/{mappingID}/ignore:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule ID
+        in: path
+        name: mappingID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Toggle a user rule's ignored flag
+      tags:
+      - users
+  /api/v1/users/policy:
+    get:
+      description: 'Returns the policy agents apply at collection time: domain stripping,
+        ignore patterns, and alias mappings. Agents also receive this in the registration
+        response.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.AgentUserPolicy'
+      summary: Get the effective user policy
+      tags:
+      - users
+    put:
+      consumes:
+      - application/json
+      description: Sets whether domain prefixes and UPN suffixes are stripped when
+        correlating identities across Windows and macOS.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update user policy options
+      tags:
+      - users
   /api/v1/version:
     get:
       description: Returns the running server's version, git commit, build date, and

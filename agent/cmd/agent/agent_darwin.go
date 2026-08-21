@@ -30,6 +30,17 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Initialize metrics.
 		m := metrics.New()
 
+		// Create the enrollment client first and pull the user policy before any
+		// metrics are restored or processes are scanned, so nothing is ever
+		// recorded under an ignored or non-canonical username.
+		var enrollClient *enrollment.Client
+		if cfg.Server.ReportURL != "" {
+			enrollClient = enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
+				WithOSVersion("macOS " + getOSVersionDarwin()).
+				WithUserPolicyHandler(func(p *enrollment.UserPolicy) { applyUserPolicy(p, logger) })
+			bootstrapUserPolicy(ctx, enrollClient, logger)
+		}
+
 		// Initialize local store.
 		db, err := store.New(cfg.Store.DBPath, logger)
 		if err != nil {
@@ -67,25 +78,20 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				if !isNewGroup {
 					return
 				}
-				user := tracker.GetProcessUser(pid)
-				if isValidUser(user) {
-					userSessions.onProcessStart(user, pid)
-				}
+				userSessions.onProcessStart(tracker.GetProcessUser(pid), pid)
 			},
 			OnStop: func(session *monitor.ProcessSession) {
 				info := norm.Resolve(session.ExeName, session.ExePath)
 				hostname := metrics.Hostname()
 
-				if isValidUser(session.User) {
-					labels := []string{info.DisplayName, session.ExeName, info.Category, session.User, hostname}
+				if user, ok := resolveUser(session.User); ok {
+					labels := []string{info.DisplayName, session.ExeName, info.Category, user, hostname}
 					m.AppUsageSeconds.WithLabelValues(labels...).Add(session.CheckpointDelta.Seconds())
 					m.AppForegroundSeconds.WithLabelValues(labels...).Add(session.ForegroundDelta.Seconds())
 					m.AppLaunches.WithLabelValues(labels...).Inc()
 				}
 
-				if isValidUser(session.User) {
-					userSessions.onProcessStop(session.User, session.PID)
-				}
+				userSessions.onProcessStop(session.User, session.PID)
 
 				if err := db.RecordSession(
 					session.PID, session.ExeName, session.ExePath,
@@ -108,9 +114,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		existingProcs = watcher.FilterProcesses(existingProcs)
 		for _, p := range existingProcs {
 			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
-			if isValidUser(p.User) {
-				userSessions.onProcessStart(p.User, p.PID)
-			}
+			userSessions.onProcessStart(p.User, p.PID)
 		}
 
 		// Start process watcher in background.
@@ -136,9 +140,8 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}
 
 		// Start enrollment heartbeat and metrics push if a central server is configured.
-		if cfg.Server.ReportURL != "" {
-			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
-				WithOSVersion("macOS " + getOSVersionDarwin())
+		// Each heartbeat also refreshes the user policy via the handler above.
+		if enrollClient != nil {
 			go enrollClient.RunHeartbeat(ctx, 2*time.Minute)
 			go enrollClient.RunMetricsPush(ctx, 30*time.Second)
 		}

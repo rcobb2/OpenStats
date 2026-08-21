@@ -39,6 +39,18 @@ export const updateMapping = (data) => request('/mappings', { method: 'PUT', bod
 export const deleteMapping = (id) => request(`/mappings/${id}`, { method: 'DELETE' });
 export const patchMappingIgnore = (id, ignored) => request(`/mappings/${id}/ignore`, { method: 'PATCH', body: JSON.stringify({ ignored }) });
 
+// Users (ignore rules + cross-platform identity correlation)
+export const getUsers = (range = '30d') => request(`/users?range=${encodeURIComponent(range)}`);
+export const getUserRules = () => request('/users/mappings');
+export const saveUserRule = (data) => request('/users/mappings', { method: 'PUT', body: JSON.stringify(data) });
+export const deleteUserRule = (id) => request(`/users/mappings/${id}`, { method: 'DELETE' });
+export const patchUserRuleIgnore = (id, ignored) =>
+  request(`/users/mappings/${id}/ignore`, { method: 'PATCH', body: JSON.stringify({ ignored }) });
+export const ignoreUser = (user, notes = '') =>
+  request('/users/ignore', { method: 'POST', body: JSON.stringify({ user, notes }) });
+export const getUserPolicy = () => request('/users/policy');
+export const updateUserPolicy = (data) => request('/users/policy', { method: 'PUT', body: JSON.stringify(data) });
+
 // Reports
 export const getSummary = () => request('/reports/summary');
 

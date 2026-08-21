@@ -57,7 +57,7 @@ Central management server providing:
 
 **API:** RESTful at `/api/v1/*` (see Swagger docs at `/api/docs`)
 
-**Database:** PostgreSQL with tables for agents, labs, mappings, installer builds.
+**Database:** PostgreSQL with tables for agents, labs, software mappings, user mappings, installer builds.
 
 ### Frontend (React/Vite)
 
@@ -67,6 +67,7 @@ Web UI for managing the fleet:
 - **Labs** - Lab/room management
 - **Agents** - Fleet inventory, status
 - **Mappings** - Software name normalization rules
+- **Users** - Ignore service accounts; correlate the same person across Windows domain accounts and macOS usernames
 - **Reports** - Usage analytics with resizable data tables
 - **Installer** - Generate customized agent packages
 

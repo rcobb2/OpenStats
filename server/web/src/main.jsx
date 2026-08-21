@@ -9,6 +9,7 @@ import Installer from './pages/agents/Installer';
 import Settings from './pages/agents/Settings';
 import Labs from './pages/Labs';
 import Mappings from './pages/Mappings';
+import Users from './pages/Users';
 import Reports from './pages/Reports';
 import './styles.css';
 
@@ -24,6 +25,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/agents/settings" element={<Settings />} />
             <Route path="/labs" element={<Labs />} />
             <Route path="/mappings" element={<Mappings />} />
+            <Route path="/users" element={<Users />} />
             <Route path="/reports" element={<Reports />} />
             {/* Redirect old installer path */}
             <Route path="/installer" element={<Navigate to="/agents/installers" replace />} />

@@ -45,8 +45,28 @@ Active process state management:
 - Maintains map of running processes
 - Handles checkpointing for metrics aggregation
 - Deduplicates by (app, user, hostname) to prevent double-counting
-- **User Filtering**: Only records metrics for valid human users (excludes system/computer accounts)
+- **User Filtering**: Only records metrics for valid human users (excludes system/computer accounts) — see `internal/userid/`
 - Integrates with foreground poller
+
+### `internal/userid/`
+
+Username resolution, applied before any username reaches a metric label:
+- `Canonicalize` strips a `DOMAIN\` prefix and an `@domain` suffix and lowercases,
+  so a Windows domain account (`COLGATE\jdoe`) and its macOS counterpart (`jdoe`)
+  share one time series.
+- `Policy.Resolve` returns the canonical username and whether the account is
+  ignored. Built-in defaults cover OS and service accounts; the server pushes
+  additional ignore patterns and aliases on top.
+- `Holder` guards the active policy — the server replaces it on every heartbeat
+  while process events resolve usernames concurrently.
+
+The same rules exist in `server/internal/userid/` so that what the agent drops at
+collection time and what reports filter at query time agree. Keep them in sync.
+
+In `cmd/agent/helpers.go`, `resolveUser` is the only function collection code
+should call: it returns the canonical name to label with, or false to skip.
+`isValidUser` applies the built-in rules only and exists for the startup path
+and tests.
 
 ### `internal/monitor/foreground.go`
 
@@ -75,6 +95,11 @@ Server communication:
 - `Register()` - POST to `/api/v1/agents/register`
 - `RunHeartbeat()` - Periodic registration (default 2 min)
 - Sends: hostname, IP, OS version, agent version, port
+- Receives: fleet settings, update URL, ignored exe names, and the **user policy**
+  (`stripDomain`, `ignorePatterns`, `aliases`), which is applied via the handler
+  registered with `WithUserPolicyHandler`
+- `FetchUserPolicy()` - GET `/api/v1/users/policy`, called once at startup so
+  already-running processes are attributed correctly before the first heartbeat
 
 ### `internal/store/sqlite.go`
 
@@ -224,6 +249,13 @@ When an agent registers with the server:
 2. Wire up collection in `cmd/agent/main.go`
 3. Update Grafana dashboards
 4. Document in README.md
+
+### Changing user filtering or correlation
+
+1. `internal/userid/` — resolution rules (mirror the change in `server/internal/userid/`)
+2. `cmd/agent/helpers.go` — `resolveUser` is the single entry point for collection code
+3. Ignore lists and aliases are **server-managed** — add them in the web portal
+   under **Users**, not in agent code
 
 ### Adding Exclude Pattern
 

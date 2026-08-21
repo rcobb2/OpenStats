@@ -3,15 +3,16 @@ package main
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/rcobb/openlabstats-agent/internal/enrollment"
 	"github.com/rcobb/openlabstats-agent/internal/inventory"
 	"github.com/rcobb/openlabstats-agent/internal/metrics"
 	"github.com/rcobb/openlabstats-agent/internal/monitor"
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
 	"github.com/rcobb/openlabstats-agent/internal/store"
+	"github.com/rcobb/openlabstats-agent/internal/userid"
 )
 
 func restoreMetrics(db *store.Store, m *metrics.Metrics, logger *slog.Logger) error {
@@ -22,11 +23,14 @@ func restoreMetrics(db *store.Store, m *metrics.Metrics, logger *slog.Logger) er
 
 	for _, t := range totals {
 		// Skip system/service accounts — they produce user="" series that waste
-		// Prometheus cardinality and never appear in user-facing reports.
-		if !isValidUser(t.User) {
+		// Prometheus cardinality and never appear in user-facing reports. Restored
+		// rows are canonicalized too, so history merges with live data even when
+		// it was persisted under a domain-qualified name.
+		user, ok := resolveUser(t.User)
+		if !ok {
 			continue
 		}
-		labels := []string{t.DisplayName, t.ExeName, t.Category, t.User, t.Hostname}
+		labels := []string{t.DisplayName, t.ExeName, t.Category, user, t.Hostname}
 		m.AppUsageSeconds.WithLabelValues(labels...).Add(t.TotalSeconds)
 		m.AppForegroundSeconds.WithLabelValues(labels...).Add(t.TotalForegroundSeconds)
 		m.AppLaunches.WithLabelValues(labels...).Add(float64(t.TotalLaunches))
@@ -81,8 +85,11 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 			foregroundSeconds := make(map[usageKey]float64)
 
 			for _, s := range snapshots {
-				// Only checkpoint metrics for valid human users.
-				if !isValidUser(s.User) {
+				// Only checkpoint metrics for valid human users, under the canonical
+				// username — two process groups owned by the same person under
+				// different name forms must land on one key, not two.
+				user, ok := resolveUser(s.User)
+				if !ok {
 					continue
 				}
 
@@ -91,7 +98,7 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 					DisplayName: info.DisplayName,
 					ExeName:     s.ExeName,
 					Category:    info.Category,
-					User:        s.User,
+					User:        user,
 				}
 
 				// For total usage, count the checkpoint interval ONCE per unique app/user/host.
@@ -163,96 +170,63 @@ func runMappingRefreshLoop(ctx context.Context, mapping *normalizer.MappingFile,
 	}
 }
 
-// isValidUser returns true if the string looks like a real human user
-// rather than a system account, service, or process name.
+// userPolicy holds the server-managed user policy: which accounts to ignore and
+// how to merge usernames that belong to one person. It starts at the built-in
+// defaults and is replaced on every heartbeat.
+var userPolicy = userid.NewHolder()
+
+// builtinUserPolicy is the default rule set, with no server-managed rules
+// applied. It backs isValidUser so the built-in account filtering lives in
+// exactly one place (internal/userid).
+var builtinUserPolicy = userid.NewPolicy()
+
+// applyUserPolicy installs a policy received from the server.
+func applyUserPolicy(p *enrollment.UserPolicy, logger *slog.Logger) {
+	if p == nil {
+		return
+	}
+	userPolicy.Set(userid.FromServer(p.StripDomain, p.IgnorePatterns, p.Aliases))
+	logger.Info("applied user policy",
+		"stripDomain", p.StripDomain,
+		"ignoredUsers", len(p.IgnorePatterns),
+		"aliases", len(p.Aliases))
+}
+
+// bootstrapUserPolicy fetches the policy before process scanning starts, so that
+// already-running processes are attributed to the right identity instead of
+// waiting for the first heartbeat. A failure here is not fatal: the built-in
+// defaults apply until a heartbeat succeeds.
+func bootstrapUserPolicy(ctx context.Context, client *enrollment.Client, logger *slog.Logger) {
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	policy, err := client.FetchUserPolicy(fetchCtx)
+	if err != nil {
+		logger.Warn("failed to fetch user policy, using built-in defaults", "error", err)
+		return
+	}
+	applyUserPolicy(policy, logger)
+}
+
+// resolveUser canonicalizes a raw OS username and reports whether it should be
+// tracked. The canonical form is what goes into metric labels, so a Windows
+// domain account (COLGATE\jdoe) and its macOS counterpart (jdoe) share one
+// series. Callers must use the returned name, not the raw one.
+func resolveUser(raw string) (string, bool) {
+	canonical, ignored := userPolicy.Resolve(raw)
+	if ignored || canonical == "" {
+		return "", false
+	}
+	return canonical, true
+}
+
+// isValidUser returns true if the string looks like a real human user rather
+// than a system account, service, or process name. It applies only the built-in
+// rules — resolveUser is what callers should use, since it also applies the
+// server-managed policy and returns the canonical name.
 func isValidUser(user string) bool {
-	if user == "" {
-		return false
-	}
-	lower := strings.ToLower(user)
-
-	// 1. Filter out common system/service/technical accounts.
-	blacklist := []string{
-		"system",
-		"local service",
-		"network service",
-		"window manager",
-		"trustedinstaller",
-		"font driver host",
-		"dwm",
-		"umfd",
-		"usermode font driver",
-		"anonymous logon",
-		"local system",
-		"iusr",
-		"iwam",
-		"mssqlserver",
-		"postgres",
-		"mysql",
-		"service",
-		"localsystem",
-		"networkservice",
-		"localservice",
-		// macOS system accounts
-		"root",
-		"daemon",
-		"nobody",
-		"wheel",
-		// macOS app/service daemons (no _ prefix but not human users)
-		"panopto_upload",
-		"lp",
-		"sshd",
-		"postfix",
-		"www",
-		"eppc",
-		"qtss",
-		"cyrus",
-		"vpn",
-		"tokend",
-		"securityagent",
-		"apple_remote_desktop",
-		"windowserver",
-		"spotlight",
-		"netinfo",
-		"installer",
-		"ard",
-	}
-
-	// Check for exact match or suffix (to handle DOMAIN\Account or NT AUTHORITY\Account)
-	for _, b := range blacklist {
-		if lower == b || strings.HasSuffix(lower, "\\"+b) {
-			return false
-		}
-	}
-
-	// 2. Filter out anything under NT AUTHORITY or NT SERVICE domains.
-	if strings.Contains(lower, "nt authority") || strings.Contains(lower, "nt service") {
-		return false
-	}
-
-	// 3. Filter out Computer accounts (AccountName ends in $)
-	if strings.HasSuffix(lower, "$") {
-		return false
-	}
-
-	// 4. Reject anything that looks like an executable or system binary.
-	for _, suffix := range []string{".exe", ".dll", ".sys", ".com", ".msc", ".scr", ".bat", ".cmd"} {
-		if strings.HasSuffix(lower, suffix) {
-			return false
-		}
-	}
-
-	// 5. macOS Apple service accounts use underscore prefix (_www, _spotlight, etc.)
-	if strings.HasPrefix(lower, "_") {
-		return false
-	}
-
-	// 6. Minimal length check (human usernames are usually at least 2 chars).
-	if len(user) < 2 {
-		return false
-	}
-
-	return true
+	_, ignored := builtinUserPolicy.Resolve(user)
+	return !ignored
 }
 
 // userSessionManager derives user login/logoff events from process start/stop events.
@@ -279,9 +253,12 @@ func newUserSessionManager(m *metrics.Metrics, logger *slog.Logger) *userSession
 	}
 }
 
-func (usm *userSessionManager) onProcessStart(user string, pid uint32) {
+func (usm *userSessionManager) onProcessStart(rawUser string, pid uint32) {
 	// Ignore system/service processes — only track real human user sessions.
-	if !isValidUser(user) {
+	// Sessions are keyed on the canonical username so a person's Windows and
+	// macOS logins are one identity in the session metrics.
+	user, ok := resolveUser(rawUser)
+	if !ok {
 		return
 	}
 
@@ -305,8 +282,9 @@ func (usm *userSessionManager) onProcessStart(user string, pid uint32) {
 	state.refCount++
 }
 
-func (usm *userSessionManager) onProcessStop(user string, pid uint32) {
-	if !isValidUser(user) {
+func (usm *userSessionManager) onProcessStop(rawUser string, pid uint32) {
+	user, ok := resolveUser(rawUser)
+	if !ok {
 		return
 	}
 

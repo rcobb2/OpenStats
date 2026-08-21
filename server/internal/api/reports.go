@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rcobb/openlabstats-server/internal/userid"
 )
 
 // promQueryInstantResult represents an instant query response.
@@ -61,7 +63,7 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Query by hostname — ignore the Prometheus lab label entirely.
-	hf := buildLabelFilters(q.Get("hostname"), "")
+	hf := s.buildLabelFilters(r.Context(), q.Get("hostname"), "")
 	query := fmt.Sprintf(
 		`sum by (hostname, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
 		hf, timeRange,
@@ -174,8 +176,37 @@ func (s *Server) buildHostnameLabMap(ctx context.Context) (map[string]string, er
 // @Success      200  {object}  map[string]interface{}
 // @Router       /api/v1/reports/active-users [get]
 func (s *Server) ReportActiveUsers(w http.ResponseWriter, r *http.Request) {
-	query := `openlabstats_user_session_active{user!=""} == 1`
-	s.proxyPromQuery(w, query)
+	ctx := r.Context()
+	policy := s.userPolicy(ctx)
+	query := fmt.Sprintf(`openlabstats_user_session_active%s == 1`, s.buildUserSessionFilters(ctx, ""))
+
+	raw, err := s.fetchInstantVector(ctx, query, 0)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+
+	// Collapse each raw username to its canonical identity so one person signed
+	// in as COLGATE\jdoe and as jdoe counts once per machine.
+	type key struct{ user, hostname string }
+	seen := make(map[key]bool)
+	result := newVectorResult()
+	for _, entry := range raw.Data.Result {
+		canonical, ignored := policy.Resolve(entry.Metric["user"])
+		if ignored || canonical == "" {
+			continue
+		}
+		k := key{canonical, entry.Metric["hostname"]}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		appendVectorSample(&result, map[string]string{"user": canonical, "hostname": k.hostname}, 1)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 // SummaryResponse holds the fleet summary stats.
@@ -245,10 +276,13 @@ func safeLabelValue(s string) (string, bool) {
 	return s, true
 }
 
-// buildLabelFilters returns a Prometheus label selector with user!="" and optional
-// hostname/lab equality matchers.
-func buildLabelFilters(hostname, lab string) string {
-	filters := []string{`user!=""`}
+// buildLabelFilters returns a Prometheus label selector with user!="", the
+// configured user-ignore matcher, and optional hostname/lab equality matchers.
+// The ignore matcher must be applied inside PromQL for app-level reports: they
+// aggregate away the user label, so an ignored account cannot be filtered out
+// after the fact.
+func (s *Server) buildLabelFilters(ctx context.Context, hostname, lab string) string {
+	filters := []string{`user!=""`, s.userPolicy(ctx).IgnoreMatcher()}
 	if v, ok := safeLabelValue(hostname); ok {
 		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
 	}
@@ -450,7 +484,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	// topk is applied server-side after whitelist filtering.
 	query := fmt.Sprintf(
 		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
@@ -485,7 +519,7 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0`,
 		lf, timeRange,
@@ -519,7 +553,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
 		lf, timeRange,
@@ -553,7 +587,7 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0`,
 		lf, timeRange,
@@ -657,15 +691,121 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 
 // buildUserSessionFilters returns a label selector for user session metrics.
 // Session metrics only carry user and hostname labels (no lab), so lab is not filtered.
-// The regex exclusion purges system accounts that accumulated in Prometheus before the
-// agent-side isValidUser guard was deployed.
-func buildUserSessionFilters(hostname string) string {
-	const sysExclude = `Font Driver Host.*|Window Manager.*|.*UMFD.*|panopto_upload|System|Local Service|Network Service|TrustedInstaller`
-	filters := []string{`user!=""`, fmt.Sprintf(`user!~"%s"`, sysExclude)}
+// The ignore matcher also purges system and service accounts that accumulated in
+// Prometheus before the agent-side filter covered them.
+func (s *Server) buildUserSessionFilters(ctx context.Context, hostname string) string {
+	filters := []string{`user!=""`, s.userPolicy(ctx).IgnoreMatcher()}
 	if v, ok := safeLabelValue(hostname); ok {
 		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
 	}
 	return "{" + strings.Join(filters, ",") + "}"
+}
+
+// newVectorResult returns an empty successful instant-vector response. Handlers
+// that aggregate in Go rebuild this shape so the frontend can treat their output
+// like any other Prometheus query.
+func newVectorResult() promQueryInstantResult {
+	var result promQueryInstantResult
+	result.Status = "success"
+	result.Data.ResultType = "vector"
+	return result
+}
+
+func appendVectorSample(result *promQueryInstantResult, metric map[string]string, value float64) {
+	result.Data.Result = append(result.Data.Result, struct {
+		Metric map[string]string `json:"metric"`
+		Value  []interface{}     `json:"value"`
+	}{
+		Metric: metric,
+		Value:  []interface{}{time.Now().Unix(), fmt.Sprintf("%g", value)},
+	})
+}
+
+// fetchInstantVector runs an instant query at the given unix timestamp (0 means
+// "now") and returns the decoded response.
+func (s *Server) fetchInstantVector(ctx context.Context, query string, atTime int64) (promQueryInstantResult, error) {
+	var result promQueryInstantResult
+	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
+	if atTime > 0 {
+		promURL += fmt.Sprintf("&time=%d", atTime)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, promURL, nil)
+	if err != nil {
+		return result, err
+	}
+	resp, err := s.promClient.Do(req)
+	if err != nil {
+		return result, err
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// sumByCanonicalUser runs a `sum by (user)` query and folds the result into
+// canonical identities, dropping ignored accounts. This is why user-keyed
+// reports cannot use PromQL topk: the merge has to happen before ranking, or a
+// user split across Windows and macOS could be ranked twice — or ranked out.
+func (s *Server) sumByCanonicalUser(ctx context.Context, query string, atTime int64, policy *userid.Policy) (map[string]float64, error) {
+	raw, err := s.fetchInstantVector(ctx, query, atTime)
+	if err != nil {
+		return nil, err
+	}
+	totals := make(map[string]float64, len(raw.Data.Result))
+	for _, entry := range raw.Data.Result {
+		canonical, ignored := policy.Resolve(entry.Metric["user"])
+		if ignored || canonical == "" || len(entry.Value) < 2 {
+			continue
+		}
+		v, ok := entry.Value[1].(string)
+		if !ok {
+			continue
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			continue
+		}
+		totals[canonical] += f
+	}
+	return totals, nil
+}
+
+// respondUserTotals sorts canonical-user totals descending, keeps the top
+// `limit`, and writes them in Prometheus vector shape (or CSV).
+func (s *Server) respondUserTotals(w http.ResponseWriter, totals map[string]float64, format string, limit int) {
+	type pair struct {
+		user  string
+		value float64
+	}
+	pairs := make([]pair, 0, len(totals))
+	for user, value := range totals {
+		if value > 0 {
+			pairs = append(pairs, pair{user, value})
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].value != pairs[j].value {
+			return pairs[i].value > pairs[j].value
+		}
+		return pairs[i].user < pairs[j].user
+	})
+	if limit > 0 && len(pairs) > limit {
+		pairs = pairs[:limit]
+	}
+
+	result := newVectorResult()
+	for _, p := range pairs {
+		appendVectorSample(&result, map[string]string{"user": p.user}, p.value)
+	}
+
+	if format == "csv" {
+		s.writeCSV(w, result.Data.Result)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 // ReportTopDevicesBySessionCount godoc
@@ -692,7 +832,7 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 			limit = parsed
 		}
 	}
-	lf := buildUserSessionFilters(q.Get("hostname"))
+	lf := s.buildUserSessionFilters(r.Context(), q.Get("hostname"))
 	query := fmt.Sprintf(
 		`topk(%d, sum by (hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
 		limit, lf, timeRange,
@@ -724,12 +864,20 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 			limit = parsed
 		}
 	}
-	lf := buildUserSessionFilters(q.Get("hostname"))
+	ctx := r.Context()
+	policy := s.userPolicy(ctx)
+	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
-		limit, lf, timeRange,
+		`sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+	s.respondUserTotals(w, totals, q.Get("format"), limit)
 }
 
 // ReportTopUsersBySessionTime godoc
@@ -756,12 +904,20 @@ func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Requ
 			limit = parsed
 		}
 	}
-	lf := buildUserSessionFilters(q.Get("hostname"))
+	ctx := r.Context()
+	policy := s.userPolicy(ctx)
+	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / 3600 > 0)`,
-		limit, lf, timeRange,
+		`sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / 3600 > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+	s.respondUserTotals(w, totals, q.Get("format"), limit)
 }
 
 // ReportAvgSessionTime godoc
@@ -788,15 +944,39 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	lf := buildUserSessionFilters(q.Get("hostname"))
-	// Divide session seconds accrued in the window by logins in the window to get average
-	// session minutes. The "> 0" guard on the denominator avoids +Inf for users with an
-	// ongoing session but no fresh login inside the window.
-	query := fmt.Sprintf(
-		`topk(%d, (sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / (sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)) / 60 > 0)`,
-		limit, lf, timeRange, lf, timeRange,
-	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	ctx := r.Context()
+	policy := s.userPolicy(ctx)
+	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
+	// Seconds and logins are merged into canonical identities separately and only
+	// then divided — averaging the per-raw-username averages would weight a
+	// user's Windows and macOS sessions equally regardless of how many of each.
+	secondsQuery := fmt.Sprintf(
+		`sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s]))`, lf, timeRange)
+	loginsQuery := fmt.Sprintf(
+		`sum by (user) (increase(openlabstats_user_session_logins_total%s[%s]))`, lf, timeRange)
+
+	seconds, err := s.sumByCanonicalUser(ctx, secondsQuery, atTime, policy)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", secondsQuery)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+	logins, err := s.sumByCanonicalUser(ctx, loginsQuery, atTime, policy)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", loginsQuery)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+
+	// Users with an ongoing session but no fresh login inside the window have a
+	// zero denominator and are skipped rather than reported as infinite.
+	avgMinutes := make(map[string]float64, len(seconds))
+	for user, secs := range seconds {
+		if count := logins[user]; count > 0 {
+			avgMinutes[user] = secs / count / 60
+		}
+	}
+	s.respondUserTotals(w, avgMinutes, q.Get("format"), limit)
 }
 
 // ReportTopAppsUsage godoc
@@ -825,7 +1005,7 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	lf := buildLabelFilters(q.Get("hostname"), q.Get("lab"))
+	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
 		`sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) / 3600 > 0`,
 		lf, timeRange,
@@ -888,10 +1068,11 @@ func (s *Server) buildUtilizationData(ctx context.Context, startUnix, endUnix, s
 		return nil, err
 	}
 
-	const sysUserExclude = `Font Driver Host.*|Window Manager.*|.*UMFD.*|panopto_upload|System|Local Service|Network Service|TrustedInstaller`
 	stepStr := fmt.Sprintf("%ds", step)
 	var hfParts []string
-	hfParts = append(hfParts, `user!=""`, fmt.Sprintf(`user!~"%s"`, sysUserExclude))
+	// Ignored accounts must be excluded here, not after aggregation: a service
+	// account's app usage would otherwise mark its machine as occupied.
+	hfParts = append(hfParts, `user!=""`, s.userPolicy(ctx).IgnoreMatcher())
 	if v, ok := safeLabelValue(hnFilter); ok {
 		hfParts = append(hfParts, fmt.Sprintf(`hostname="%s"`, v))
 	}

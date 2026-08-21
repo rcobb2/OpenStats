@@ -18,7 +18,7 @@ import (
 
 // AgentVersion is the single source of truth for the agent version string.
 // Also update the installer WiX version in agent/installer/openlabstats.wxs when bumping.
-const AgentVersion = "0.1.10"
+const AgentVersion = "0.1.11"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
@@ -36,6 +36,16 @@ type RegisterAgentResponse struct {
 	Settings        *SystemSettings `json:"settings"`
 	UpdateURL       string          `json:"updateUrl,omitempty"`
 	IgnoredExeNames []string        `json:"ignoredExeNames,omitempty"`
+	UserPolicy      *UserPolicy     `json:"userPolicy,omitempty"`
+}
+
+// UserPolicy is the server-managed user-tracking policy. Ignored accounts never
+// produce metrics, and Aliases merges usernames that belong to one person —
+// typically a macOS shortname into its domain account.
+type UserPolicy struct {
+	StripDomain    bool              `json:"stripDomain"`
+	IgnorePatterns []string          `json:"ignorePatterns"`
+	Aliases        map[string]string `json:"aliases"`
 }
 
 type SystemSettings struct {
@@ -59,6 +69,17 @@ type Client struct {
 
 	ignoredMu       sync.RWMutex
 	ignoredExeNames []string
+
+	// onUserPolicy, when set, receives the policy from every successful
+	// registration so the agent can apply changes without restarting.
+	onUserPolicy func(*UserPolicy)
+}
+
+// WithUserPolicyHandler registers a callback invoked with the server's user
+// policy on each successful registration.
+func (c *Client) WithUserPolicyHandler(fn func(*UserPolicy)) *Client {
+	c.onUserPolicy = fn
+	return c
 }
 
 // NewClient creates a new enrollment client.
@@ -83,16 +104,43 @@ func (c *Client) WithOSVersion(v string) *Client {
 
 // Register sends a registration/heartbeat to the central server.
 func (c *Client) Register(ctx context.Context) (*SystemSettings, string) {
-	settings, updateURL, ignored, err := c.doRegister(ctx)
+	res, err := c.doRegister(ctx)
 	if err != nil {
 		c.logger.Warn("registration failed", "error", err)
+		return nil, ""
 	}
-	if ignored != nil {
+	if res.IgnoredExeNames != nil {
 		c.ignoredMu.Lock()
-		c.ignoredExeNames = ignored
+		c.ignoredExeNames = res.IgnoredExeNames
 		c.ignoredMu.Unlock()
 	}
-	return settings, updateURL
+	if res.UserPolicy != nil && c.onUserPolicy != nil {
+		c.onUserPolicy(res.UserPolicy)
+	}
+	return res.Settings, res.UpdateURL
+}
+
+// FetchUserPolicy retrieves the user policy without registering. Used at startup
+// so the first process events are already filtered and canonicalized, ahead of
+// the first heartbeat.
+func (c *Client) FetchUserPolicy(ctx context.Context) (*UserPolicy, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.serverURL+"/api/v1/users/policy", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned %d", resp.StatusCode)
+	}
+	var policy UserPolicy
+	if err := json.NewDecoder(resp.Body).Decode(&policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
 }
 
 // GetIgnoredExeNames returns the server-provided list of exe names to suppress.
@@ -130,7 +178,7 @@ func (c *Client) GetSettings(ctx context.Context) (*SystemSettings, error) {
 	return &settings, nil
 }
 
-func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, []string, error) {
+func (c *Client) doRegister(ctx context.Context) (*RegisterAgentResponse, error) {
 	hostname, _ := os.Hostname()
 	ip := getOutboundIP()
 
@@ -147,32 +195,32 @@ func (c *Client) doRegister(ctx context.Context) (*SystemSettings, string, []str
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("marshal registration: %w", err)
+		return nil, fmt.Errorf("marshal registration: %w", err)
 	}
 
 	url := c.serverURL + "/api/v1/agents/register"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("send registration: %w", err)
+		return nil, fmt.Errorf("send registration: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", nil, fmt.Errorf("registration failed: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("registration failed: status %d", resp.StatusCode)
 	}
 
 	var res RegisterAgentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, "", nil, fmt.Errorf("decode registration response: %w", err)
+		return nil, fmt.Errorf("decode registration response: %w", err)
 	}
 
-	return res.Settings, res.UpdateURL, res.IgnoredExeNames, nil
+	return &res, nil
 }
 
 // RunHeartbeat periodically registers with the server.

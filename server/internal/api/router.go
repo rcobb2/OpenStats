@@ -100,6 +100,19 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Patch("/{mappingID}/ignore", s.ToggleMappingIgnored)
 		})
 
+		// Users: ignore rules and cross-platform identity correlation
+		r.Route("/users", func(r chi.Router) {
+			r.Get("/", s.ListDiscoveredUsers)
+			r.Get("/policy", s.GetUserPolicy) // Also pushed to agents on every heartbeat
+			r.Put("/policy", s.UpdateUserPolicy)
+			r.Post("/ignore", s.QuickIgnoreUser)
+			r.Get("/mappings", s.ListUserMappings)
+			r.Put("/mappings", s.UpsertUserMapping)
+			r.Post("/mappings", s.UpsertUserMapping)
+			r.Delete("/mappings/{mappingID}", s.DeleteUserMapping)
+			r.Patch("/mappings/{mappingID}/ignore", s.ToggleUserMappingIgnored)
+		})
+
 		// Quick-ignore from reports page (creates or updates mapping to ignored=true)
 		r.Post("/reports/ignore-app", s.QuickIgnoreApp)
 

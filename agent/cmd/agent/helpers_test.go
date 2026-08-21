@@ -8,9 +8,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/rcobb/openlabstats-agent/internal/enrollment"
 	"github.com/rcobb/openlabstats-agent/internal/metrics"
 	"github.com/rcobb/openlabstats-agent/internal/monitor"
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
+	"github.com/rcobb/openlabstats-agent/internal/userid"
 )
 
 func discardSlogLogger() *slog.Logger {
@@ -83,6 +85,97 @@ func TestIsValidUserFiltersSystemAccounts(t *testing.T) {
 		if isValidUser(u) {
 			t.Errorf("isValidUser(%q) = true, want false (should be filtered)", u)
 		}
+	}
+}
+
+// ── resolveUser + server-pushed policy ───────────────────────────────────────
+
+// withUserPolicy installs a policy for the duration of one test.
+func withUserPolicy(t *testing.T, p *enrollment.UserPolicy) {
+	t.Helper()
+	t.Cleanup(func() { userPolicy.Set(userid.NewPolicy()) })
+	applyUserPolicy(p, discardSlogLogger())
+}
+
+func TestResolveUserCanonicalizesDomainAccounts(t *testing.T) {
+	cases := map[string]string{
+		`COLGATE\jdoe`:     "jdoe",
+		"jdoe":             "jdoe",
+		"jdoe@colgate.edu": "jdoe",
+		"JDoe":             "jdoe",
+	}
+	for raw, want := range cases {
+		got, ok := resolveUser(raw)
+		if !ok {
+			t.Errorf("resolveUser(%q): expected tracked", raw)
+			continue
+		}
+		if got != want {
+			t.Errorf("resolveUser(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestResolveUserAppliesServerIgnoreList(t *testing.T) {
+	withUserPolicy(t, &enrollment.UserPolicy{
+		StripDomain:    true,
+		IgnorePatterns: []string{"zabbix"},
+	})
+	for _, raw := range []string{"zabbix", `COLGATE\zabbix`} {
+		if _, ok := resolveUser(raw); ok {
+			t.Errorf("resolveUser(%q): expected ignored", raw)
+		}
+	}
+	if _, ok := resolveUser("alice"); !ok {
+		t.Error(`resolveUser("alice"): expected tracked`)
+	}
+}
+
+func TestSessionMetricsUseCanonicalUser(t *testing.T) {
+	usm, m := newTestSessionManager(t)
+	host := metrics.Hostname()
+
+	// The same person on a Windows domain PC and on a Mac must land on one series.
+	usm.onProcessStart(`COLGATE\jdoe`, 1001)
+	usm.onProcessStart("jdoe", 1002)
+
+	if got := counterValue(t, m.UserSessionLogins, "jdoe", host); got != 1 {
+		t.Errorf("logins for canonical user = %v, want 1", got)
+	}
+	if got := gaugeValue(t, m.UserSessionActive, "jdoe", host); got != 1 {
+		t.Errorf("active gauge for canonical user = %v, want 1", got)
+	}
+
+	// Only after both process groups end does the session close.
+	usm.onProcessStop(`COLGATE\jdoe`, 1001)
+	if got := gaugeValue(t, m.UserSessionActive, "jdoe", host); got != 1 {
+		t.Errorf("active gauge after first stop = %v, want 1", got)
+	}
+	usm.onProcessStop("jdoe", 1002)
+	if got := gaugeValue(t, m.UserSessionActive, "jdoe", host); got != 0 {
+		t.Errorf("active gauge after last stop = %v, want 0", got)
+	}
+}
+
+func TestSessionMetricsSkipIgnoredUser(t *testing.T) {
+	withUserPolicy(t, &enrollment.UserPolicy{StripDomain: true, IgnorePatterns: []string{"zabbix"}})
+	usm, m := newTestSessionManager(t)
+	host := metrics.Hostname()
+
+	usm.onProcessStart(`COLGATE\zabbix`, 2001)
+	if got := counterValue(t, m.UserSessionLogins, "zabbix", host); got != 0 {
+		t.Errorf("logins for ignored user = %v, want 0", got)
+	}
+}
+
+func TestUserAliasMergesMacShortname(t *testing.T) {
+	withUserPolicy(t, &enrollment.UserPolicy{
+		StripDomain: true,
+		Aliases:     map[string]string{"jdoe2": "jdoe"},
+	})
+	got, ok := resolveUser("jdoe2")
+	if !ok || got != "jdoe" {
+		t.Errorf(`resolveUser("jdoe2") = (%q, %v), want ("jdoe", true)`, got, ok)
 	}
 }
 

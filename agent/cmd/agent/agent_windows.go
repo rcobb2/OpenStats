@@ -33,6 +33,17 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Initialize metrics.
 		m := metrics.New()
 
+		// Create the enrollment client first and pull the user policy before any
+		// metrics are restored or processes are scanned, so nothing is ever
+		// recorded under an ignored or non-canonical username.
+		var enrollClient *enrollment.Client
+		if cfg.Server.ReportURL != "" {
+			enrollClient = enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
+				WithOSVersion(getWindowsOSCaption(logger)).
+				WithUserPolicyHandler(func(p *enrollment.UserPolicy) { applyUserPolicy(p, logger) })
+			bootstrapUserPolicy(ctx, enrollClient, logger)
+		}
+
 		// Initialize local store.
 		db, err := store.New(cfg.Store.DBPath, logger)
 		if err != nil {
@@ -67,9 +78,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 
 		for _, p := range existingProcs {
 			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
-			if isValidUser(p.User) {
-				userSessions.onProcessStart(p.User, p.PID)
-			}
+			userSessions.onProcessStart(p.User, p.PID)
 		}
 
 		// Set up WMI watcher.
@@ -82,10 +91,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 					return // child process joined existing group, skip
 				}
 				// Track user session from process owner.
-				user := tracker.GetProcessUser(pid)
-				if isValidUser(user) {
-					userSessions.onProcessStart(user, pid)
-				}
+				userSessions.onProcessStart(tracker.GetProcessUser(pid), pid)
 			},
 			OnStop: func(session *monitor.ProcessSession) {
 				// Resolve the friendly name and record the session.
@@ -93,17 +99,15 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				hostname := metrics.Hostname()
 
 				// Update Prometheus metrics only if this is a valid user session.
-				if isValidUser(session.User) {
-					labels := []string{info.DisplayName, session.ExeName, info.Category, session.User, hostname}
+				if user, ok := resolveUser(session.User); ok {
+					labels := []string{info.DisplayName, session.ExeName, info.Category, user, hostname}
 					m.AppUsageSeconds.WithLabelValues(labels...).Add(session.CheckpointDelta.Seconds())
 					m.AppForegroundSeconds.WithLabelValues(labels...).Add(session.ForegroundDelta.Seconds())
 					m.AppLaunches.WithLabelValues(labels...).Inc()
 				}
 
 				// Update user session tracking.
-				if isValidUser(session.User) {
-					userSessions.onProcessStop(session.User, session.PID)
-				}
+				userSessions.onProcessStop(session.User, session.PID)
 
 				// Persist to local store.
 				if err := db.RecordSession(
@@ -143,9 +147,8 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}
 
 		// Start enrollment heartbeat and metrics push if a central server is configured.
-		if cfg.Server.ReportURL != "" {
-			enrollClient := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
-				WithOSVersion(getWindowsOSCaption(logger))
+		// Each heartbeat also refreshes the user policy via the handler above.
+		if enrollClient != nil {
 			go enrollClient.RunHeartbeat(ctx, 2*time.Minute)
 			go enrollClient.RunMetricsPush(ctx, 30*time.Second)
 		}

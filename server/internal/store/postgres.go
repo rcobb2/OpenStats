@@ -81,6 +81,18 @@ func (s *Store) migrate(ctx context.Context) error {
 		updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 
+	CREATE TABLE IF NOT EXISTS user_mappings (
+		id             SERIAL PRIMARY KEY,
+		pattern        TEXT NOT NULL UNIQUE,
+		canonical_user TEXT NOT NULL DEFAULT '',
+		display_name   TEXT NOT NULL DEFAULT '',
+		notes          TEXT NOT NULL DEFAULT '',
+		source         TEXT NOT NULL DEFAULT 'manual',
+		ignored        BOOLEAN NOT NULL DEFAULT FALSE,
+		created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
 	CREATE TABLE IF NOT EXISTS installer_builds (
 		id             SERIAL PRIMARY KEY,
 		server_address TEXT NOT NULL,
@@ -94,6 +106,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 	CREATE INDEX IF NOT EXISTS idx_agents_last_seen ON agents(last_seen);
 	CREATE INDEX IF NOT EXISTS idx_mappings_exe ON software_mappings(exe_name);
+	CREATE INDEX IF NOT EXISTS idx_user_mappings_pattern ON user_mappings(pattern);
+	CREATE INDEX IF NOT EXISTS idx_user_mappings_canonical ON user_mappings(canonical_user);
 
 	ALTER TABLE labs ADD COLUMN IF NOT EXISTS room TEXT NOT NULL DEFAULT '';
 
@@ -688,4 +702,130 @@ func (s *Store) UpdateSettings(ctx context.Context, settings *SystemSettings) er
 	}
 
 	return tx.Commit(ctx)
+}
+
+// --- User mapping operations ---
+
+// UserMapping is one admin-configured rule for a raw OS username. Pattern is
+// matched case-insensitively against the username as it appears in metrics and
+// may contain "*" wildcards. Ignored drops the account from all tracking;
+// CanonicalUser merges it into another identity (e.g. a macOS shortname into
+// its domain account).
+type UserMapping struct {
+	ID            int       `json:"id"`
+	Pattern       string    `json:"pattern"`
+	CanonicalUser string    `json:"canonicalUser"`
+	DisplayName   string    `json:"displayName"`
+	Notes         string    `json:"notes"`
+	Source        string    `json:"source"`
+	Ignored       bool      `json:"ignored"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+func (s *Store) ListUserMappings(ctx context.Context) ([]UserMapping, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, pattern, canonical_user, display_name, notes, source, ignored, created_at, updated_at
+		FROM user_mappings ORDER BY ignored DESC, pattern`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mappings []UserMapping
+	for rows.Next() {
+		var m UserMapping
+		if err := rows.Scan(&m.ID, &m.Pattern, &m.CanonicalUser, &m.DisplayName, &m.Notes, &m.Source, &m.Ignored, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, m)
+	}
+	return mappings, rows.Err()
+}
+
+// UpsertUserMapping inserts or replaces the rule for m.Pattern. Patterns are
+// stored lowercased so that lookups and uniqueness are case-insensitive.
+func (s *Store) UpsertUserMapping(ctx context.Context, m *UserMapping) error {
+	pattern := strings.ToLower(strings.TrimSpace(m.Pattern))
+	canonical := strings.ToLower(strings.TrimSpace(m.CanonicalUser))
+	source := m.Source
+	if source == "" {
+		source = "manual"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO user_mappings (pattern, canonical_user, display_name, notes, source, ignored)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (pattern) DO UPDATE SET
+			canonical_user = EXCLUDED.canonical_user,
+			display_name = EXCLUDED.display_name,
+			notes = EXCLUDED.notes,
+			source = EXCLUDED.source,
+			ignored = EXCLUDED.ignored,
+			updated_at = NOW()`,
+		pattern, canonical, m.DisplayName, m.Notes, source, m.Ignored,
+	)
+	return err
+}
+
+func (s *Store) DeleteUserMapping(ctx context.Context, id int) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM user_mappings WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) SetUserMappingIgnored(ctx context.Context, id int, ignored bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE user_mappings SET ignored = $2, updated_at = NOW() WHERE id = $1`, id, ignored)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// IgnoreUserPattern marks a username as ignored, creating the rule if needed.
+// Used by the quick-ignore action on the reports and users pages.
+func (s *Store) IgnoreUserPattern(ctx context.Context, pattern, notes string) error {
+	p := strings.ToLower(strings.TrimSpace(pattern))
+	if p == "" {
+		return errors.New("pattern is required")
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO user_mappings (pattern, canonical_user, display_name, notes, source, ignored)
+		VALUES ($1, '', '', $2, 'quick-ignore', true)
+		ON CONFLICT (pattern) DO UPDATE SET ignored = true, updated_at = NOW()`,
+		p, notes)
+	return err
+}
+
+// GetUserStripDomain reports whether domain-prefix stripping (COLGATE\jdoe →
+// jdoe) is enabled. Defaults to true when the setting has never been written.
+func (s *Store) GetUserStripDomain(ctx context.Context) (bool, error) {
+	var value string
+	err := s.pool.QueryRow(ctx, `SELECT value FROM settings WHERE key = 'user_strip_domain'`).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	return value != "false", nil
+}
+
+func (s *Store) SetUserStripDomain(ctx context.Context, enabled bool) error {
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO settings (key, value, updated_at) VALUES ('user_strip_domain', $1, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, value)
+	return err
 }

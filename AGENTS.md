@@ -57,7 +57,9 @@ WindowsLabStats/
 ### Agent → Server
 - **Registration**: `POST http://server:8080/api/v1/agents/register`
 - **Payload**: `{ id, hostname, ipAddress, osVersion, agentVersion, port, building, room }`
+- **Response**: `{ agent, settings, updateUrl, ignoredExeNames, userPolicy }`
 - **Heartbeat**: Every 2 minutes
+- **User policy fetch** (startup only): `GET /api/v1/users/policy`
 
 ### Server → Prometheus
 - **Discovery file**: Written to path in `server.config.fileSD.outputPath`
@@ -120,6 +122,15 @@ When modifying the system, update ALL applicable components:
 - [ ] Backend: Add/modify endpoints in `server/internal/api/reports.go`
 - [ ] `server/grafana/dashboards/*.json` - Update Grafana panels if applicable
 - [ ] `deploy/grafana-dashboard.json` - Sync deploy copy
+
+### Changing User Filtering or Correlation
+
+1. `server/internal/userid/` — resolution rules and the PromQL ignore matcher
+2. `agent/internal/userid/` — mirror the same rule change
+3. `server/internal/store/postgres.go` — `user_mappings` schema/operations
+4. `server/internal/api/users.go` — handlers and agent policy payload
+5. `server/web/src/pages/Users.jsx` — admin UI
+6. Bump `enrollment.AgentVersion` if agent behavior changed
 
 ### Adding a New Frontend Page
 
@@ -257,6 +268,26 @@ The server maintains global configuration settings that are pushed to agents dur
 - **Stale Timeout**: Number of days of no contact before an agent is automatically purged from the database.
 
 Settings are managed via **Agents > Settings** in the Web Portal.
+
+### User Tracking Policy
+
+The server also pushes a user policy on every heartbeat, managed via **Users** in
+the Web Portal:
+
+- **Ignored users**: patterns (with `*` wildcards) for accounts that should never
+  be tracked — service accounts like `zabbix`, `svc-*`. Built-in defaults already
+  cover OS and service accounts.
+- **Correlation**: when domain stripping is on (the default), `COLGATE\jdoe`,
+  `jdoe@colgate.edu`, and `jdoe` resolve to one identity, so a person's Windows
+  and macOS usage is one user in reports.
+- **Aliases**: explicit merges for accounts whose names genuinely differ across
+  platforms (e.g. macOS shortname `jdoe2` → `jdoe`).
+
+Enforcement happens in two places, and both must agree: the agent applies the
+policy at collection time (`agent/internal/userid`), and reports apply it at query
+time (`server/internal/userid`) so data collected before a rule existed is also
+filtered and merged. The two `userid` packages are intentional copies — agent and
+server are separate Go modules.
 
 ### MSI Installer Customization
 
