@@ -46,3 +46,5 @@ bws-token
 
 # Installer binaries and built frontend assets
 server/web/public/
+agent/installer/darwin/build/
+agent/installer/darwin/payload/
