@@ -18,7 +18,7 @@ import (
 
 // AgentVersion is the single source of truth for the agent version string.
 // Also update the installer WiX version in agent/installer/openlabstats.wxs when bumping.
-const AgentVersion = "0.1.11"
+const AgentVersion = "0.1.12"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {

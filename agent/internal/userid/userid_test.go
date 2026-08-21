@@ -53,6 +53,27 @@ func TestResolveIgnoresSystemAccountsByDefault(t *testing.T) {
 	}
 }
 
+func TestResolveIgnoresPseudoAccountsNamedByDomain(t *testing.T) {
+	// These have no stable marker in the account half — "Window Manager\\DWM-1"
+	// canonicalizes to "dwm-1". The domain component is what identifies them.
+	p := NewPolicy()
+	for _, raw := range []string{
+		`Window Manager\DWM-1`,
+		`Window Manager\DWM-2`,
+		`Font Driver Host\UMFD-0`,
+		`Font Driver Host\UMFD-3`,
+		"DWM-1",
+	} {
+		if _, ignored := p.Resolve(raw); !ignored {
+			t.Errorf("Resolve(%q): expected ignored", raw)
+		}
+	}
+	// A real user in a domain that merely resembles one must survive.
+	if _, ignored := p.Resolve(`COLGATE\jdoe`); ignored {
+		t.Error(`Resolve("COLGATE\jdoe"): expected tracked`)
+	}
+}
+
 func TestResolveIgnoreRules(t *testing.T) {
 	p := NewPolicy()
 	p.Rules = []Rule{

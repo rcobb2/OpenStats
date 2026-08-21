@@ -88,9 +88,10 @@ func globToRegex(pattern string) (string, bool) {
 	}
 
 	// A domain-qualified pattern is used verbatim; a bare one also matches the
-	// same account seen with a domain prefix or a UPN suffix.
+	// same account seen with a domain prefix or a UPN suffix, and matches when it
+	// names the domain component itself (Window Manager\DWM-1).
 	if strings.Contains(pat, `\`) || strings.Contains(pat, `/`) {
 		return body, true
 	}
-	return `(?:[^\\]*\\)?` + body + `(?:@[^\\]*)?`, true
+	return `(?:(?:[^\\]*\\)?` + body + `(?:@[^\\]*)?|` + body + `\\.*)`, true
 }

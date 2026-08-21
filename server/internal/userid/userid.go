@@ -29,6 +29,7 @@ var DefaultIgnorePatterns = []string{
 	"trustedinstaller",
 	"window manager",
 	"font driver host",
+	"dwm-*",
 	"usermode font driver",
 	"dwm",
 	"umfd",
@@ -198,11 +199,17 @@ func matchesEither(pattern, rawLower, canonical string) bool {
 	if MatchGlob(pat, rawLower) || MatchGlob(pat, canonical) {
 		return true
 	}
-	// A bare pattern should also match a domain-qualified raw name even when
-	// domain stripping is off.
 	if !strings.ContainsAny(pat, `\/`) {
 		if i := strings.LastIndexAny(rawLower, `\/`); i >= 0 {
-			return MatchGlob(pat, rawLower[i+1:])
+			// A bare pattern should match a domain-qualified raw name even when
+			// domain stripping is off ("system" vs "COLGATE\system")...
+			if MatchGlob(pat, rawLower[i+1:]) {
+				return true
+			}
+			// ...and should also match when it names the *domain* component:
+			// "Window Manager\DWM-1" and "Font Driver Host\UMFD-0" are pseudo
+			// accounts whose only stable marker is the domain half.
+			return MatchGlob(pat, rawLower[:i])
 		}
 	}
 	return false
