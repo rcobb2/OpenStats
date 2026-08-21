@@ -93,6 +93,7 @@ cd server && go test ./...
 | `agent/internal/enrollment/client.go` | Server registration + heartbeat; also holds `agentVersion` const |
 | `agent/internal/store/sqlite.go` | SQLite local persistence |
 | `server/internal/api/router.go` | chi router, all routes, CORS, Swagger, SPA |
+| `server/cmd/openstatsctl/` | CLI client for a live instance (reads + curated writes); driven by the `openstats` skill |
 | `server/internal/api/users.go` | User rules, discovered-user listing, agent policy payload |
 | `server/internal/userid/` | Username canonicalization, ignore policy, PromQL ignore matcher |
 | `server/internal/store/postgres.go` | pgxpool connection, `migrate()`, all queries |
@@ -100,6 +101,12 @@ cd server && go test ./...
 | `server/web/src/api.js` | All frontend API calls |
 | `server/web/src/main.jsx` | React Router routes |
 | `server/web/src/components/Layout.jsx` | Nav structure |
+
+## Interacting With a Live Instance
+
+`openstatsctl` (in `server/cmd/openstatsctl/`) is the client for a running deployment — fleet status, reports, users, mappings, labs, plus low-risk writes (ignore/alias users, edit mappings, assign a lab). Build it onto PATH with `cd server && go build -o ../bin/openstatsctl ./cmd/openstatsctl/`. Server resolution: `--server`, then `$OPENSTATS_URL`, then the production default.
+
+Deleting agents, forcing agent updates, and writing fleet settings are deliberately **not** exposed — use the web portal. The `.claude/skills/openstats/` skill wraps the CLI and carries the interpretation caveats (login reports are sparse; shared-account hours exceed wall-clock; built-in ignores can't be cleared).
 
 ## API Contract (Agent ↔ Server)
 

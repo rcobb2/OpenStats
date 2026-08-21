@@ -1098,7 +1098,10 @@ func (s *Server) buildUtilizationData(ctx context.Context, startUnix, endUnix, s
 	allowedApps := s.allowedAppSet(ctx)
 
 	// Pass 1: sum app-usage rates per (hostname, timestamp) for whitelisted apps only.
-	type hostTime struct{ hostname string; t int64 }
+	type hostTime struct {
+		hostname string
+		t        int64
+	}
 	hostTimeRate := make(map[hostTime]float64)
 
 	for _, series := range raw.Data.Result {

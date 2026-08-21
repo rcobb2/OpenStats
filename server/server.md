@@ -114,6 +114,22 @@ Installer generation:
 - Generates customized agent config
 - (See server/web/web.md for frontend integration)
 
+### `cmd/openstatsctl/`
+
+CLI client for a live instance, used directly and through the `openstats` skill.
+Stdlib only, and payload types are declared locally rather than imported from
+`internal/store`, so the binary carries no Postgres driver and does not track the
+DB schema.
+
+- `client.go` — HTTP plumbing, API payload types, error shaping
+- `render.go` — table output and Prometheus instant-vector rendering
+- `main.go` — subcommand dispatch, flag helpers, usage
+
+Reads cover agents, labs, users, rules, policy, mappings, reports, and settings.
+Writes are curated: ignore/unignore/alias users, delete a user rule, set or
+ignore a software mapping, assign an agent to a lab. Deleting agents, forcing
+updates, and writing settings are intentionally absent.
+
 ## Configuration (`config/server.yaml`)
 
 ```yaml

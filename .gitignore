@@ -32,6 +32,7 @@ server/web/node_modules/
 
 # Build
 *.tmp
+bin/
 
 # Homelab deployment runtime data
 data/
