@@ -19,12 +19,12 @@ EnvironmentFile=/etc/openstats/bws-token
 ExecStartPre=/etc/openstats/fetch-secrets.sh
 
 ExecStart=/usr/bin/podman-compose \
-    --file /opt/openstats/deploy/podman01/docker-compose.yml \
+    --file /opt/openstats/deploy/podman02/docker-compose.yml \
     --env-file /run/openstats/secrets.env \
     up -d
 
 ExecStop=/usr/bin/podman-compose \
-    --file /opt/openstats/deploy/podman01/docker-compose.yml \
+    --file /opt/openstats/deploy/podman02/docker-compose.yml \
     down
 
 Restart=on-failure

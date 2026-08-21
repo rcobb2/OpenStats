@@ -149,10 +149,14 @@ go build -o server.exe ./cmd/server/
 # With config
 .\server.exe config\server.yaml
 
-# Via Docker
+# Via Docker (local dev only)
 cd server
 docker-compose up -d
 ```
+
+Production runs on **podman02** and is deployed by the **Ansible playbook in the separate
+infra repo** — not by running compose on the host. See the Deployment section in
+`CLAUDE.md`/`AGENTS.md`.
 
 ## Database Schema
 

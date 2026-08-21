@@ -1,4 +1,4 @@
-# OpenLabStats server config for podman01.colgate.edu
+# OpenLabStats server config for podman02.colgate.edu
 # Mounted read-only at /etc/openlabstats/server.yaml inside the container.
 
 server:

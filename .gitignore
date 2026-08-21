@@ -38,7 +38,7 @@ data/
 state/
 
 # Deployment secrets
-deploy/podman01/.env
+deploy/podman02/.env
 
 # Bitwarden token file (never commit)
 bws-token

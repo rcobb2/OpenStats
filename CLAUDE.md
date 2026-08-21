@@ -25,7 +25,7 @@ cd server
 go build -o server.exe ./cmd/server/
 .\server.exe config\server.yaml
 
-# Full stack via Docker
+# Full stack via Docker (LOCAL DEV ONLY — never run against production)
 cd server && docker-compose up -d
 
 # Frontend dev
@@ -42,6 +42,24 @@ cd agent/installer && .\build.ps1
 cd agent && go test ./...
 cd server && go test ./...
 ```
+
+## Deployment (Production)
+
+Production runs on **podman02**. Deploys are performed by the **Ansible playbook in the
+separate infra repo** — never by hand on the host.
+
+```
+# Run the OpenStats playbook from the Ansible control node.
+# TODO: replace with the exact invocation from the infra repo.
+ansible-playbook <infra-repo>/<playbook>.yml --limit podman02
+```
+
+- Do **not** ssh to podman02 to `git pull`, run `podman-compose up --build`, or
+  `systemctl restart openstats-compose`. The playbook handles pull, rebuild and restart.
+- `deploy/podman02/` holds the compose file, `server.yaml`, nginx block, systemd unit and
+  Bitwarden secret map. Edit them in git — the playbook is what deploys them.
+- Merging a server change does not make it live. The deploy is a separate operator step;
+  say so explicitly instead of implying the change is already in production.
 
 ## Architecture
 
