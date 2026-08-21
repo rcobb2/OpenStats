@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -39,6 +41,11 @@ func (s *Server) GenerateInstaller(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "serverAddress is required")
 		return
 	}
+
+	// Normalize before baking the address into the msiexec command. A bare
+	// hostname makes every agent request fail with `unsupported protocol
+	// scheme ""`, so the agent installs cleanly and then never registers.
+	req.ServerAddress = normalizeServerAddress(req.ServerAddress)
 
 	if req.Port == 0 {
 		req.Port = 9183
@@ -178,11 +185,79 @@ func findLatestByExt(publicDir, ext string) (string, error) {
 	if len(files) == 0 {
 		return "", nil
 	}
-	// Sort by name descending — works well with semver-based naming.
+	// Sort newest-version-first. A plain string sort is wrong here: it orders
+	// "...-0.1.9.msi" above "...-0.1.10.msi" because '9' > '1', so the server
+	// would hand agents an older installer than the one it has on disk and
+	// outdated agents could never move forward.
 	sort.Slice(files, func(i, j int) bool {
-		return files[i].Name() > files[j].Name()
+		ni, nj := files[i].Name(), files[j].Name()
+		if c := compareVersions(extractVersion(ni), extractVersion(nj)); c != 0 {
+			return c > 0
+		}
+		// Same version (e.g. -arm64 vs -universal) or no version at all:
+		// fall back to name order so the pick stays deterministic.
+		return ni > nj
 	})
 	return files[0].Name(), nil
+}
+
+// normalizeServerAddress mirrors enrollment.NormalizeServerURL on the agent:
+// assume https when no scheme is given and drop trailing slashes, so the
+// generated install command always produces a working reportURL.
+func normalizeServerAddress(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	return strings.TrimRight(s, "/")
+}
+
+// installerVersionRe matches the first dotted-numeric run in a filename, e.g.
+// "openlabstats-agent-0.1.10-universal.pkg" -> "0.1.10".
+var installerVersionRe = regexp.MustCompile(`\d+(?:\.\d+)+`)
+
+// extractVersion pulls the version components out of an installer filename.
+// Returns nil when the name carries no recognizable version, which sorts below
+// every versioned file.
+func extractVersion(name string) []int {
+	m := installerVersionRe.FindString(name)
+	if m == "" {
+		return nil
+	}
+	parts := strings.Split(m, ".")
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// compareVersions returns >0 when a is newer than b, <0 when older, 0 when
+// equal. Missing trailing components count as zero, so 0.1 and 0.1.0 are equal.
+func compareVersions(a, b []int) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var av, bv int
+		if i < len(a) {
+			av = a[i]
+		}
+		if i < len(b) {
+			bv = b[i]
+		}
+		if av != bv {
+			if av > bv {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
 }
 
 func intToStr(i int) string {
