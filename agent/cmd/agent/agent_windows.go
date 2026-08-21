@@ -72,13 +72,8 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		logger.Info("scanning for existing processes...")
 		existingProcs := monitor.ScanExistingProcesses(logger, norm.ResolveFamily)
 
-		// Initialize user session manager before the existing process loop so
-		// pre-existing processes are reflected in the session refcount at startup.
-		userSessions := newUserSessionManager(m, logger)
-
 		for _, p := range existingProcs {
 			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
-			userSessions.onProcessStart(p.User, p.PID)
 		}
 
 		// Set up WMI watcher.
@@ -86,13 +81,6 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 			ExcludePatterns: cfg.Monitor.ExcludePatterns,
 			MinLifetime:     cfg.Monitor.MinLifetime,
 			FamilyResolver:  norm.ResolveFamily,
-			OnStart: func(pid uint32, exeName string, isNewGroup bool) {
-				if !isNewGroup {
-					return // child process joined existing group, skip
-				}
-				// Track user session from process owner.
-				userSessions.onProcessStart(tracker.GetProcessUser(pid), pid)
-			},
 			OnStop: func(session *monitor.ProcessSession) {
 				// Resolve the friendly name and record the session.
 				info := norm.Resolve(session.ExeName, session.ExePath)
@@ -105,9 +93,6 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 					m.AppForegroundSeconds.WithLabelValues(labels...).Add(session.ForegroundDelta.Seconds())
 					m.AppLaunches.WithLabelValues(labels...).Inc()
 				}
-
-				// Update user session tracking.
-				userSessions.onProcessStop(session.User, session.PID)
 
 				// Persist to local store.
 				if err := db.RecordSession(
@@ -132,7 +117,12 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}()
 
 		// Start periodic checkpoint loop for active process groups.
-		go runCheckpointLoop(ctx, tracker, norm, m, userSessions, cfg.Monitor.ReconcileInterval, logger)
+		go runCheckpointLoop(ctx, tracker, norm, m, cfg.Monitor.ReconcileInterval, logger)
+
+		// Start the OS logon session poller. User sessions come from the OS
+		// (WTS/utmpx), not from process refcounts; 15s keeps sign-in and sign-out
+		// edges tight without polling the session APIs hard.
+		go newLogonTracker(m, logger).Run(ctx, 15*time.Second)
 
 		// Start foreground window poller.
 		go monitor.RunForegroundPoller(ctx, tracker, 1*time.Second, logger)

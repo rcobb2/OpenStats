@@ -48,6 +48,28 @@ Active process state management:
 - **User Filtering**: Only records metrics for valid human users (excludes system/computer accounts) — see `internal/userid/`
 - Integrates with foreground poller
 
+### `internal/logon/`
+
+OS logon session tracking — the source of truth for the four `user_session_*`
+metrics:
+
+- `Enumerator` is platform-specific: `WTSEnumerateSessions` on Windows (console,
+  RDP, and disconnected sessions), `utmpx` login records on macOS (console plus
+  SSH). `enum_other.go` is a no-op stub so the package builds and its tests run
+  on any OS.
+- `Tracker` diffs each poll against the last and drives the metrics. It counts a
+  logon only after the first poll has seeded state: sessions already open when
+  the agent starts are **adopted**, not counted. `LoginTime` comes from the OS, so
+  session duration survives an agent restart.
+- Time accrues once per canonical user even when they hold several OS sessions
+  (console + SSH is one occupant).
+
+This replaced a refcount proxy that inferred a logon from the first tracked
+process and a logoff from the last one exiting. On machines that are never signed
+out — kiosk accounts, service accounts — the refcount never returned to zero, so
+exactly one logon was ever recorded and every report built on
+`increase(user_session_logins_total[...])` came back empty.
+
 ### `internal/userid/`
 
 Username resolution, applied before any username reaches a metric label:
@@ -249,6 +271,15 @@ When an agent registers with the server:
 2. Wire up collection in `cmd/agent/main.go`
 3. Update Grafana dashboards
 4. Document in README.md
+
+### Changing how sessions are counted
+
+1. `internal/logon/tracker.go` — diff/metric logic, covered by tests that run on
+   any platform
+2. `internal/logon/enum_windows.go` / `enum_darwin.go` — platform enumeration;
+   these need a real Windows or macOS host to validate, not just a cross-compile
+3. Session metrics have exactly one writer. Nothing outside this package may
+   touch `UserSession*`, or a session gets counted twice.
 
 ### Changing user filtering or correlation
 

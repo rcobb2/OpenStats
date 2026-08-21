@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/rcobb/openlabstats-agent/internal/enrollment"
 	"github.com/rcobb/openlabstats-agent/internal/inventory"
+	"github.com/rcobb/openlabstats-agent/internal/logon"
 	"github.com/rcobb/openlabstats-agent/internal/metrics"
 	"github.com/rcobb/openlabstats-agent/internal/monitor"
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
@@ -40,25 +40,7 @@ func restoreMetrics(db *store.Store, m *metrics.Metrics, logger *slog.Logger) er
 	return nil
 }
 
-// checkpointSessions flushes elapsed time for all active user sessions into the
-// counter and updates the live duration gauge. Called from runCheckpointLoop so
-// that active sessions appear in Prometheus even before they end.
-func (usm *userSessionManager) checkpointSessions() {
-	usm.mu.Lock()
-	defer usm.mu.Unlock()
-
-	hostname := metrics.Hostname()
-	now := time.Now()
-
-	for user, state := range usm.users {
-		elapsed := now.Sub(state.lastCheckpoint).Seconds()
-		state.lastCheckpoint = now
-		usm.metrics.UserSessionSecondsTotal.WithLabelValues(user, hostname).Add(elapsed)
-		usm.metrics.UserSessionDuration.WithLabelValues(user, hostname).Set(now.Sub(state.loginTime).Seconds())
-	}
-}
-
-func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *normalizer.Normalizer, m *metrics.Metrics, userSessions *userSessionManager, interval time.Duration, logger *slog.Logger) {
+func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *normalizer.Normalizer, m *metrics.Metrics, interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -67,7 +49,6 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			userSessions.checkpointSessions()
 			snapshots := tracker.CheckpointActive()
 			hostname := metrics.Hostname()
 
@@ -208,6 +189,15 @@ func bootstrapUserPolicy(ctx context.Context, client *enrollment.Client, logger 
 	applyUserPolicy(policy, logger)
 }
 
+// newLogonTracker builds the OS-logon session tracker. It owns the user-session
+// metrics outright: sessions come from the OS (WTS on Windows, utmpx on macOS)
+// rather than being inferred from process refcounts, so a sign-in registers even
+// when another account already has processes running, and an agent restart no
+// longer manufactures a logon for every session that was already open.
+func newLogonTracker(m *metrics.Metrics, logger *slog.Logger) *logon.Tracker {
+	return logon.NewTracker(logon.NewEnumerator(), m, resolveUser, metrics.Hostname(), logger)
+}
+
 // resolveUser canonicalizes a raw OS username and reports whether it should be
 // tracked. The canonical form is what goes into metric labels, so a Windows
 // domain account (COLGATE\jdoe) and its macOS counterpart (jdoe) share one
@@ -227,90 +217,4 @@ func resolveUser(raw string) (string, bool) {
 func isValidUser(user string) bool {
 	_, ignored := builtinUserPolicy.Resolve(user)
 	return !ignored
-}
-
-// userSessionManager derives user login/logoff events from process start/stop events.
-// When a user's first tracked process appears, it counts as a login.
-// When a user's last tracked process ends, it counts as a logoff.
-type userSessionManager struct {
-	mu      sync.Mutex
-	users   map[string]*userState // user -> state
-	metrics *metrics.Metrics
-	logger  *slog.Logger
-}
-
-type userState struct {
-	refCount       int // number of active tracked process groups for this user
-	loginTime      time.Time
-	lastCheckpoint time.Time
-}
-
-func newUserSessionManager(m *metrics.Metrics, logger *slog.Logger) *userSessionManager {
-	return &userSessionManager{
-		users:   make(map[string]*userState),
-		metrics: m,
-		logger:  logger,
-	}
-}
-
-func (usm *userSessionManager) onProcessStart(rawUser string, pid uint32) {
-	// Ignore system/service processes — only track real human user sessions.
-	// Sessions are keyed on the canonical username so a person's Windows and
-	// macOS logins are one identity in the session metrics.
-	user, ok := resolveUser(rawUser)
-	if !ok {
-		return
-	}
-
-	usm.mu.Lock()
-	defer usm.mu.Unlock()
-
-	hostname := metrics.Hostname()
-
-	state, exists := usm.users[user]
-	if !exists {
-		// First process for this user — counts as a login.
-		now := time.Now()
-		state = &userState{loginTime: now, lastCheckpoint: now}
-		usm.users[user] = state
-
-		usm.metrics.UserSessionLogins.WithLabelValues(user, hostname).Inc()
-		usm.metrics.UserSessionActive.WithLabelValues(user, hostname).Set(1)
-		usm.logger.Info("user session started", "user", user)
-	}
-
-	state.refCount++
-}
-
-func (usm *userSessionManager) onProcessStop(rawUser string, pid uint32) {
-	user, ok := resolveUser(rawUser)
-	if !ok {
-		return
-	}
-
-	usm.mu.Lock()
-	defer usm.mu.Unlock()
-
-	hostname := metrics.Hostname()
-
-	state, exists := usm.users[user]
-	if !exists {
-		return
-	}
-
-	state.refCount--
-
-	if state.refCount <= 0 {
-		// Last process ended — counts as a logoff.
-		// Only add time since last checkpoint to avoid double-counting periodic flushes.
-		duration := time.Since(state.lastCheckpoint).Seconds()
-		usm.metrics.UserSessionSecondsTotal.WithLabelValues(user, hostname).Add(duration)
-		usm.metrics.UserSessionActive.WithLabelValues(user, hostname).Set(0)
-		usm.metrics.UserSessionDuration.WithLabelValues(user, hostname).Set(0)
-		delete(usm.users, user)
-		usm.logger.Info("user session ended", "user", user, "duration", duration)
-	} else {
-		// Update current session duration gauge.
-		usm.metrics.UserSessionDuration.WithLabelValues(user, hostname).Set(time.Since(state.loginTime).Seconds())
-	}
 }

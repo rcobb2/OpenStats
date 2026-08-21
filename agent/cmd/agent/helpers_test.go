@@ -39,13 +39,6 @@ func gaugeValue(t *testing.T, gv *prometheus.GaugeVec, labels ...string) float64
 	return testutil.ToFloat64(g)
 }
 
-func newTestSessionManager(t *testing.T) (*userSessionManager, *metrics.Metrics) {
-	t.Helper()
-	m := metrics.NewForTest()
-	usm := newUserSessionManager(m, discardSlogLogger())
-	return usm, m
-}
-
 // ── isValidUser ───────────────────────────────────────────────────────────────
 
 func TestIsValidUser(t *testing.T) {
@@ -131,43 +124,6 @@ func TestResolveUserAppliesServerIgnoreList(t *testing.T) {
 	}
 }
 
-func TestSessionMetricsUseCanonicalUser(t *testing.T) {
-	usm, m := newTestSessionManager(t)
-	host := metrics.Hostname()
-
-	// The same person on a Windows domain PC and on a Mac must land on one series.
-	usm.onProcessStart(`COLGATE\jdoe`, 1001)
-	usm.onProcessStart("jdoe", 1002)
-
-	if got := counterValue(t, m.UserSessionLogins, "jdoe", host); got != 1 {
-		t.Errorf("logins for canonical user = %v, want 1", got)
-	}
-	if got := gaugeValue(t, m.UserSessionActive, "jdoe", host); got != 1 {
-		t.Errorf("active gauge for canonical user = %v, want 1", got)
-	}
-
-	// Only after both process groups end does the session close.
-	usm.onProcessStop(`COLGATE\jdoe`, 1001)
-	if got := gaugeValue(t, m.UserSessionActive, "jdoe", host); got != 1 {
-		t.Errorf("active gauge after first stop = %v, want 1", got)
-	}
-	usm.onProcessStop("jdoe", 1002)
-	if got := gaugeValue(t, m.UserSessionActive, "jdoe", host); got != 0 {
-		t.Errorf("active gauge after last stop = %v, want 0", got)
-	}
-}
-
-func TestSessionMetricsSkipIgnoredUser(t *testing.T) {
-	withUserPolicy(t, &enrollment.UserPolicy{StripDomain: true, IgnorePatterns: []string{"zabbix"}})
-	usm, m := newTestSessionManager(t)
-	host := metrics.Hostname()
-
-	usm.onProcessStart(`COLGATE\zabbix`, 2001)
-	if got := counterValue(t, m.UserSessionLogins, "zabbix", host); got != 0 {
-		t.Errorf("logins for ignored user = %v, want 0", got)
-	}
-}
-
 func TestUserAliasMergesMacShortname(t *testing.T) {
 	withUserPolicy(t, &enrollment.UserPolicy{
 		StripDomain: true,
@@ -176,101 +132,6 @@ func TestUserAliasMergesMacShortname(t *testing.T) {
 	got, ok := resolveUser("jdoe2")
 	if !ok || got != "jdoe" {
 		t.Errorf(`resolveUser("jdoe2") = (%q, %v), want ("jdoe", true)`, got, ok)
-	}
-}
-
-// ── userSessionManager: login tracking ───────────────────────────────────────
-
-// TestUserSessionLoginFired verifies the login counter increments on first process.
-func TestUserSessionLoginFired(t *testing.T) {
-	usm, m := newTestSessionManager(t)
-	host := metrics.Hostname()
-
-	usm.onProcessStart("alice", 1001)
-
-	if got := counterValue(t, m.UserSessionLogins, "alice", host); got != 1 {
-		t.Errorf("logins: got %v, want 1", got)
-	}
-	if got := gaugeValue(t, m.UserSessionActive, "alice", host); got != 1 {
-		t.Errorf("session active: got %v, want 1", got)
-	}
-}
-
-// TestUserSessionSecondProcessNoExtraLogin verifies a second process for the
-// same user does NOT fire an additional login.
-func TestUserSessionSecondProcessNoExtraLogin(t *testing.T) {
-	usm, m := newTestSessionManager(t)
-	host := metrics.Hostname()
-
-	usm.onProcessStart("bob", 2001)
-	usm.onProcessStart("bob", 2002)
-
-	if got := counterValue(t, m.UserSessionLogins, "bob", host); got != 1 {
-		t.Errorf("logins: got %v, want 1 (two processes, one session)", got)
-	}
-}
-
-// TestUserSessionLogoffFiredOnLastExit verifies session-end metrics fire only
-// when the last process for a user exits.
-func TestUserSessionLogoffFiredOnLastExit(t *testing.T) {
-	usm, m := newTestSessionManager(t)
-	host := metrics.Hostname()
-
-	usm.onProcessStart("carol", 3001)
-	usm.onProcessStart("carol", 3002)
-
-	// First exit: session still active.
-	usm.onProcessStop("carol", 3001)
-	if got := gaugeValue(t, m.UserSessionActive, "carol", host); got != 1 {
-		t.Errorf("expected session still active after first exit, got %v", got)
-	}
-
-	// Second exit: session ends.
-	time.Sleep(5 * time.Millisecond)
-	usm.onProcessStop("carol", 3002)
-
-	if got := gaugeValue(t, m.UserSessionActive, "carol", host); got != 0 {
-		t.Errorf("expected session inactive after last exit, got %v", got)
-	}
-	if got := counterValue(t, m.UserSessionSecondsTotal, "carol", host); got <= 0 {
-		t.Errorf("expected positive session duration recorded, got %v", got)
-	}
-}
-
-// TestUserSessionRelogin verifies a user can open a second session after
-// their first one ends.
-func TestUserSessionRelogin(t *testing.T) {
-	usm, m := newTestSessionManager(t)
-	host := metrics.Hostname()
-
-	usm.onProcessStart("dave", 4001)
-	usm.onProcessStop("dave", 4001)
-
-	if got := counterValue(t, m.UserSessionLogins, "dave", host); got != 1 {
-		t.Errorf("after first session: logins=%v, want 1", got)
-	}
-
-	usm.onProcessStart("dave", 4002)
-
-	if got := counterValue(t, m.UserSessionLogins, "dave", host); got != 2 {
-		t.Errorf("after re-login: logins=%v, want 2", got)
-	}
-	if got := gaugeValue(t, m.UserSessionActive, "dave", host); got != 1 {
-		t.Errorf("after re-login: active=%v, want 1", got)
-	}
-}
-
-// TestUserSessionStopUnknownUserIsNoop verifies stopping an untracked user
-// does not panic or affect other users' state.
-func TestUserSessionStopUnknownUserIsNoop(t *testing.T) {
-	usm, m := newTestSessionManager(t)
-	host := metrics.Hostname()
-
-	usm.onProcessStart("eve", 5001)
-	usm.onProcessStop("ghost", 9999) // not tracked — should be a no-op
-
-	if got := gaugeValue(t, m.UserSessionActive, "eve", host); got != 1 {
-		t.Errorf("eve's session should be unaffected: active=%v", got)
 	}
 }
 

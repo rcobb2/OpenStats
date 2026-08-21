@@ -9,7 +9,7 @@ The OpenLabStats agent runs as a Windows service on lab and classroom computers.
 - **Software usage** — which applications are launched, how long they run, and who uses them (human only)
 - **Launch counts** — how many times each application is opened
 - **Foreground tracking** — active vs background usage for precise analytics
-- **User sessions** — when users log in and out
+- **User sessions** — when users log in and out, read from OS logon sessions (Windows Terminal Services / macOS utmpx) rather than inferred from running processes, so sign-ins are counted even on machines that stay signed in
 - **User identity** — service accounts (e.g. `zabbix`) can be ignored, and one person's Windows domain account (`COLGATE\jdoe`) and macOS username (`jdoe`) are reported as a single user. Managed under **Users** in the web portal.
 - **Software inventory** — what's installed on each machine
 

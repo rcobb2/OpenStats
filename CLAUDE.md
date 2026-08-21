@@ -71,6 +71,7 @@ cd server && go test ./...
 - **Swagger docs** — Regenerate with `swag init` from `server/` after changing API handler annotations. Docs served at `/api/docs`.
 - **Version constants** — Agent version is in `agent/cmd/agent/main.go` AND `agent/internal/enrollment/client.go`; keep both in sync.
 - **Fleet Settings** — Server pushes global config to agents at registration: heartbeat interval, update interval, min agent version, stale timeout. Managed via **Agents > Settings** in the web portal. The same response carries the **user policy** (ignore patterns, aliases, domain stripping) from **Users**.
+- **Session metrics come from the OS, not from processes** — `agent/internal/logon/` enumerates logon sessions (WTS / utmpx) and is the only writer of `openlabstats_user_session_*`. The previous design inferred a logon from the first tracked process and a logoff from the last one exiting, which never fired again on machines that are never signed out (kiosk and service accounts), pinning every login counter at 1. Sessions already open at agent start are adopted, not counted, so a restart no longer manufactures logons.
 - **User-keyed reports don't use PromQL `topk`** — identities are merged by canonical name in Go first, then ranked; ranking before the merge would double-count or drop a user split across platforms. See `sumByCanonicalUser` in `server/internal/api/reports.go`.
 
 ## Key Files
@@ -87,6 +88,7 @@ cd server && go test ./...
 | `agent/internal/monitor/foreground.go` | Foreground window polling (Windows: Win32; macOS: CoreGraphics) |
 | `agent/internal/metrics/prometheus.go` | All Prometheus metric definitions and labels |
 | `agent/internal/normalizer/normalizer.go` | Name resolution orchestration |
+| `agent/internal/logon/` | OS logon session tracking (WTS on Windows, utmpx on macOS); sole writer of `user_session_*` |
 | `agent/internal/userid/` | Username canonicalization + ignore policy (mirror of server copy) |
 | `agent/internal/enrollment/client.go` | Server registration + heartbeat; also holds `agentVersion` const |
 | `agent/internal/store/sqlite.go` | SQLite local persistence |
