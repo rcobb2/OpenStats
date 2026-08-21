@@ -16,7 +16,10 @@ fi
 # Remove old plist if upgrading (will be reinstalled by payload).
 rm -f "$PLIST_PATH"
 
-# Backup existing config so postinstall can restore it (preserves building/room/server settings).
+# Backup existing config so postinstall can carry forward building/room
+# (server settings are intentionally NOT restored from this backup — the
+# freshly-installed package's defaults win, so reportURL/mappingUpdateURL
+# stay current after an upgrade).
 if [[ -f "$CONFIG_PATH" ]]; then
     cp "$CONFIG_PATH" "$CONFIG_BACKUP"
 fi

@@ -11,7 +11,7 @@
 #
 # The resulting package installs:
 #   /usr/local/openlabstats/openlabstats-agent
-#   /usr/local/openlabstats/configs/agent.yaml  (if not already present)
+#   /usr/local/openlabstats/configs/agent.yaml  (regenerated from configs/agent-macos.yaml on every build)
 #   /Library/LaunchDaemons/com.openlabstats.agent.plist
 
 set -euo pipefail
@@ -56,12 +56,21 @@ fi
 
 chmod 755 "$BIN_PATH"
 
-# Copy a default agent.yaml only if none exists in the payload.
+# Always regenerate the payload's default agent.yaml from the source of
+# truth (agent/configs/agent-macos.yaml). Previously this only copied it in
+# "if not already present," which let the checked-in payload copy drift
+# from agent-macos.yaml and ship a stale reportURL in new packages.
+# postinstall is responsible for preserving site-specific fields
+# (building/room) across upgrades — this script's job is just to make sure
+# the shipped default is always current.
 CONFIG_DST="$PAYLOAD_DIR/usr/local/openlabstats/configs/agent.yaml"
 CONFIG_SRC="$AGENT_DIR/configs/agent-macos.yaml"
-if [[ ! -f "$CONFIG_DST" && -f "$CONFIG_SRC" ]]; then
+if [[ -f "$CONFIG_SRC" ]]; then
     mkdir -p "$(dirname "$CONFIG_DST")"
     cp "$CONFIG_SRC" "$CONFIG_DST"
+else
+    echo "ERROR: default config $CONFIG_SRC not found." >&2
+    exit 1
 fi
 
 # Make scripts executable.

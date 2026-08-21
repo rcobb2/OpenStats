@@ -16,10 +16,25 @@ chmod 755 "$LOG_DIR"
 chmod 755 "$INSTALL_DIR"
 chmod 755 "$INSTALL_DIR/openlabstats-agent"
 
-# Restore pre-existing config (preserves building/room/server settings across updates).
-# If no backup exists this is a fresh install — keep the default config from the package.
+# Preserve only the site-specific building/room fields from a pre-existing
+# config across upgrades. We intentionally do NOT restore the whole file —
+# doing so previously clobbered server.reportURL (and any other setting)
+# with whatever was installed before, silently pointing upgraded agents at
+# a stale/unreachable server URL. The freshly-installed package's
+# agent.yaml (with the current defaults) is left in place; we just patch
+# building/room into it if the backup had non-empty values.
+# If no backup exists this is a fresh install — keep the default config as-is.
 if [[ -f "$CONFIG_BACKUP" ]]; then
-    cp "$CONFIG_BACKUP" "$CONFIG_PATH"
+    OLD_BUILDING="$(sed -n 's/^[[:space:]]*building:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$CONFIG_BACKUP" | head -n1)"
+    OLD_ROOM="$(sed -n 's/^[[:space:]]*room:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$CONFIG_BACKUP" | head -n1)"
+
+    if [[ -n "$OLD_BUILDING" ]]; then
+        sed -i '' "s/^\([[:space:]]*building:[[:space:]]*\).*\$/\1\"${OLD_BUILDING}\"/" "$CONFIG_PATH"
+    fi
+    if [[ -n "$OLD_ROOM" ]]; then
+        sed -i '' "s/^\([[:space:]]*room:[[:space:]]*\).*\$/\1\"${OLD_ROOM}\"/" "$CONFIG_PATH"
+    fi
+
     rm -f "$CONFIG_BACKUP"
 fi
 
