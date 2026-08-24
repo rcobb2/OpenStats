@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -74,6 +76,10 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Layer in installer-supplied values (Windows: HKLM\SOFTWARE\OpenLabStats)
+	// before defaults, so an MSI-provided port still counts as "set".
+	applyPlatformOverrides(cfg)
+
 	setDefaults(cfg)
 
 	// Resolve relative paths relative to the config file's directory.
@@ -86,6 +92,17 @@ func Load(configPath string) (*Config, error) {
 	cfg.Normalizer.MappingFile = resolvePath(baseDir, cfg.Normalizer.MappingFile)
 
 	return cfg, nil
+}
+
+// parsePort validates a port supplied as a string (from the installer). It
+// returns false for anything outside 1-65535 so a malformed value falls back to
+// the config/default rather than putting the agent on port 0.
+func parsePort(s string) (int, bool) {
+	p, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || p < 1 || p > 65535 {
+		return 0, false
+	}
+	return p, true
 }
 
 // resolvePath makes a relative path absolute by joining it with baseDir.

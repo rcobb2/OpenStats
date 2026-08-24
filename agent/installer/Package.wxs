@@ -119,19 +119,41 @@
     </ComponentGroup>
 
     <!-- ============================================================
-         Post-install: configure agent.yaml using PowerShell.
-         This replaces placeholders in the default config with MSI properties.
-         ============================================================ -->
-    <CustomAction Id="ConfigureAgent"
-                  Directory="INSTALLDIR"
-                  ExeCommand="[SystemFolder]cmd.exe /c powershell -NoProfile -Command &quot;$c = Get-Content '[ConfigDir]agent.yaml' -Raw; $c = $c -replace 'reportURL:\s*&quot;[^&quot;]*&quot;', 'reportURL: &quot;[SERVERADDRESS]&quot;'; $c = $c -replace 'mappingUpdateURL:\s*&quot;[^&quot;]*&quot;', 'mappingUpdateURL: &quot;[SERVERADDRESS]/api/v1/mappings/agent&quot;'; $c = $c -replace 'port:\s*9183', 'port: [PORT]'; $c = $c -replace 'building:\s*&quot;[^&quot;]*&quot;', 'building: &quot;[BUILDING]&quot;'; $c = $c -replace 'room:\s*&quot;[^&quot;]*&quot;', 'room: &quot;[ROOM]&quot;'; Set-Content '[ConfigDir]agent.yaml' $c -NoNewline&quot;"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="ignore" />
+         Agent configuration via the registry.
 
-    <InstallExecuteSequence>
-      <Custom Action="ConfigureAgent" After="InstallFiles" Condition="SERVERADDRESS OR (PORT &lt;&gt; &quot;9183&quot;) OR BUILDING OR ROOM" />
-    </InstallExecuteSequence>
+         The agent reads HKLM\SOFTWARE\OpenLabStats and layers these values
+         over agent.yaml (see internal/config/override_windows.go).
+
+         This replaced a deferred PowerShell custom action that regex-patched
+         agent.yaml in place with Return="ignore". Because failures were
+         ignored, a blocked or failing PowerShell left reportURL empty while
+         msiexec still returned success — the agent installed, the service
+         started, and it silently never registered. RegistryValue is native
+         MSI: transactional, logged, and rolled back on failure.
+
+         Values are written as strings so an unset property yields "" rather
+         than 0, which the agent could not distinguish from a real value.
+         ============================================================ -->
+    <ComponentGroup Id="AgentConfigRegistry" Directory="INSTALLDIR">
+      <Component Id="AgentRegistryConfig" Guid="0B7F4E1A-93C6-4D28-8E5B-7A1C4F60D932" Bitness="always64">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\OpenLabStats" ForceDeleteOnUninstall="yes">
+          <RegistryValue Name="ServerAddress" Value="[SERVERADDRESS]" Type="string" KeyPath="yes" />
+          <RegistryValue Name="MappingUpdateURL" Value="[MAPPINGUPDATEURL]" Type="string" />
+          <RegistryValue Name="Port" Value="[PORT]" Type="string" />
+          <RegistryValue Name="Building" Value="[BUILDING]" Type="string" />
+          <RegistryValue Name="Room" Value="[ROOM]" Type="string" />
+          <!-- Recorded for support: which install set these values. -->
+          <RegistryValue Name="InstalledVersion" Value="[ProductVersion]" Type="string" />
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+
+    <!-- Derive the mapping URL from SERVERADDRESS unless explicitly overridden. -->
+    <Property Id="MAPPINGUPDATEURL" Secure="yes" />
+    <SetProperty Id="MAPPINGUPDATEURL"
+                 Value="[SERVERADDRESS]/api/v1/mappings/agent"
+                 Before="CostFinalize"
+                 Condition="SERVERADDRESS AND NOT MAPPINGUPDATEURL" />
 
     <!-- ============================================================
          Feature tree
@@ -139,6 +161,7 @@
     <Feature Id="Complete" Title="OpenLabStats Agent" Level="1">
       <ComponentGroupRef Id="AgentBinary" />
       <ComponentGroupRef Id="ConfigFiles" />
+      <ComponentGroupRef Id="AgentConfigRegistry" />
       <ComponentGroupRef Id="DataDirs" />
       <ComponentGroupRef Id="FirewallRules" />
     </Feature>

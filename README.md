@@ -96,16 +96,19 @@ msiexec /i openlabstats-agent.msi /qn /l*v install.log SERVERADDRESS="http://ser
 
 The agent supports several CLI commands for querying status and configuration:
 
+These are bare subcommands, not flags — a dash-prefixed form like `--status` is not
+recognized and instead starts the agent in console mode.
+
 | Command | Description |
 |---------|-------------|
-| `--version` | Print agent version |
-| `--serveraddress` | Print configured server URL |
-| `--building` | Print configured building |
-| `--room` | Print configured room |
-| `--heartbeat` | Print heartbeat interval (from server settings) |
-| `--maintenancewindow` | Print maintenance window status and configured times |
-| `--setmaintenance <val>` | Set maintenance override (`true`, `false`, or `auto`) |
-| `--status` | Print full agent status |
+| `version` | Print agent version |
+| `serveraddress` | Print configured server URL |
+| `building` | Print configured building |
+| `room` | Print configured room |
+| `heartbeat` | Print heartbeat interval (from server settings) |
+| `maintenancewindow` | Print maintenance window status and configured times |
+| `setmaintenance <val>` | Set maintenance override (`true`, `false`, or `auto`) |
+| `status` | Print full agent status |
 
 ### CLI Examples
 
