@@ -2,7 +2,7 @@
 # Fetch secrets from Bitwarden Secrets Manager and write to the env file.
 # Called by ExecStartPre in openstats-compose.service.
 #
-# Prereqs on podman01:
+# Prereqs on podman02:
 #   1. Install bws CLI: https://github.com/bitwarden/sdk/releases (Linux x86_64 static binary)
 #      sudo install -m 755 bws /usr/local/bin/bws
 #   2. Create /etc/openstats/bws-token (root:root 0600):

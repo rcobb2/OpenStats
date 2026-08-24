@@ -82,10 +82,39 @@ func (c *Client) WithUserPolicyHandler(fn func(*UserPolicy)) *Client {
 	return c
 }
 
+// NormalizeServerURL turns an admin-supplied server address into a usable base
+// URL. Two shapes used to break the agent silently:
+//
+//   - A bare hostname ("openstats.colgate.edu") — the installer UI suggested
+//     exactly this. Every request then fails with `unsupported protocol
+//     scheme ""`, and isTrustedUpdateHost sees an empty hostname, so the agent
+//     neither registers nor self-updates.
+//   - A trailing slash — paths become "//api/v1/...".
+//
+// A scheme-less address is assumed to be https; write the scheme explicitly
+// for plain-HTTP servers (e.g. "http://localhost:8080").
+func NormalizeServerURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	u, err := neturl.Parse(s)
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(s, "/")
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
 // NewClient creates a new enrollment client.
 func NewClient(serverURL string, agentPort int, building, room string, logger *slog.Logger) *Client {
 	return &Client{
-		serverURL: serverURL,
+		serverURL: NormalizeServerURL(serverURL),
 		port:      agentPort,
 		building:  building,
 		room:      room,
@@ -106,7 +135,9 @@ func (c *Client) WithOSVersion(v string) *Client {
 func (c *Client) Register(ctx context.Context) (*SystemSettings, string) {
 	res, err := c.doRegister(ctx)
 	if err != nil {
-		c.logger.Warn("registration failed", "error", err)
+		// Include the target so a misconfigured server address is diagnosable
+		// from the agent log instead of looking like a transient network blip.
+		c.logger.Error("registration failed", "error", err, "serverURL", c.serverURL)
 		return nil, ""
 	}
 	if res.IgnoredExeNames != nil {

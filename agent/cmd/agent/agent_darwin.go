@@ -39,6 +39,11 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				WithOSVersion("macOS " + getOSVersionDarwin()).
 				WithUserPolicyHandler(func(p *enrollment.UserPolicy) { applyUserPolicy(p, logger) })
 			bootstrapUserPolicy(ctx, enrollClient, logger)
+		} else {
+			// Without a server URL the agent still collects metrics locally but
+			// never registers and never self-updates. Don't let that be silent.
+			logger.Warn("no server.reportURL configured: agent will NOT register with a central server, " +
+				"send heartbeats, or self-update; set server.reportURL in /usr/local/openlabstats/configs/agent.yaml")
 		}
 
 		// Initialize local store.

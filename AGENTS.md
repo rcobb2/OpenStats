@@ -212,6 +212,30 @@ cd server && go run ./cmd/server/ --config config/server.yaml
 cd server/web && npm run dev
 ```
 
+The `docker-compose up -d` above is for **local development only**. Never use it, or any
+hand-run `podman-compose`/`--build` command, against the production host.
+
+### Deploying to Production
+
+Production runs on **podman02**. Deployment is owned by the **Ansible playbook in the
+separate infra repo** — do not build, pull, or restart containers on the host directly.
+
+```
+# Run the OpenStats playbook from the Ansible control node.
+# TODO: replace with the exact invocation from the infra repo.
+ansible-playbook <infra-repo>/<playbook>.yml --limit podman02
+```
+
+Rules for agents:
+- **Never** ssh to podman02 to run `git pull`, `podman-compose up --build`, or
+  `systemctl restart openstats-compose`. The playbook does all of it.
+- Do not instruct the user to rebuild on the host. Point them at the playbook.
+- `deploy/podman02/` holds the compose file, `server.yaml`, nginx block, systemd unit
+  and Bitwarden secret map that the playbook consumes. Change these in git; the
+  playbook is what puts them on the host.
+- After merging a server change, the deploy is a separate step the operator runs — say
+  so explicitly rather than implying the change is live.
+
 ### Running Tests
 
 ```powershell

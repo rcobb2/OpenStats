@@ -42,6 +42,13 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				WithOSVersion(getWindowsOSCaption(logger)).
 				WithUserPolicyHandler(func(p *enrollment.UserPolicy) { applyUserPolicy(p, logger) })
 			bootstrapUserPolicy(ctx, enrollClient, logger)
+		} else {
+			// Without a server URL the agent still collects metrics locally but
+			// never registers and never self-updates. That used to be entirely
+			// silent — e.g. an MSI installed by double-click rather than with
+			// SERVERADDRESS set — so say so loudly.
+			logger.Warn("no server.reportURL configured: agent will NOT register with a central server, " +
+				"send heartbeats, or self-update; reinstall with SERVERADDRESS=<url> or set server.reportURL in agent.yaml")
 		}
 
 		// Initialize local store.

@@ -124,9 +124,15 @@ cd server/web && npm install && npm run build
 # Server
 .\server\server.exe server\config\server.yaml
 
-# Full stack (Docker)
+# Full stack (Docker) — local dev only
 cd server && docker-compose up -d
 ```
+
+### Production
+
+Production runs on **podman02**. Deploys go through the **Ansible playbook in the separate
+infra repo** — don't build or restart containers on the host by hand. The configs the
+playbook consumes live in `deploy/podman02/`.
 
 ## Metrics Reference
 

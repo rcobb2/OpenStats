@@ -48,11 +48,15 @@ export default function Installer() {
               Server Address
               <input
                 type="text"
-                placeholder="openstats.colgate.edu"
+                placeholder="https://openstats.colgate.edu"
                 value={form.serverAddress}
                 onChange={e => setForm({ ...form, serverAddress: e.target.value })}
                 required
               />
+              <small style={{ color: 'var(--text-muted)' }}>
+                Include the scheme (<code>https://</code>). A bare hostname leaves the
+                agent unable to reach the server, so it installs but never registers.
+              </small>
             </label>
             <label>
               Metrics Port
@@ -100,6 +104,10 @@ export default function Installer() {
                   >
                     Download MSI
                   </a>
+                  <p style={{ color: 'var(--text-muted)', marginTop: '-1rem', marginBottom: '1.5rem' }}>
+                    Don't double-click the MSI — that installs an agent with no server
+                    address, which runs but never registers. Use the install command below.
+                  </p>
                 </>
               ) : (
                 <p style={{ color: 'var(--text-muted)' }}>
