@@ -487,19 +487,43 @@ func (s *Store) AutoInsertMapping(ctx context.Context, exeName string) error {
 	return err
 }
 
-// BatchAutoInsertMappings inserts multiple unknown exe names in a single query.
+// DiscoveredApp carries the app/category labels an agent already attached to a
+// metric line for an exe the server hasn't catalogued yet. The agent has
+// already run its own software-map.json/PE-metadata resolution by the time a
+// line reaches here, so seeding from it — rather than a blank placeholder —
+// means an exe the agent already recognizes (e.g. POWERPNT.EXE) lands
+// pre-filled instead of starting from scratch on every host that reports it.
+// This is a hint only: the row still gets source="auto", which never rewrites
+// the metric line (see applyServerMappings) until a human reviews and
+// promotes it to "manual".
+type DiscoveredApp struct {
+	DisplayName string
+	Category    string
+}
+
+// BatchAutoInsertMappings inserts multiple unknown exe names in a single query,
+// seeding display_name/category from the agent-reported hint when available
+// and falling back to the raw exe name / "Unknown" when it isn't.
 // Uses ON CONFLICT DO NOTHING so existing entries are unaffected.
-func (s *Store) BatchAutoInsertMappings(ctx context.Context, exeNames map[string]bool) error {
-	if len(exeNames) == 0 {
+func (s *Store) BatchAutoInsertMappings(ctx context.Context, discovered map[string]DiscoveredApp) error {
+	if len(discovered) == 0 {
 		return nil
 	}
-	args := make([]interface{}, 0, len(exeNames))
-	placeholders := make([]string, 0, len(exeNames))
+	args := make([]interface{}, 0, len(discovered)*3)
+	placeholders := make([]string, 0, len(discovered))
 	i := 1
-	for name := range exeNames {
-		placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, 'Unknown', '', '', 'auto', false)", i, i))
-		args = append(args, name)
-		i++
+	for name, hint := range discovered {
+		display := hint.DisplayName
+		if display == "" {
+			display = name
+		}
+		category := hint.Category
+		if category == "" {
+			category = "Unknown"
+		}
+		placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d, '', '', 'auto', false)", i, i+1, i+2))
+		args = append(args, name, display, category)
+		i += 3
 	}
 	query := `INSERT INTO software_mappings (exe_name, display_name, category, publisher, family, source, ignored) VALUES ` +
 		strings.Join(placeholders, ", ") +

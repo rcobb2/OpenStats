@@ -2,7 +2,9 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -22,6 +24,41 @@ type MappingRequest struct {
 	Ignored     bool   `json:"ignored"`
 }
 
+// validCategories is the closed set of categories a human can assign through
+// the portal or CLI. It exists because free-text entry produced "Productive"
+// and "business" sitting alongside "Productivity" and "Business" — typos that
+// silently split an app's usage across two buckets in any category rollup.
+// It intentionally does NOT constrain what an agent reports on a metric line
+// (agent/configs/software-map.json uses a different, richer taxonomy) — those
+// land as source="auto" hints that never rewrite metrics until a human edits
+// them through this validated path.
+var validCategories = map[string]bool{
+	"":              true, // uncategorized is allowed; typos are not
+	"AI":            true,
+	"Browser":       true,
+	"Business":      true,
+	"Communication": true,
+	"Creative":      true,
+	"Management":    true,
+	"Music":         true,
+	"Productivity":  true,
+	"Programming":   true,
+	"Scientific":    true,
+	"Utility":       true,
+	"Unknown":       true,
+}
+
+func validCategoryNames() []string {
+	names := make([]string, 0, len(validCategories))
+	for c := range validCategories {
+		if c != "" {
+			names = append(names, c)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // GetAgentMappings godoc
 // @Summary      Get mappings for agents
 // @Description  Returns all software mappings in the format agents expect (software-map.json compatible). Agents poll this endpoint via mappingUpdateURL.
@@ -37,6 +74,17 @@ func (s *Server) GetAgentMappings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// ListMappingCategories godoc
+// @Summary      List valid mapping categories
+// @Description  Returns the closed set of categories the portal/CLI accept when creating or editing a mapping.
+// @Tags         mappings
+// @Produce      json
+// @Success      200  {array}  string
+// @Router       /api/v1/mappings/categories [get]
+func (s *Server) ListMappingCategories(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, validCategoryNames())
 }
 
 // ListMappings godoc
@@ -78,6 +126,11 @@ func (s *Server) CreateMapping(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "exeName and displayName are required")
 		return
 	}
+	if !validCategories[req.Category] {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid category %q; must be one of: %s",
+			req.Category, strings.Join(validCategoryNames(), ", ")))
+		return
+	}
 
 	m := &store.SoftwareMapping{
 		ExeName:     req.ExeName,
@@ -112,6 +165,11 @@ func (s *Server) UpdateMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ExeName == "" || req.DisplayName == "" {
 		writeError(w, http.StatusBadRequest, "exeName and displayName are required")
+		return
+	}
+	if !validCategories[req.Category] {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid category %q; must be one of: %s",
+			req.Category, strings.Join(validCategoryNames(), ", ")))
 		return
 	}
 
