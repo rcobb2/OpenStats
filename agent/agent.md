@@ -184,16 +184,20 @@ net stop OpenLabStats
 
 The agent provides several CLI commands for querying status and configuration:
 
+These are bare subcommands, not flags — `main.go` matches `os.Args[1]` literally, so a
+dash-prefixed form like `--status` is not recognized and instead starts the agent in
+console mode.
+
 | Command | Description |
 |---------|-------------|
-| `--version` | Print agent version |
-| `--serveraddress` | Print configured server URL |
-| `--building` | Print configured building |
-| `--room` | Print configured room |
-| `--heartbeat` | Print heartbeat interval (from server settings) |
-| `--maintenancewindow` | Print maintenance window status and configured times |
-| `--setmaintenance <val>` | Set maintenance override (`true`, `false`, or `auto`) |
-| `--status` | Print full agent status (version, building, room, server, heartbeat, maintenance) |
+| `version` | Print agent version |
+| `serveraddress` | Print configured server URL (after registry overrides) |
+| `building` | Print configured building |
+| `room` | Print configured room |
+| `heartbeat` | Print heartbeat interval (from server settings) |
+| `maintenancewindow` | Print maintenance window status and configured times |
+| `setmaintenance <val>` | Set maintenance override (`true`, `false`, or `auto`) |
+| `status` | Print full agent status (version, building, room, server, heartbeat, maintenance) |
 
 ### Examples
 
@@ -226,21 +230,76 @@ The agent can be deployed via MSI with full support for silent installation and 
 
 | Property | Description | Default |
 |----------|-------------|---------|
-| `SERVERADDRESS` | URL of the central management server | `""` |
+| `SERVERADDRESS` | URL of the central management server — **must include the scheme** | `""` |
 | `PORT` | Prometheus metrics scrape port | `9183` |
 | `BUILDING` | Lab building name for auto-assignment | `""` |
 | `ROOM` | Lab room number for auto-assignment | `""` |
+| `MAPPINGUPDATEURL` | Override the mapping URL (derived from `SERVERADDRESS` by default) | `""` |
 | `INSTALLDIR` | Custom installation path | `C:\Program Files\OpenLabStats` |
 
 ### Silent Install Examples
 
 ```powershell
 # Standard install with server enrollment
-msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="http://openlabstats.campus.edu:8080"
+msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="https://openlabstats.campus.edu"
 
 # Install with automatic lab and room assignment
-msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="http://server:8080" BUILDING="Science Hall" ROOM="302"
+msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="https://server.campus.edu" BUILDING="Science Hall" ROOM="302"
 ```
+
+### How Configuration Is Applied
+
+The MSI records its properties under `HKLM\SOFTWARE\OpenLabStats` using native WiX
+`RegistryValue` elements. At startup the agent reads that key and layers the values over
+`agent.yaml` (`internal/config/override_windows.go`); a non-empty registry value wins,
+and a missing key is normal for hand-configured installs.
+
+| Registry value | From property |
+|---|---|
+| `ServerAddress` | `SERVERADDRESS` |
+| `MappingUpdateURL` | `MAPPINGUPDATEURL`, else `SERVERADDRESS` + `/api/v1/mappings/agent` |
+| `Port` | `PORT` |
+| `Building` | `BUILDING` |
+| `Room` | `ROOM` |
+| `InstalledVersion` | `ProductVersion` (recorded for support) |
+
+This replaced a deferred PowerShell custom action that regex-patched `agent.yaml` with
+`Return="ignore"`. Because failures were ignored, a blocked or failing PowerShell left
+`reportURL` empty while msiexec still reported success — the agent installed, the service
+started, and it silently never registered. Registry writes are transactional and roll back.
+
+### Fleet Deployment (SCCM / Intune / GPO)
+
+> **`SERVERADDRESS` must include the scheme.** A bare hostname is the one mistake that
+> reliably produces a fleet of agents that install successfully and never register: every
+> request fails with `unsupported protocol scheme ""`, and the failure is only visible in
+> the agent's own log. An Academic SCCM rollout was lost to exactly this.
+
+```powershell
+msiexec /i "openlabstats-agent-<version>.msi" /qn REBOOT=ReallySuppress ^
+    SERVERADDRESS="https://openstats.colgate.edu" ^
+    BUILDING="Case Library" ROOM="204" ^
+    /l*v C:\Windows\Temp\openlabstats-install.log
+```
+
+Recent agents normalize a scheme-less address as a safety net, but do not rely on it —
+older agents already in the field cannot.
+
+**Verify a pilot machine before rolling out to a collection:**
+
+```powershell
+# 1. The installer recorded what you passed
+reg query "HKLM\SOFTWARE\OpenLabStats"
+
+# 2. The agent resolved it (should print an absolute URL)
+& "C:\Program Files\OpenLabStats\openlabstats-agent.exe" serveraddress
+
+# 3. The server saw it — the host should appear with a fresh lastSeen
+curl "https://openstats.colgate.edu/api/v1/agents"
+```
+
+A successful `msiexec` exit code alone is **not** evidence of enrollment. Confirm the
+machine appears in the portal before scaling out.
 
 ### Auto-Registration Logic
 

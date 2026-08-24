@@ -14,10 +14,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rcobb/openlabstats-agent/internal/urlutil"
 )
 
 // AgentVersion is the single source of truth for the agent version string.
-// Also update the installer WiX version in agent/installer/openlabstats.wxs when bumping.
+// The installer picks it up automatically: agent/installer/build.ps1 greps this
+// constant and passes -d Version=... to WiX, which Package.wxs consumes as
+// $(var.Version). No second edit is needed. (The file this comment used to name,
+// openlabstats.wxs, does not exist — the manifest is Package.wxs.)
 const AgentVersion = "0.2.0"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
@@ -82,33 +87,11 @@ func (c *Client) WithUserPolicyHandler(fn func(*UserPolicy)) *Client {
 	return c
 }
 
-// NormalizeServerURL turns an admin-supplied server address into a usable base
-// URL. Two shapes used to break the agent silently:
-//
-//   - A bare hostname ("openstats.colgate.edu") — the installer UI suggested
-//     exactly this. Every request then fails with `unsupported protocol
-//     scheme ""`, and isTrustedUpdateHost sees an empty hostname, so the agent
-//     neither registers nor self-updates.
-//   - A trailing slash — paths become "//api/v1/...".
-//
-// A scheme-less address is assumed to be https; write the scheme explicitly
-// for plain-HTTP servers (e.g. "http://localhost:8080").
+// NormalizeServerURL is retained here as the enrollment-facing entry point;
+// the implementation lives in internal/urlutil so internal/config can apply the
+// same rules to installer-supplied registry values.
 func NormalizeServerURL(raw string) string {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return ""
-	}
-	if !strings.Contains(s, "://") {
-		s = "https://" + s
-	}
-	u, err := neturl.Parse(s)
-	if err != nil || u.Host == "" {
-		return strings.TrimRight(s, "/")
-	}
-	u.Path = strings.TrimRight(u.Path, "/")
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
+	return urlutil.NormalizeServerURL(raw)
 }
 
 // NewClient creates a new enrollment client.

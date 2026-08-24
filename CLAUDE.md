@@ -169,15 +169,29 @@ Deleting agents, forcing agent updates, and writing fleet settings are deliberat
 
 ### Version Bump
 - Single source of truth: `enrollment.AgentVersion` in `agent/internal/enrollment/client.go`. `main.go` references it — no second edit needed.
-- Also update the WiX version in `agent/installer/openlabstats.wxs`.
+- The installer version is derived automatically: `agent/installer/build.ps1` greps `AgentVersion` and passes `-d Version=...` to WiX. No second edit needed. (There is no `openlabstats.wxs`; the manifest is `agent/installer/Package.wxs`.)
 
 ## MSI Installer
 
 Silent install with auto-lab assignment:
 ```powershell
-msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="http://server:8080" BUILDING="Science Hall" ROOM="302"
+msiexec /i openlabstats-agent.msi /qn SERVERADDRESS="https://openstats.colgate.edu" BUILDING="Science Hall" ROOM="302"
 ```
 If `BUILDING` and `ROOM` are provided and no matching lab exists, the server auto-creates it on first registration.
+
+**`SERVERADDRESS` must include the scheme.** A bare hostname makes every agent request fail
+with `unsupported protocol scheme ""`, so agents install successfully and never register —
+this cost an entire Academic SCCM rollout. Newer agents normalize it as a safety net; agents
+already in the field do not.
+
+The MSI applies its properties by writing `HKLM\SOFTWARE\OpenLabStats` via native WiX
+`RegistryValue`; the agent layers that over `agent.yaml` in
+`agent/internal/config/override_windows.go`. Do **not** reintroduce a PowerShell custom
+action to patch YAML — the previous one used `Return="ignore"`, so failures were invisible
+and left agents unconfigured while msiexec reported success.
+
+A successful msiexec exit code is not evidence of enrollment. Verify against
+`/api/v1/agents` before scaling a deployment out. See `agent/agent.md` for the pilot checks.
 
 ## Ports (Docker stack)
 

@@ -6,6 +6,9 @@
 *.test
 *.out
 *.msi
+*.pkg
+# WiX build database, emitted alongside every MSI build.
+*.wixpdb
 
 # Go
 go.work
