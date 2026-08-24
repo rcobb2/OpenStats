@@ -94,7 +94,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		r.Route("/mappings", func(r chi.Router) {
 			r.Get("/", s.ListMappings)
 			r.Get("/categories", s.ListMappingCategories) // valid categories for manual entry (add/edit forms)
-			r.Get("/agent", s.GetAgentMappings)            // Agent-facing endpoint (software-map.json format)
+			r.Get("/agent", s.GetAgentMappings)           // Agent-facing endpoint (software-map.json format)
 			r.Post("/", s.CreateMapping)
 			r.Put("/", s.UpdateMapping)
 			r.Delete("/{mappingID}", s.DeleteMapping)
