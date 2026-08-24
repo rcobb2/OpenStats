@@ -110,6 +110,20 @@ function applyAppFilter(data, appFilter) {
   return data.filter(r => r.name.toLowerCase().includes(q));
 }
 
+// Login-derived metrics (device/user login counts, avg session duration) are
+// documented as sparse under 30 days — lab machines are rarely signed out, so
+// increase() over a short window frequently has nothing to show. Rather than
+// let these three panels silently follow the page's short default (24h) and
+// look broken with a single bar, floor their query window to 30 days
+// regardless of the page-level selector. Explicit custom ranges are left
+// alone — a user who picked a specific window asked for that window.
+const LOGIN_METRIC_MIN_RANGE = '30d';
+function floorLoginRange(range) {
+  if (range === 'custom' || range.includes('~')) return range;
+  const days = range.endsWith('d') ? parseInt(range, 10) : range.endsWith('h') ? parseInt(range, 10) / 24 : 0;
+  return days >= 30 ? range : LOGIN_METRIC_MIN_RANGE;
+}
+
 function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const [foreground, setForeground] = useState(null);
   const [launches, setLaunches] = useState(null);
@@ -117,6 +131,9 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const [topUserLogins, setTopUserLogins] = useState(null);
   const [userSessionTime, setUserSessionTime] = useState(null);
   const [avgSession, setAvgSession] = useState(null);
+
+  const loginRange = floorLoginRange(range);
+  const loginRangeFloored = loginRange !== range;
 
   useEffect(() => {
     setForeground(null);
@@ -130,15 +147,19 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
       .then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
     getTopAppsByLaunches(range, 10, filters)
       .then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches(false));
-    getTopDevicesBySessions(range, 10, filters)
+    getTopDevicesBySessions(loginRange, 10, filters)
       .then(r => setTopDevices(parsePromVector(r, 'hostname'))).catch(() => setTopDevices(false));
-    getTopUsersByLogins(range, 10, filters)
+    getTopUsersByLogins(loginRange, 10, filters)
       .then(r => setTopUserLogins(parsePromVector(r, 'user'))).catch(() => setTopUserLogins(false));
     getTopUsersBySessionTime(range, 10, filters)
       .then(r => setUserSessionTime(parsePromVector(r, 'user'))).catch(() => setUserSessionTime(false));
-    getAvgSessionTime(range, 10, filters)
+    getAvgSessionTime(loginRange, 10, filters)
       .then(r => setAvgSession(parsePromVector(r, 'user'))).catch(() => setAvgSession(false));
-  }, [range, filters]);
+  }, [range, loginRange, filters]);
+
+  const loginSubtitle = loginRangeFloored
+    ? 'Logins are sparse — showing last 30 days regardless of the range above'
+    : undefined;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -151,10 +172,10 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
         </ChartCard>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
-        <ChartCard title="Top 10 Most Signed-In Devices">
+        <ChartCard title="Top 10 Most Signed-In Devices" subtitle={loginSubtitle}>
           <HBarChart data={topDevices} valueLabel="logins" roundValues height={300} />
         </ChartCard>
-        <ChartCard title="Top 10 Users by Login Count">
+        <ChartCard title="Top 10 Users by Login Count" subtitle={loginSubtitle}>
           <HBarChart data={topUserLogins} valueLabel="logins" roundValues height={300} />
         </ChartCard>
       </div>
@@ -162,7 +183,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
         <ChartCard title="Top 10 Users by Total Session Time">
           <HBarChart data={userSessionTime} valueLabel="hours" height={300} />
         </ChartCard>
-        <ChartCard title="Average Session Duration per User">
+        <ChartCard title="Average Session Duration per User" subtitle={loginSubtitle}>
           <HBarChart data={avgSession} valueLabel="minutes" height={300} />
         </ChartCard>
       </div>
