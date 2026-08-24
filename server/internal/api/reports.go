@@ -920,9 +920,36 @@ func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Requ
 	s.respondUserTotals(w, totals, q.Get("format"), limit)
 }
 
+// minLoginsForAvgSession is the smallest login count treated as a large
+// enough sample to report an average. seconds/logins is total accrued
+// signed-in time divided by count of discrete new-login *events* — for a
+// shared/kiosk account that's rarely signed all the way out, that count can
+// be 1 or 2 while the account stayed signed in for days, producing an
+// "average session" of a week-plus that no one actually experienced as one
+// sitting (found via genchem: 1 login, 191.87 accrued hours -> an 11,506
+// minute "average"). Below this floor a user is omitted from this report
+// entirely rather than shown with a misleading number; their total time and
+// login count still appear correctly in the other two reports.
+const minLoginsForAvgSession = 3
+
+// computeAvgSessionMinutes divides accrued session seconds by login count per
+// canonical user, in minutes. A user with an ongoing session but no fresh
+// login inside the window has a zero denominator and is omitted rather than
+// reported as infinite; a user below minLogins is omitted for being too
+// small a sample to average meaningfully (see minLoginsForAvgSession).
+func computeAvgSessionMinutes(seconds, logins map[string]float64, minLogins float64) map[string]float64 {
+	avgMinutes := make(map[string]float64, len(seconds))
+	for user, secs := range seconds {
+		if count := logins[user]; count >= minLogins {
+			avgMinutes[user] = secs / count / 60
+		}
+	}
+	return avgMinutes
+}
+
 // ReportAvgSessionTime godoc
 // @Summary      Average session duration per user
-// @Description  Returns top N users ranked by average session duration in minutes.
+// @Description  Returns top N users ranked by average session duration in minutes. Users with fewer than minLoginsForAvgSession logins in the window are omitted — too small a sample to average meaningfully.
 // @Tags         reports
 // @Produce      json
 // @Param        range    query  string  false  "Time range"  default(24h)
@@ -968,14 +995,7 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Users with an ongoing session but no fresh login inside the window have a
-	// zero denominator and are skipped rather than reported as infinite.
-	avgMinutes := make(map[string]float64, len(seconds))
-	for user, secs := range seconds {
-		if count := logins[user]; count > 0 {
-			avgMinutes[user] = secs / count / 60
-		}
-	}
+	avgMinutes := computeAvgSessionMinutes(seconds, logins, minLoginsForAvgSession)
 	s.respondUserTotals(w, avgMinutes, q.Get("format"), limit)
 }
 

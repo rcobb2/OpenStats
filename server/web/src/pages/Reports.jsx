@@ -160,6 +160,11 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const loginSubtitle = loginRangeFloored
     ? 'Logins are sparse — showing last 30 days regardless of the range above'
     : undefined;
+  // Users with under 3 logins in the window are omitted server-side — total
+  // accrued time divided by 1-2 discrete sign-ins produces a distorted
+  // "average" for shared/kiosk accounts that rarely sign fully out.
+  const avgSessionSubtitle = [loginSubtitle, 'Users with under 3 logins in the window are omitted']
+    .filter(Boolean).join('. ');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -183,7 +188,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
         <ChartCard title="Top 10 Users by Total Session Time">
           <HBarChart data={userSessionTime} valueLabel="hours" height={300} />
         </ChartCard>
-        <ChartCard title="Average Session Duration per User" subtitle={loginSubtitle}>
+        <ChartCard title="Average Session Duration per User" subtitle={avgSessionSubtitle}>
           <HBarChart data={avgSession} valueLabel="minutes" height={300} />
         </ChartCard>
       </div>
