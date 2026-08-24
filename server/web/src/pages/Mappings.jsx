@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getMappings, createMapping, updateMapping, deleteMapping, patchMappingIgnore } from '../api';
+import { getMappings, getMappingCategories, createMapping, updateMapping, deleteMapping, patchMappingIgnore } from '../api';
 import ResizableTable from '../components/Table';
 
 const EMPTY_FORM = { exeName: '', displayName: '', category: '', publisher: '', family: '' };
 
 export default function Mappings() {
   const [mappings, setMappings] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [tab, setTab] = useState('all');
   const [filter, setFilter] = useState('');
   const [form, setForm] = useState(EMPTY_FORM);
@@ -21,6 +22,12 @@ export default function Mappings() {
   );
 
   useEffect(() => { load(); }, [load]);
+  // Fixed vocabulary from the server — a free-text category field is what
+  // produced "Productive"/"business" typos sitting alongside the real
+  // categories. Loaded once; the server is the single source of truth.
+  useEffect(() => {
+    getMappingCategories().then(data => setCategories(data || [])).catch(() => {});
+  }, []);
 
   const reviewCount = mappings.filter(m => m.source === 'auto' && !m.ignored).length;
   const ignoredCount = mappings.filter(m => m.ignored).length;
@@ -115,8 +122,11 @@ export default function Mappings() {
             onChange={e => setForm({ ...form, exeName: e.target.value })} required />
           <input placeholder="Display name" value={form.displayName}
             onChange={e => setForm({ ...form, displayName: e.target.value })} required />
-          <input placeholder="Category" value={form.category}
-            onChange={e => setForm({ ...form, category: e.target.value })} />
+          <select value={form.category}
+            onChange={e => setForm({ ...form, category: e.target.value })}>
+            <option value="">Category&hellip;</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
           <input placeholder="Publisher" value={form.publisher}
             onChange={e => setForm({ ...form, publisher: e.target.value })} />
           <input placeholder="Family key" value={form.family}
@@ -180,11 +190,14 @@ export default function Mappings() {
                 />
               </td>
               <td>
-                <input
+                <select
                   value={editForm.category}
                   onChange={e => setEditForm({ ...editForm, category: e.target.value })}
                   style={{ width: '100%' }}
-                />
+                >
+                  <option value="">Category&hellip;</option>
+                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </td>
               <td>
                 <input

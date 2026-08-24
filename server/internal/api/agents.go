@@ -339,7 +339,7 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 	// Apply server-side mapping rewrite: rename app/category labels for manually-reviewed
 	// entries, drop ignored exe lines, and auto-insert unknown exe names for admin review.
 	if mappings, err := s.store.GetMappingsMap(r.Context()); err == nil {
-		var unknown map[string]bool
+		var unknown map[string]store.DiscoveredApp
 		body, unknown = applyServerMappings(body, mappings)
 		if err := s.store.BatchAutoInsertMappings(r.Context(), unknown); err != nil {
 			s.logger.Warn("failed to auto-insert mappings", "count", len(unknown), "error", err)
@@ -440,11 +440,16 @@ func promLabelEscape(s string) string {
 }
 
 // applyServerMappings rewrites app/category labels using DB mappings, drops
-// ignored exe lines, and returns exe names not yet in the DB.
+// ignored exe lines, and returns exe names not yet in the DB along with the
+// app/category labels the agent already attached to them — the agent has
+// already run its own software-map.json/PE-metadata resolution, so an unknown
+// exe is rarely actually blank; seeding the auto-inserted row from that
+// instead of a placeholder is what lets a recognized app land pre-categorized
+// instead of starting every host's review queue from scratch.
 // Only source="manual" mappings trigger rewrites; source="auto" entries are
 // tracked for admin review without altering metric values.
-func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping) ([]byte, map[string]bool) {
-	unknown := make(map[string]bool)
+func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping) ([]byte, map[string]store.DiscoveredApp) {
+	unknown := make(map[string]store.DiscoveredApp)
 	var out bytes.Buffer
 	out.Grow(len(body))
 
@@ -474,7 +479,12 @@ func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping
 
 		m, found := mappings[strings.ToLower(exeName)]
 		if !found {
-			unknown[exeName] = true
+			if _, seen := unknown[exeName]; !seen {
+				unknown[exeName] = store.DiscoveredApp{
+					DisplayName: extractPromLabelValue(labelSet, "app"),
+					Category:    extractPromLabelValue(labelSet, "category"),
+				}
+			}
 			out.Write(line)
 			out.WriteByte('\n')
 			continue

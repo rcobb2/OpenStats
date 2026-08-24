@@ -34,6 +34,7 @@ export const deleteLab = (id) => request(`/labs/${id}`, { method: 'DELETE' });
 
 // Mappings
 export const getMappings = () => request('/mappings');
+export const getMappingCategories = () => request('/mappings/categories');
 export const createMapping = (data) => request('/mappings', { method: 'POST', body: JSON.stringify(data) });
 export const updateMapping = (data) => request('/mappings', { method: 'PUT', body: JSON.stringify(data) });
 export const deleteMapping = (id) => request(`/mappings/${id}`, { method: 'DELETE' });
