@@ -23,3 +23,16 @@ scrape_configs:
     metrics_path: /metrics/agents
     static_configs:
       - targets: ['openstats-server:8080']
+    # openlabstats_installed_software_info is a per-(name,version,publisher,hostname)
+    # inventory gauge — one series per installed program per machine. At ~22k series
+    # (56% of total TSDB on a ~600-agent fleet) it dominates ingestion/indexing load
+    # and was measured adding ~2s of Prometheus query "prepare_time" to every report
+    # panel, even though no report query touches it. Nothing currently queries this
+    # Prometheus from Grafana in production (see git history for the investigation),
+    # so drop it at ingestion rather than storing it. If per-device software inventory
+    # reporting becomes a real feature, re-add with only {name, hostname} labels
+    # (drop `version`/`publisher`) instead of restoring this.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'openlabstats_installed_software_info'
+        action: drop
