@@ -205,6 +205,30 @@ type settings struct {
 	MinAgentVersion          string `json:"minAgentVersion"`
 	MaintenanceWindowStart   string `json:"maintenanceWindowStart"`
 	MaintenanceWindowEnd     string `json:"maintenanceWindowEnd"`
+	AutoUpdateEnabled        bool   `json:"autoUpdateEnabled"`
+	RolloutMaxConcurrent     int    `json:"rolloutMaxConcurrent"`
+	RolloutGraceSeconds      int    `json:"rolloutGraceSeconds"`
+	TargetAgentVersion       string `json:"targetAgentVersion"`
+}
+
+// rolloutStatus mirrors GET /agents/rollout-status.
+type rolloutStatus struct {
+	AutoUpdateEnabled  bool              `json:"autoUpdateEnabled"`
+	MaxConcurrent      int               `json:"maxConcurrent"`
+	GracePeriodSeconds int               `json:"gracePeriodSeconds"`
+	TargetPin          string            `json:"targetPin"`
+	InFlightGlobal     int               `json:"inFlightGlobal"`
+	Platforms          []rolloutPlatform `json:"platforms"`
+}
+
+type rolloutPlatform struct {
+	Platform  string         `json:"platform"`
+	Target    string         `json:"target"`
+	Total     int            `json:"total"`
+	Updated   int            `json:"updated"`
+	Updating  int            `json:"updating"`
+	Pending   int            `json:"pending"`
+	ByVersion map[string]int `json:"byVersion"`
 }
 
 // promVector is the instant-vector shape every report endpoint returns.

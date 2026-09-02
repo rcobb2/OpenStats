@@ -72,9 +72,33 @@ Confirm with the user before writing when the request is ambiguous about which
 account or app is meant — an ignore rule silently removes a user from every
 report, and that is easy to misattribute later.
 
-**Not available on purpose:** deleting agents, forcing agent updates, and writing
-fleet settings. If asked, point at the web portal rather than reaching for
-`curl` — these are disruptive and easy to trigger from a mistaken premise.
+## Staggered auto-update rollout
+
+`rollout` is the one settings-write the CLI exposes, for driving a controlled
+fleet update. The server hands the newest published installer to a bounded number
+of below-target agents at a time (per platform), only inside the maintenance
+window; publishing a GitHub release makes it available automatically (the server
+polls for new installers). `status` is read-only; `enable` prompts before it
+starts updating real machines.
+
+```bash
+openstatsctl rollout status                       # progress per platform
+openstatsctl rollout enable --max 5               # start; prompts (add --yes to skip)
+openstatsctl rollout enable --max 5 --window 22:00-04:00   # only overnight
+openstatsctl rollout set --max 20                 # go faster once it looks healthy
+openstatsctl rollout enable --target 0.4.0        # pin a version (pause/rollback lever)
+openstatsctl rollout disable                      # pause — in-flight installs finish
+```
+
+Start low (`--max 5`), confirm the first cohort reaches the target in
+`rollout status`, then raise `--max`. To stop a rollout, `disable` (or pin
+`--target` to a version at/below the fleet). A brand-new agent version only rolls
+out once its release is published and its installer has landed on the server.
+
+**Not available on purpose:** deleting agents and forcing a single agent's update.
+For those, point at the web portal rather than reaching for `curl` — they are
+disruptive and easy to trigger from a mistaken premise. (General settings writes
+beyond `rollout` are likewise portal-only.)
 
 ## What to know before interpreting the numbers
 

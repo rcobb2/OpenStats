@@ -2,20 +2,74 @@
 // agents and people alike: every subcommand prints an aligned table by default
 // and raw JSON with --json.
 //
-// It deliberately exposes reads plus low-risk writes only. Deleting an agent,
-// forcing a fleet update, and changing fleet settings are reachable through the
-// REST API and the web portal, and are left out here on purpose — an agent
-// working from a mistaken premise should not be able to disrupt the fleet. See
+// It deliberately exposes reads plus low-risk writes only. Deleting an agent and
+// forcing a single agent's update are left out on purpose — an agent working
+// from a mistaken premise should not be able to disrupt the fleet. The one
+// settings-write it does expose is the `rollout` command group (staggered
+// auto-update controls), which is confirm-gated for the disruptive `enable`. See
 // the "excluded" note in usage().
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 )
+
+// confirm prompts on stderr and returns true only for an affirmative answer.
+func confirm(prompt string) bool {
+	fmt.Fprintf(os.Stderr, "%s [y/N] ", prompt)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	line = strings.ToLower(strings.TrimSpace(line))
+	return line == "y" || line == "yes"
+}
+
+// parseWindow splits "HH:MM-HH:MM" into start and end. An empty string clears the
+// window (returns "", "" → updates allowed any time).
+func parseWindow(v string) (string, string, error) {
+	if strings.TrimSpace(v) == "" || v == "none" {
+		return "", "", nil
+	}
+	parts := strings.SplitN(v, "-", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("--window must be HH:MM-HH:MM (or 'none' to clear)")
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
+}
+
+// formatVersionCounts renders a byVersion map as "0.1.10×394, 0.4.0×12", newest
+// counts first by size.
+func formatVersionCounts(m map[string]int) string {
+	if len(m) == 0 {
+		return "-"
+	}
+	type vc struct {
+		v string
+		n int
+	}
+	list := make([]vc, 0, len(m))
+	for v, n := range m {
+		list = append(list, vc{v, n})
+	}
+	for i := 1; i < len(list); i++ {
+		for j := i; j > 0 && list[j].n > list[j-1].n; j-- {
+			list[j], list[j-1] = list[j-1], list[j]
+		}
+	}
+	parts := make([]string, 0, len(list))
+	for _, e := range list {
+		parts = append(parts, fmt.Sprintf("%s×%d", e.v, e.n))
+	}
+	return strings.Join(parts, ", ")
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -58,6 +112,8 @@ func dispatch(c *client, args []string) error {
 		return cmdReports(c, args[1:])
 	case "settings":
 		return cmdSettings(c, args[1:])
+	case "rollout":
+		return cmdRollout(c, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q (try: openstatsctl help)", args[0])
 	}
@@ -562,13 +618,188 @@ func cmdReports(c *client, args []string) error {
 
 func cmdSettings(c *client, args []string) error {
 	if len(args) == 0 || args[0] != "get" {
-		return fmt.Errorf("usage: openstatsctl settings get  (writes are intentionally not supported)")
+		return fmt.Errorf("usage: openstatsctl settings get  (general writes are intentionally not supported; use `rollout` for auto-update controls)")
 	}
 	var s settings
 	if err := c.get("/settings", nil, &s); err != nil {
 		return err
 	}
 	return emitJSON(s)
+}
+
+// --- rollout: staggered auto-update controls ---
+//
+// This is the one settings-write path the CLI deliberately exposes, because a
+// controlled, confirm-gated command is safer for driving a fleet rollout than
+// hand-editing the whole settings object. It GET-modifies-PUTs so unrelated
+// settings are preserved. `enable` prompts for confirmation (it starts updating
+// real machines) unless --yes is passed; `status`/`disable`/`set` do not update
+// machines and are unprompted.
+func cmdRollout(c *client, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: openstatsctl rollout status|enable|disable|set [flags]")
+	}
+	switch args[0] {
+	case "status":
+		return rolloutStatusCmd(c, args[1:])
+	case "enable":
+		return rolloutEnableCmd(c, args[1:])
+	case "disable":
+		return rolloutDisableCmd(c, args[1:])
+	case "set":
+		return rolloutSetCmd(c, args[1:])
+	default:
+		return fmt.Errorf("unknown rollout subcommand %q (try: status, enable, disable, set)", args[0])
+	}
+}
+
+func rolloutStatusCmd(c *client, args []string) error {
+	var rs rolloutStatus
+	if err := c.get("/agents/rollout-status", nil, &rs); err != nil {
+		return err
+	}
+	if hasFlag(args, "--json") {
+		return emitJSON(rs)
+	}
+	state := "OFF (fleet frozen)"
+	if rs.AutoUpdateEnabled {
+		state = "ON"
+	}
+	maxc := "unlimited"
+	if rs.MaxConcurrent > 0 {
+		maxc = fmt.Sprintf("%d", rs.MaxConcurrent)
+	}
+	fmt.Printf("auto-update: %s   max concurrent: %s   installing now: %d   grace: %ds\n",
+		state, maxc, rs.InFlightGlobal, rs.GracePeriodSeconds)
+	if rs.TargetPin != "" {
+		fmt.Printf("target pin:  %s\n", rs.TargetPin)
+	}
+	fmt.Println()
+	t := newTable("PLATFORM", "TARGET", "UPDATED", "UPDATING", "PENDING", "TOTAL", "VERSIONS")
+	for _, p := range rs.Platforms {
+		t.add(p.Platform, orDash(p.Target),
+			fmt.Sprintf("%d", p.Updated), fmt.Sprintf("%d", p.Updating),
+			fmt.Sprintf("%d", p.Pending), fmt.Sprintf("%d", p.Total),
+			formatVersionCounts(p.ByVersion))
+	}
+	t.render(os.Stdout)
+	return nil
+}
+
+func rolloutEnableCmd(c *client, args []string) error {
+	var s settings
+	if err := c.get("/settings", nil, &s); err != nil {
+		return err
+	}
+	s.AutoUpdateEnabled = true
+	if v := flagValue(args, "--max"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("--max must be a non-negative integer (0 = unlimited)")
+		}
+		s.RolloutMaxConcurrent = n
+	}
+	if v := flagValue(args, "--target"); v != "" {
+		s.TargetAgentVersion = v // pin
+	}
+	if hasFlag(args, "--no-target") {
+		s.TargetAgentVersion = "" // clear pin → auto-track latest
+	}
+	if v := flagValue(args, "--window"); v != "" {
+		start, end, err := parseWindow(v)
+		if err != nil {
+			return err
+		}
+		s.MaintenanceWindowStart, s.MaintenanceWindowEnd = start, end
+	}
+
+	// Show what's about to happen against the live fleet before committing.
+	var rs rolloutStatus
+	if err := c.get("/agents/rollout-status", nil, &rs); err == nil {
+		pending := 0
+		for _, p := range rs.Platforms {
+			pending += p.Pending
+		}
+		maxc := "unlimited"
+		if s.RolloutMaxConcurrent > 0 {
+			maxc = fmt.Sprintf("%d", s.RolloutMaxConcurrent)
+		}
+		win := "any time (no window set)"
+		if s.MaintenanceWindowStart != "" && s.MaintenanceWindowEnd != "" {
+			win = s.MaintenanceWindowStart + "–" + s.MaintenanceWindowEnd
+		}
+		tgt := "auto (newest installer)"
+		if s.TargetAgentVersion != "" {
+			tgt = s.TargetAgentVersion
+		}
+		fmt.Printf("About to ENABLE auto-update on %s:\n", c.baseURL)
+		fmt.Printf("  target:         %s\n", tgt)
+		fmt.Printf("  max concurrent: %s\n", maxc)
+		fmt.Printf("  window:         %s\n", win)
+		fmt.Printf("  agents pending: %d will begin updating\n", pending)
+	}
+	if !hasFlag(args, "--yes") && !confirm("Start the rollout?") {
+		fmt.Println("aborted.")
+		return nil
+	}
+	if err := c.send(http.MethodPut, "/settings", s); err != nil {
+		return err
+	}
+	fmt.Println("✓ auto-update enabled. Watch progress with: openstatsctl rollout status")
+	return nil
+}
+
+func rolloutDisableCmd(c *client, args []string) error {
+	var s settings
+	if err := c.get("/settings", nil, &s); err != nil {
+		return err
+	}
+	s.AutoUpdateEnabled = false
+	if err := c.send(http.MethodPut, "/settings", s); err != nil {
+		return err
+	}
+	fmt.Println("✓ auto-update disabled. In-flight installs finish; no new agents will be offered.")
+	return nil
+}
+
+func rolloutSetCmd(c *client, args []string) error {
+	var s settings
+	if err := c.get("/settings", nil, &s); err != nil {
+		return err
+	}
+	changed := false
+	if v := flagValue(args, "--max"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("--max must be a non-negative integer (0 = unlimited)")
+		}
+		s.RolloutMaxConcurrent = n
+		changed = true
+	}
+	if v := flagValue(args, "--target"); v != "" {
+		s.TargetAgentVersion = v
+		changed = true
+	}
+	if hasFlag(args, "--no-target") {
+		s.TargetAgentVersion = ""
+		changed = true
+	}
+	if v := flagValue(args, "--window"); v != "" {
+		start, end, err := parseWindow(v)
+		if err != nil {
+			return err
+		}
+		s.MaintenanceWindowStart, s.MaintenanceWindowEnd = start, end
+		changed = true
+	}
+	if !changed {
+		return fmt.Errorf("nothing to set (try --max N, --target V, --no-target, --window HH:MM-HH:MM)")
+	}
+	if err := c.send(http.MethodPut, "/settings", s); err != nil {
+		return err
+	}
+	fmt.Println("✓ rollout settings updated.")
+	return nil
 }
 
 // --- flag helpers ---
@@ -675,8 +906,15 @@ Commands:
 
   settings get                            Read fleet settings
 
-Excluded on purpose: deleting agents, forcing agent updates, and writing fleet
-settings. Use the web portal for those — they are disruptive and easy to trigger
-from a mistaken premise.
+  rollout status                          Auto-update progress per platform
+  rollout enable [--max N] [--target V|--no-target] [--window HH:MM-HH:MM] [--yes]
+                                          Turn on staggered auto-update (prompts)
+  rollout disable                         Pause auto-update (in-flight finish)
+  rollout set [--max N] [--target V|--no-target] [--window HH:MM-HH:MM]
+                                          Adjust rollout without toggling
+
+Excluded on purpose: deleting agents and forcing a single agent's update. Use the
+web portal for those. General settings writes are also excluded — the rollout
+group is the one deliberate exception (confirm-gated) for driving a fleet update.
 `)
 }

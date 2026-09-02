@@ -124,7 +124,7 @@ ansible-playbook <infra-repo>/<playbook>.yml --limit podman02
 
 `openstatsctl` (in `server/cmd/openstatsctl/`) is the client for a running deployment — fleet status, reports, users, mappings, labs, plus low-risk writes (ignore/alias users, edit mappings, assign a lab). Build it onto PATH with `cd server && go build -o ../bin/openstatsctl ./cmd/openstatsctl/`. Server resolution: `--server`, then `$OPENSTATS_URL`, then the production default.
 
-Deleting agents, forcing agent updates, and writing fleet settings are deliberately **not** exposed — use the web portal. The `.claude/skills/openstats/` skill wraps the CLI and carries the interpretation caveats (login reports are sparse; shared-account hours exceed wall-clock; built-in ignores can't be cleared).
+Deleting agents and forcing a single agent's update are deliberately **not** exposed — use the web portal. Staggered fleet auto-update *is* exposed via `openstatsctl rollout` (status/enable/disable/set; `enable` is confirm-gated) — the one deliberate settings-write; other settings writes remain portal-only. The `.claude/skills/openstats/` skill wraps the CLI and carries the interpretation caveats (login reports are sparse; shared-account hours exceed wall-clock; built-in ignores can't be cleared).
 
 ## API Contract (Agent ↔ Server)
 
