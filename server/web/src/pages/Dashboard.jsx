@@ -30,6 +30,7 @@ function TopAppsChart({ range }) {
       <BarChart layout="vertical" data={data} margin={{ top: 4, right: 24, bottom: 4, left: 8 }}>
         <XAxis
           type="number"
+          allowDecimals={false}
           tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
           axisLine={{ stroke: 'var(--border)' }}
           tickLine={false}
@@ -48,7 +49,10 @@ function TopAppsChart({ range }) {
           contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
           labelStyle={{ color: 'var(--text)' }}
           formatter={(v, _name, { payload }) => [
-            v.toLocaleString(),
+            // PromQL increase() extrapolates at the query-range edges, so a
+            // real integer launch count can come back as e.g. 95.452 — round
+            // for display; the underlying value isn't fractional.
+            v.toLocaleString(undefined, { maximumFractionDigits: 0 }),
             payload.category || 'launches',
           ]}
         />
