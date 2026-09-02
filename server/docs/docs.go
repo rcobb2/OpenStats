@@ -615,6 +615,29 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/mappings/categories": {
+            "get": {
+                "description": "Returns the closed set of categories the portal/CLI accept when creating or editing a mapping.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mappings"
+                ],
+                "summary": "List valid mapping categories",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/mappings/{mappingID}": {
             "delete": {
                 "tags": [
@@ -728,7 +751,7 @@ const docTemplate = `{
         },
         "/api/v1/reports/avg-session-time": {
             "get": {
-                "description": "Returns top N users ranked by average session duration in minutes.",
+                "description": "Returns top N users ranked by average session duration in minutes. Users with fewer than minLoginsForAvgSession logins in the window are omitted — too small a sample to average meaningfully.",
                 "produces": [
                     "application/json"
                 ],
@@ -755,6 +778,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter to a specific machine",
                         "name": "hostname",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab name",
+                        "name": "lab",
                         "in": "query"
                     }
                 ],
@@ -1015,6 +1044,12 @@ const docTemplate = `{
                         "description": "Filter to a specific machine",
                         "name": "hostname",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab name",
+                        "name": "lab",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1098,6 +1133,12 @@ const docTemplate = `{
                         "description": "Filter to a specific machine",
                         "name": "hostname",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab name",
+                        "name": "lab",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1136,6 +1177,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter to a specific machine",
                         "name": "hostname",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab name",
+                        "name": "lab",
                         "in": "query"
                     }
                 ],

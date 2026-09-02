@@ -168,6 +168,22 @@ func (s *Server) buildHostnameLabMap(ctx context.Context) (map[string]string, er
 	return m, nil
 }
 
+// hostnameMatchesLab reports whether hostname's current DB-assigned lab matches
+// labFilter. An empty labFilter always matches (no filtering requested).
+// Session/login metrics carry no native Prometheus lab label, so callers post-filter
+// with this against the DB-based hostname→lab map (see buildHostnameLabMap) rather
+// than adding a lab= matcher to the PromQL selector.
+func hostnameMatchesLab(hostnameToLab map[string]string, hostname, labFilter string) bool {
+	if labFilter == "" {
+		return true
+	}
+	labName := hostnameToLab[strings.ToLower(hostname)]
+	if labName == "" {
+		labName = "Unassigned"
+	}
+	return strings.EqualFold(labName, labFilter)
+}
+
 // ReportActiveUsers godoc
 // @Summary      Currently active users
 // @Description  Returns users with active sessions right now.
@@ -690,9 +706,11 @@ func (s *Server) writeCSV(w http.ResponseWriter, results []struct {
 }
 
 // buildUserSessionFilters returns a label selector for user session metrics.
-// Session metrics only carry user and hostname labels (no lab), so lab is not filtered.
-// The ignore matcher also purges system and service accounts that accumulated in
-// Prometheus before the agent-side filter covered them.
+// Session metrics only carry user and hostname labels (no lab), so lab cannot be
+// added as a PromQL matcher here — callers that need lab filtering post-filter
+// results against the DB-based hostname→lab map instead (see hostnameMatchesLab,
+// buildHostnameLabMap). The ignore matcher also purges system and service accounts
+// that accumulated in Prometheus before the agent-side filter covered them.
 func (s *Server) buildUserSessionFilters(ctx context.Context, hostname string) string {
 	filters := []string{`user!=""`, s.userPolicy(ctx).IgnoreMatcher()}
 	if v, ok := safeLabelValue(hostname); ok {
@@ -744,17 +762,24 @@ func (s *Server) fetchInstantVector(ctx context.Context, query string, atTime in
 	return result, nil
 }
 
-// sumByCanonicalUser runs a `sum by (user)` query and folds the result into
-// canonical identities, dropping ignored accounts. This is why user-keyed
-// reports cannot use PromQL topk: the merge has to happen before ranking, or a
-// user split across Windows and macOS could be ranked twice — or ranked out.
-func (s *Server) sumByCanonicalUser(ctx context.Context, query string, atTime int64, policy *userid.Policy) (map[string]float64, error) {
+// sumByCanonicalUser runs a `sum by (user, hostname)` query and folds the result
+// into canonical identities, dropping ignored accounts and any hostname outside
+// labFilter (empty labFilter keeps everything — see hostnameMatchesLab). The
+// hostname label must survive the query so lab filtering can happen before the
+// user merge; that's why callers group by (user, hostname) rather than (user).
+// This is also why user-keyed reports cannot use PromQL topk: the merge has to
+// happen before ranking, or a user split across Windows and macOS could be
+// ranked twice — or ranked out.
+func (s *Server) sumByCanonicalUser(ctx context.Context, query string, atTime int64, policy *userid.Policy, hostnameToLab map[string]string, labFilter string) (map[string]float64, error) {
 	raw, err := s.fetchInstantVector(ctx, query, atTime)
 	if err != nil {
 		return nil, err
 	}
 	totals := make(map[string]float64, len(raw.Data.Result))
 	for _, entry := range raw.Data.Result {
+		if !hostnameMatchesLab(hostnameToLab, entry.Metric["hostname"], labFilter) {
+			continue
+		}
 		canonical, ignored := policy.Resolve(entry.Metric["user"])
 		if ignored || canonical == "" || len(entry.Value) < 2 {
 			continue
@@ -816,6 +841,7 @@ func (s *Server) respondUserTotals(w http.ResponseWriter, totals map[string]floa
 // @Param        range    query  string  false  "Time range"  default(24h)
 // @Param        limit    query  int     false  "Max results"  default(10)
 // @Param        hostname query  string  false  "Filter to a specific machine"
+// @Param        lab      query  string  false  "Filter to a specific lab name"
 // @Success      200
 // @Router       /api/v1/reports/top-devices-by-sessions [get]
 func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.Request) {
@@ -832,12 +858,85 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 			limit = parsed
 		}
 	}
-	lf := s.buildUserSessionFilters(r.Context(), q.Get("hostname"))
+	ctx := r.Context()
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		return
+	}
+	labFilter := q.Get("lab")
+
+	// topk() can't be applied in PromQL here: lab filtering has to drop
+	// non-matching hostnames *before* ranking, or a lab's true top-10 could be
+	// pushed out by higher-count hostnames from other labs. So this fetches
+	// every hostname's count and ranks in Go instead (rankHostnamesByValue).
+	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`topk(%d, sum by (hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0)`,
-		limit, lf, timeRange,
+		`sum by (hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0`,
+		lf, timeRange,
 	)
-	s.queryAndRespondAt(w, query, q.Get("format"), atTime)
+	raw, err := s.fetchInstantVector(ctx, query, atTime)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+
+	result := rankHostnamesByValue(raw, hostnameToLab, labFilter, limit)
+
+	if q.Get("format") == "csv" {
+		s.writeCSV(w, result.Data.Result)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// rankHostnamesByValue drops any hostname outside labFilter (see
+// hostnameMatchesLab), then sorts the remaining `sum by (hostname)` samples
+// descending by value and keeps the top `limit`. Filtering has to happen
+// before ranking, not after, or a lab's true top-N could be pushed out by
+// higher-count hostnames from other labs — that's also why this can't be a
+// PromQL topk() the way it used to be before lab filtering existed here.
+func rankHostnamesByValue(raw promQueryInstantResult, hostnameToLab map[string]string, labFilter string, limit int) promQueryInstantResult {
+	type pair struct {
+		hostname string
+		value    float64
+	}
+	pairs := make([]pair, 0, len(raw.Data.Result))
+	for _, entry := range raw.Data.Result {
+		hostname := entry.Metric["hostname"]
+		if !hostnameMatchesLab(hostnameToLab, hostname, labFilter) {
+			continue
+		}
+		if len(entry.Value) < 2 {
+			continue
+		}
+		v, ok := entry.Value[1].(string)
+		if !ok {
+			continue
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f <= 0 {
+			continue
+		}
+		pairs = append(pairs, pair{hostname, f})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].value != pairs[j].value {
+			return pairs[i].value > pairs[j].value
+		}
+		return pairs[i].hostname < pairs[j].hostname
+	})
+	if limit > 0 && len(pairs) > limit {
+		pairs = pairs[:limit]
+	}
+
+	result := newVectorResult()
+	for _, p := range pairs {
+		appendVectorSample(&result, map[string]string{"hostname": p.hostname}, p.value)
+	}
+	return result
 }
 
 // ReportTopUsersByLoginCount godoc
@@ -848,6 +947,7 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 // @Param        range    query  string  false  "Time range"  default(24h)
 // @Param        limit    query  int     false  "Max results"  default(10)
 // @Param        hostname query  string  false  "Filter to a specific machine"
+// @Param        lab      query  string  false  "Filter to a specific lab name"
 // @Success      200
 // @Router       /api/v1/reports/top-users-by-logins [get]
 func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Request) {
@@ -866,12 +966,18 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 	}
 	ctx := r.Context()
 	policy := s.userPolicy(ctx)
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		return
+	}
+	labFilter := q.Get("lab")
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`sum by (user) (increase(openlabstats_user_session_logins_total%s[%s])) > 0`,
+		`sum by (user, hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0`,
 		lf, timeRange,
 	)
-	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy)
+	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy, hostnameToLab, labFilter)
 	if err != nil {
 		s.logger.Error("prometheus query failed", "error", err, "query", query)
 		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
@@ -888,6 +994,7 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 // @Param        range    query  string  false  "Time range"  default(24h)
 // @Param        limit    query  int     false  "Max results"  default(10)
 // @Param        hostname query  string  false  "Filter to a specific machine"
+// @Param        lab      query  string  false  "Filter to a specific lab name"
 // @Success      200
 // @Router       /api/v1/reports/top-users-by-session-time [get]
 func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Request) {
@@ -906,12 +1013,18 @@ func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Requ
 	}
 	ctx := r.Context()
 	policy := s.userPolicy(ctx)
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		return
+	}
+	labFilter := q.Get("lab")
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s])) / 3600 > 0`,
+		`sum by (user, hostname) (increase(openlabstats_user_session_seconds_total%s[%s])) / 3600 > 0`,
 		lf, timeRange,
 	)
-	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy)
+	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy, hostnameToLab, labFilter)
 	if err != nil {
 		s.logger.Error("prometheus query failed", "error", err, "query", query)
 		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
@@ -955,6 +1068,7 @@ func computeAvgSessionMinutes(seconds, logins map[string]float64, minLogins floa
 // @Param        range    query  string  false  "Time range"  default(24h)
 // @Param        limit    query  int     false  "Max results"  default(10)
 // @Param        hostname query  string  false  "Filter to a specific machine"
+// @Param        lab      query  string  false  "Filter to a specific lab name"
 // @Success      200
 // @Router       /api/v1/reports/avg-session-time [get]
 func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
@@ -973,22 +1087,28 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	policy := s.userPolicy(ctx)
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		return
+	}
+	labFilter := q.Get("lab")
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	// Seconds and logins are merged into canonical identities separately and only
 	// then divided — averaging the per-raw-username averages would weight a
 	// user's Windows and macOS sessions equally regardless of how many of each.
 	secondsQuery := fmt.Sprintf(
-		`sum by (user) (increase(openlabstats_user_session_seconds_total%s[%s]))`, lf, timeRange)
+		`sum by (user, hostname) (increase(openlabstats_user_session_seconds_total%s[%s]))`, lf, timeRange)
 	loginsQuery := fmt.Sprintf(
-		`sum by (user) (increase(openlabstats_user_session_logins_total%s[%s]))`, lf, timeRange)
+		`sum by (user, hostname) (increase(openlabstats_user_session_logins_total%s[%s]))`, lf, timeRange)
 
-	seconds, err := s.sumByCanonicalUser(ctx, secondsQuery, atTime, policy)
+	seconds, err := s.sumByCanonicalUser(ctx, secondsQuery, atTime, policy, hostnameToLab, labFilter)
 	if err != nil {
 		s.logger.Error("prometheus query failed", "error", err, "query", secondsQuery)
 		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
 		return
 	}
-	logins, err := s.sumByCanonicalUser(ctx, loginsQuery, atTime, policy)
+	logins, err := s.sumByCanonicalUser(ctx, loginsQuery, atTime, policy, hostnameToLab, labFilter)
 	if err != nil {
 		s.logger.Error("prometheus query failed", "error", err, "query", loginsQuery)
 		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")

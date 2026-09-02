@@ -741,6 +741,22 @@ paths:
       summary: Get mappings for agents
       tags:
       - mappings
+  /api/v1/mappings/categories:
+    get:
+      description: Returns the closed set of categories the portal/CLI accept when
+        creating or editing a mapping.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+      summary: List valid mapping categories
+      tags:
+      - mappings
   /api/v1/reports/active-users:
     get:
       description: Returns users with active sessions right now.
@@ -758,6 +774,8 @@ paths:
   /api/v1/reports/avg-session-time:
     get:
       description: Returns top N users ranked by average session duration in minutes.
+        Users with fewer than minLoginsForAvgSession logins in the window are omitted
+        — too small a sample to average meaningfully.
       parameters:
       - default: 24h
         description: Time range
@@ -772,6 +790,10 @@ paths:
       - description: Filter to a specific machine
         in: query
         name: hostname
+        type: string
+      - description: Filter to a specific lab name
+        in: query
+        name: lab
         type: string
       produces:
       - application/json
@@ -951,6 +973,10 @@ paths:
         in: query
         name: hostname
         type: string
+      - description: Filter to a specific lab name
+        in: query
+        name: lab
+        type: string
       produces:
       - application/json
       responses:
@@ -1008,6 +1034,10 @@ paths:
         in: query
         name: hostname
         type: string
+      - description: Filter to a specific lab name
+        in: query
+        name: lab
+        type: string
       produces:
       - application/json
       responses:
@@ -1034,6 +1064,10 @@ paths:
       - description: Filter to a specific machine
         in: query
         name: hostname
+        type: string
+      - description: Filter to a specific lab name
+        in: query
+        name: lab
         type: string
       produces:
       - application/json
