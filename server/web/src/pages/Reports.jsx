@@ -227,20 +227,6 @@ function sparseNote(data, limit, clause) {
   return `Showing all ${data.length} — fewer than ${limit} ${clause} for the current filters`;
 }
 
-// Login-derived metrics (device/user login counts, avg session duration) are
-// documented as sparse under 30 days — lab machines are rarely signed out, so
-// increase() over a short window frequently has nothing to show. Rather than
-// let these three panels silently follow the page's short default (24h) and
-// look broken with a single bar, floor their query window to 30 days
-// regardless of the page-level selector. Explicit custom ranges are left
-// alone — a user who picked a specific window asked for that window.
-const LOGIN_METRIC_MIN_RANGE = '30d';
-function floorLoginRange(range) {
-  if (range === 'custom' || range.includes('~')) return range;
-  const days = range.endsWith('d') ? parseInt(range, 10) : range.endsWith('h') ? parseInt(range, 10) / 24 : 0;
-  return days >= 30 ? range : LOGIN_METRIC_MIN_RANGE;
-}
-
 function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const [foreground, setForeground] = useState(null);
   const [launches, setLaunches] = useState(null);
@@ -250,9 +236,6 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const [avgSession, setAvgSession] = useState(null);
   const [elevatedApps, setElevatedApps] = useState(null);
   const [elevatingUsers, setElevatingUsers] = useState(null);
-
-  const loginRange = floorLoginRange(range);
-  const loginRangeFloored = loginRange !== range;
 
   useEffect(() => {
     setForeground(null);
@@ -268,23 +251,20 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
       .then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
     getTopAppsByLaunches(range, 10, filters)
       .then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches(false));
-    getTopDevicesBySessions(loginRange, 10, filters)
+    getTopDevicesBySessions(range, 10, filters)
       .then(r => setTopDevices(parsePromVector(r, 'hostname'))).catch(() => setTopDevices(false));
-    getTopUsersByLogins(loginRange, 10, filters)
+    getTopUsersByLogins(range, 10, filters)
       .then(r => setTopUserLogins(parsePromVector(r, 'user'))).catch(() => setTopUserLogins(false));
     getTopUsersBySessionTime(range, 10, filters)
       .then(r => setUserSessionTime(parsePromVector(r, 'user'))).catch(() => setUserSessionTime(false));
-    getAvgSessionTime(loginRange, 10, filters)
+    getAvgSessionTime(range, 10, filters)
       .then(r => setAvgSession(parsePromVector(r, 'user'))).catch(() => setAvgSession(false));
-    getTopAppsByElevations(loginRange, 10, filters)
+    getTopAppsByElevations(range, 10, filters)
       .then(r => setElevatedApps(parsePromVector(r))).catch(() => setElevatedApps(false));
-    getTopUsersByElevations(loginRange, 10, filters)
+    getTopUsersByElevations(range, 10, filters)
       .then(r => setElevatingUsers(parsePromVector(r, 'user'))).catch(() => setElevatingUsers(false));
-  }, [range, loginRange, filters]);
+  }, [range, filters]);
 
-  const loginSparse = loginRangeFloored
-    ? 'Logins are sparse — showing last 30 days regardless of the range above'
-    : undefined;
   // Users with under 3 logins in the window are omitted server-side — total
   // accrued time divided by 1-2 discrete sign-ins produces a distorted
   // "average" for shared/kiosk accounts that rarely sign fully out.
@@ -294,19 +274,15 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
 
   const foregroundSubtitle = sparseNote(foreground, 10, 'apps had usage');
   const launchesSubtitle = sparseNote(launches, 10, 'apps had usage');
-  const topDevicesSubtitle = [loginSparse, sparseNote(topDevices, 10, 'devices had logins')].filter(Boolean).join('. ');
-  const topUserLoginsSubtitle = [loginSparse, sparseNote(topUserLogins, 10, 'users had logins')].filter(Boolean).join('. ');
+  const topDevicesSubtitle = sparseNote(topDevices, 10, 'devices had logins');
+  const topUserLoginsSubtitle = sparseNote(topUserLogins, 10, 'users had logins');
   const userSessionTimeSubtitle = sparseNote(userSessionTime, 10, 'users had usage');
   // No sparseNote here: the 3-login floor is why this list is short, and a
   // "fewer than 10 had usage" note would flatly contradict the line right
   // above it — those users did have usage, they were filtered by login count.
-  const avgSessionSubtitle = [loginSparse, omittedNote].filter(Boolean).join('. ');
-  // Elevations are rare events (UAC on Windows, sudo/admin authorization on
-  // macOS), so the panels borrow the 30-day login floor rather than the
-  // headline range.
-  const elevationSubtitle = loginRangeFloored
-    ? 'Elevations are sparse — showing last 30 days regardless of the range above'
-    : undefined;
+  const avgSessionSubtitle = omittedNote;
+  const elevatedAppsSubtitle = sparseNote(elevatedApps, 10, 'apps had elevations');
+  const elevatingUsersSubtitle = sparseNote(elevatingUsers, 10, 'users had elevations');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -338,7 +314,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
           subtitle={topDevicesSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Devices by Login Count', valueLabel: 'logins', roundValues: true,
-            fetcher: () => getTopDevicesBySessions(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'hostname')),
+            fetcher: () => getTopDevicesBySessions(range, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'hostname')),
           })}
         >
           <HBarChart data={topDevices} valueLabel="logins" roundValues height={300} />
@@ -348,7 +324,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
           subtitle={topUserLoginsSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Users by Login Count', valueLabel: 'logins', roundValues: true,
-            fetcher: () => getTopUsersByLogins(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
+            fetcher: () => getTopUsersByLogins(range, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
           })}
         >
           <HBarChart data={topUserLogins} valueLabel="logins" roundValues height={300} />
@@ -370,7 +346,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
           subtitle={avgSessionSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Users by Average Session Duration', valueLabel: 'minutes',
-            fetcher: () => getAvgSessionTime(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
+            fetcher: () => getAvgSessionTime(range, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
           })}
         >
           <HBarChart data={avgSession} valueLabel="minutes" height={300} />
@@ -379,20 +355,20 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
         <ChartCard
           title="Top Elevated Apps"
-          subtitle={elevationSubtitle}
+          subtitle={elevatedAppsSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Apps by Elevation Count', valueLabel: 'elevations', roundValues: true,
-            fetcher: () => getTopAppsByElevations(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r)),
+            fetcher: () => getTopAppsByElevations(range, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r)),
           })}
         >
           <HBarChart data={elevatedApps} valueLabel="elevations" roundValues height={300} />
         </ChartCard>
         <ChartCard
           title="Top Users by Elevations"
-          subtitle={elevationSubtitle}
+          subtitle={elevatingUsersSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Users by Elevation Count', valueLabel: 'elevations', roundValues: true,
-            fetcher: () => getTopUsersByElevations(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
+            fetcher: () => getTopUsersByElevations(range, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
           })}
         >
           <HBarChart data={elevatingUsers} valueLabel="elevations" roundValues height={300} />
