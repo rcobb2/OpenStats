@@ -66,6 +66,7 @@ type PollWatcher struct {
 	familyResolver  func(exeName, exePath string) string
 	onStart         func(pid uint32, exeName string, isNewGroup bool)
 	onStop          func(session *ProcessSession)
+	onElevated      func(pid uint32, exeName, exePath, user string)
 	prevPIDs        map[uint32]procSnapshot
 }
 
@@ -88,6 +89,7 @@ func NewPollWatcher(tracker *Tracker, logger *slog.Logger, cfg WMIWatcherConfig)
 		familyResolver:  cfg.FamilyResolver,
 		onStart:         cfg.OnStart,
 		onStop:          cfg.OnStop,
+		onElevated:      cfg.OnElevated,
 		prevPIDs:        make(map[uint32]procSnapshot),
 	}, nil
 }
@@ -229,14 +231,32 @@ func (w *PollWatcher) currentSnapshot() map[uint32]procSnapshot {
 			continue
 		}
 		exePath := getExePath(pid)
+		pathUnreadable := exePath == ""
+		if pathUnreadable {
+			exePath = exeName
+		}
+
+		// Elevation detection runs before the exclude/system-path filtering
+		// below, and before the "unreadable root path → system daemon" skip.
+		// The most common escalation targets — sudo'd /usr/sbin, /usr/bin
+		// utilities (softwareupdate, launchctl, installer...) — are exactly
+		// what those filters treat as noise for usage tracking. They are not
+		// noise for elevation tracking; they're the whole point.
+		if w.onElevated != nil {
+			prev, seen := w.prevPIDs[pid]
+			isNew := !seen || info.startSec != prev.startSec
+			if isNew {
+				if invokingUser, ok := rootEscalationInvoker(info.uid, info.ppid); ok {
+					w.onElevated(pid, exeName, exePath, invokingUser)
+				}
+			}
+		}
+
 		// When proc_pidpath can't read the path (e.g., root-owned daemon and we
 		// are running as a regular user), fall back to the exe name for pattern
 		// matching but treat a missing path on a root process as a system daemon.
-		if exePath == "" {
-			if info.uid == 0 {
-				continue // root process we can't path-read → system daemon, skip
-			}
-			exePath = exeName
+		if pathUnreadable && info.uid == 0 {
+			continue // root process we can't path-read → system daemon, skip
 		}
 		if w.isExcluded(exeName, exePath) {
 			continue

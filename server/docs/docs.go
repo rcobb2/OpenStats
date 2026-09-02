@@ -936,7 +936,7 @@ const docTemplate = `{
         },
         "/api/v1/reports/top-apps-by-elevations": {
             "get": {
-                "description": "Returns top applications by UAC-elevated launch count over the given time range. Windows agents only; data is typically sparse.",
+                "description": "Returns top applications by privilege-elevation launch count over the given time range (UAC on Windows, sudo/admin authorization on macOS). Data is typically sparse.",
                 "produces": [
                     "application/json"
                 ],
@@ -1157,7 +1157,7 @@ const docTemplate = `{
         },
         "/api/v1/reports/top-users-by-elevations": {
             "get": {
-                "description": "Returns the top N users ranked by UAC-elevated process launches over the time range. Windows agents only; data is typically sparse.",
+                "description": "Returns the top N users ranked by privilege-elevation launches over the time range (UAC on Windows, sudo/admin authorization on macOS). Data is typically sparse.",
                 "produces": [
                     "application/json"
                 ],

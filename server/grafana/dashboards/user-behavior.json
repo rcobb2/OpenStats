@@ -146,7 +146,7 @@
         },
         "overrides": []
       },
-      "description": "UAC-elevated (split-token full) process launches. Windows agents only; typically sparse."
+      "description": "Privilege-elevation launches: UAC on Windows, root escalations (sudo, admin authorization) on macOS. Typically sparse."
     },
     {
       "type": "bargauge",
@@ -188,7 +188,7 @@
         },
         "overrides": []
       },
-      "description": "UAC-elevated (split-token full) process launches. Windows agents only; typically sparse."
+      "description": "Privilege-elevation launches: UAC on Windows, root escalations (sudo, admin authorization) on macOS. Typically sparse."
     }
   ],
   "refresh": "5m",

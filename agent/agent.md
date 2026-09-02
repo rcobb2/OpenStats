@@ -24,7 +24,7 @@ Defines all Prometheus metrics exposed by the agent:
 | `openlabstats_app_foreground_seconds_total` | Counter | app, exe, category, user, hostname |
 | `openlabstats_app_launches_total` | Counter | app, exe, category, user, hostname |
 | `openlabstats_app_active` | Gauge | app, exe, category, user, hostname |
-| `openlabstats_privilege_elevations_total` | Counter | app, exe, category, user, hostname (Windows only) |
+| `openlabstats_privilege_elevations_total` | Counter | app, exe, category, user, hostname |
 | `openlabstats_user_session_active` | Gauge | user, hostname |
 | `openlabstats_user_session_duration_seconds` | Gauge | user, hostname |
 | `openlabstats_user_session_logins_total` | Counter | user, hostname |
@@ -40,20 +40,41 @@ WMI event subscription for process tracking:
 - Tracks process user via `Win32_Process` and token lookup
 - Emits events via callbacks: `OnStart`, `OnStop`, `OnElevated`
 
-### `internal/monitor/elevation.go` / `elevation_windows.go`
+### `internal/monitor/elevation.go` / `elevation_windows.go` / `elevation_darwin.go`
 
-UAC elevation detection (Windows only):
-- On each process start event, opens the process token and reads
-  `TOKEN_ELEVATION_TYPE`. Only `TokenElevationTypeFull` (the elevated half of a
-  UAC split token) counts — `Default` tokens (built-in Administrator, SYSTEM,
-  UAC-off machines) are always-elevated without a consent event and are ignored.
-- Children of an elevated process inherit the Full token, so the parent's token
-  is also checked: a Full child of a Full parent is not counted. If the parent
-  is gone or unreadable, the launch is counted (favor visibility).
+Privilege-elevation detection. `elevation.go` holds the pure, platform-agnostic
+decision logic (unit-tested on any OS); the platform files supply the actual
+process-token / process-owner lookups.
+
+**Windows** (`elevation_windows.go`): on each process start event, opens the
+process token and reads `TOKEN_ELEVATION_TYPE`. Only `TokenElevationTypeFull`
+(the elevated half of a UAC split token) counts — `Default` tokens (built-in
+Administrator, SYSTEM, UAC-off machines) are always-elevated without a consent
+event and are ignored. Children of an elevated process inherit the Full token,
+so the parent's token is also checked: a Full child of a Full parent is not
+counted. If the parent is gone or unreadable, the launch is still counted
+(favor visibility) — a UAC split token keeps the original user's identity, so
+attribution never depends on the parent.
+
+**macOS** (`elevation_darwin.go`): on each poll cycle, a newly-started process
+running as uid 0 with a non-root parent is a genuine escalation (`sudo`, an
+admin AppleScript, an installer's root helper); a root process forked by
+another root process (a daemon's own child, launchd's tree) is not. Unlike
+Windows, `sudo` fully replaces the process owner with root, so the elevated
+process can never be attributed to a human — attribution comes from the
+**parent's** owner instead, and if the parent can no longer be inspected there
+is no one to attribute to, so the launch is *not* counted (the opposite bias
+from Windows). This check runs inside `currentSnapshot()`'s per-PID loop
+*before* the usual exclude/system-path filtering, because the most common
+escalation targets (`sudo softwareupdate`, `sudo launchctl`, `/usr/sbin/*`,
+`/usr/bin/*`) are exactly the paths that filtering treats as noise for usage
+tracking.
+
+Both platforms share these properties:
 - Elevations are counted at **start time** via `OnElevated`, not in the OnStop
   session path — a short-lived elevated installer must count even if it dies
-  before `minLifetime`. A cancelled UAC prompt never creates a process, so it is
-  never counted.
+  before `minLifetime`. A cancelled UAC prompt or `sudo` password rejection
+  never creates a process, so it is never counted.
 - Processes already elevated when the agent starts are adopted, not counted
   (`ScanExistingProcesses` doesn't run the check), so a restart never
   manufactures elevation events.

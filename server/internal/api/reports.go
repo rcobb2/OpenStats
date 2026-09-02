@@ -587,7 +587,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 
 // ReportTopAppsByElevations godoc
 // @Summary      Top applications by UAC elevation count
-// @Description  Returns top applications by UAC-elevated launch count over the given time range. Windows agents only; data is typically sparse.
+// @Description  Returns top applications by privilege-elevation launch count over the given time range (UAC on Windows, sudo/admin authorization on macOS). Data is typically sparse.
 // @Tags         reports
 // @Produce      json
 // @Param        range    query  string  false  "Time range (e.g. 24h, 7d, 30d)"  default(24h)
@@ -1073,7 +1073,7 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 
 // ReportTopUsersByElevations godoc
 // @Summary      Top users by UAC elevation count
-// @Description  Returns the top N users ranked by UAC-elevated process launches over the time range. Windows agents only; data is typically sparse.
+// @Description  Returns the top N users ranked by privilege-elevation launches over the time range (UAC on Windows, sudo/admin authorization on macOS). Data is typically sparse.
 // @Tags         reports
 // @Produce      json
 // @Param        range    query  string  false  "Time range"  default(24h)

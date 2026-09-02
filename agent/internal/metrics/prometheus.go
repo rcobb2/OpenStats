@@ -78,7 +78,7 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "privilege_elevations_total",
-				Help:      "Total number of UAC-elevated (split-token full) process launches. Windows only.",
+				Help:      "Total number of privilege-elevation launches: UAC-elevated processes on Windows, root escalations (sudo, admin authorization) on macOS.",
 			},
 			[]string{"app", "exe", "category", "user", "hostname"},
 		),

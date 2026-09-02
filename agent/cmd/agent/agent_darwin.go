@@ -76,6 +76,18 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 			ExcludePatterns: cfg.Monitor.ExcludePatterns,
 			MinLifetime:     cfg.Monitor.MinLifetime,
 			FamilyResolver:  norm.ResolveFamily,
+			OnElevated: func(pid uint32, exeName, exePath, rawUser string) {
+				info := norm.Resolve(exeName, exePath)
+				if user, ok := resolveUser(rawUser); ok {
+					m.PrivilegeElevations.WithLabelValues(info.DisplayName, exeName, info.Category, user, metrics.Hostname()).Inc()
+				}
+				// Persist the raw user (like RecordSession); canonicalization
+				// happens on restore.
+				if err := db.RecordElevation(exeName, info.DisplayName, info.Category, rawUser, metrics.Hostname()); err != nil {
+					logger.Error("failed to record elevation", "error", err)
+				}
+				logger.Info("privilege elevation detected", "pid", pid, "exe", exeName, "user", rawUser)
+			},
 			OnStop: func(session *monitor.ProcessSession) {
 				info := norm.Resolve(session.ExeName, session.ExePath)
 				hostname := metrics.Hostname()

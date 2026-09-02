@@ -301,12 +301,12 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   // "fewer than 10 had usage" note would flatly contradict the line right
   // above it — those users did have usage, they were filtered by login count.
   const avgSessionSubtitle = [loginSparse, omittedNote].filter(Boolean).join('. ');
-  // Elevations only come from Windows agents and are rare events, so the panels
-  // borrow the 30-day login floor rather than the headline range.
-  const elevationSubtitle = [
-    'Windows machines only',
-    loginRangeFloored ? 'Elevations are sparse — showing last 30 days regardless of the range above' : undefined,
-  ].filter(Boolean).join('. ');
+  // Elevations are rare events (UAC on Windows, sudo/admin authorization on
+  // macOS), so the panels borrow the 30-day login floor rather than the
+  // headline range.
+  const elevationSubtitle = loginRangeFloored
+    ? 'Elevations are sparse — showing last 30 days regardless of the range above'
+    : undefined;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -381,17 +381,17 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
           title="Top Elevated Apps"
           subtitle={elevationSubtitle}
           onViewAll={() => openViewAll({
-            title: 'All Apps by UAC Elevation Count', valueLabel: 'elevations', roundValues: true,
+            title: 'All Apps by Elevation Count', valueLabel: 'elevations', roundValues: true,
             fetcher: () => getTopAppsByElevations(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r)),
           })}
         >
           <HBarChart data={elevatedApps} valueLabel="elevations" roundValues height={300} />
         </ChartCard>
         <ChartCard
-          title="Top Users by UAC Elevations"
+          title="Top Users by Elevations"
           subtitle={elevationSubtitle}
           onViewAll={() => openViewAll({
-            title: 'All Users by UAC Elevation Count', valueLabel: 'elevations', roundValues: true,
+            title: 'All Users by Elevation Count', valueLabel: 'elevations', roundValues: true,
             fetcher: () => getTopUsersByElevations(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
           })}
         >

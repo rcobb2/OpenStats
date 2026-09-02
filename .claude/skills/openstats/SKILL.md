@@ -87,12 +87,16 @@ correct, not a bug — reach for `--range 30d`, and prefer
 `top-users-by-session-time` when the question is really "who uses these machines
 the most".
 
-**Elevation reports are Windows-only and sparse.** `top-apps-by-elevations` and
-`top-users-by-elevations` count UAC-elevated process launches, which only
-Windows agents v0.3.0+ emit and which are rare events — empty output on a short
-range is expected, try `--range 30d`. macOS machines never contribute. The count
-is attributed to the account whose credentials were used (an over-the-shoulder
-IT elevation shows the admin account, not the student at the keyboard).
+**Elevation reports are sparse.** `top-apps-by-elevations` and
+`top-users-by-elevations` count privilege-elevation launches — UAC-elevated
+processes on Windows (agent v0.3.0+), root escalations via sudo or admin
+authorization on macOS (agent v0.4.0+) — which are rare events; empty output on
+a short range is expected, try `--range 30d`. The count is attributed to the
+account whose credentials authorized the elevation: on Windows that's the
+elevated token's own owner (an over-the-shoulder IT elevation shows the admin
+account, not the student at the keyboard); on macOS it's the parent
+process's owner, i.e. whoever ran `sudo` or approved the admin prompt, since
+the elevated process itself always runs as root.
 
 **Session-time totals exceed wall-clock.** A shared account signed in on 40
 machines accrues 40 hours per hour. Numbers in the hundreds or thousands of hours

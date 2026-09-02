@@ -45,8 +45,8 @@ Main HTTP router using chi:
 | `/api/v1/reports/usage-by-lab` | GET | Usage grouped by lab |
 | `/api/v1/reports/active-users` | GET | Currently active users |
 | `/api/v1/reports/summary` | GET | Overview statistics |
-| `/api/v1/reports/top-apps-by-elevations` | GET | Top apps by UAC elevation count (Windows agents only) |
-| `/api/v1/reports/top-users-by-elevations` | GET | Top users by UAC elevation count (Windows agents only) |
+| `/api/v1/reports/top-apps-by-elevations` | GET | Top apps by privilege-elevation launch count (UAC on Windows, sudo/admin authorization on macOS) |
+| `/api/v1/reports/top-users-by-elevations` | GET | Top users by privilege-elevation launch count |
 | `/api/v1/installers/generate` | POST | Generate custom installer |
 | `/api/v1/settings` | GET | System settings |
 | `/health` | GET | Health check |

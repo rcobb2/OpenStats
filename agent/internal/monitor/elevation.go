@@ -29,3 +29,24 @@ func shouldCountElevation(procType, parentType uint32, parentKnown bool) bool {
 	}
 	return true
 }
+
+// shouldCountRootLaunch decides whether a just-started macOS process
+// represents a genuine privilege escalation (sudo, an admin AppleScript, an
+// installer's root helper). Only a process now running as uid 0 with a live,
+// non-root parent counts — a root process forked by another root process (a
+// daemon's own child, launchd's tree) is not a new escalation, it's just root
+// software running.
+//
+// Unlike the Windows check, parentKnown=false always means "do not count".
+// A UAC split token keeps the original user's identity even once elevated, so
+// Windows can attribute an elevation regardless of the parent. sudo fully
+// changes the process owner to root, so on macOS the elevated process itself
+// can never be attributed to a human — attribution has to come from the
+// parent's owner. Without a readable parent there is no one to attribute the
+// event to, so it isn't counted.
+func shouldCountRootLaunch(childUID, parentUID uint32, parentKnown bool) bool {
+	if childUID != 0 {
+		return false
+	}
+	return parentKnown && parentUID != 0
+}

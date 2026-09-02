@@ -129,9 +129,9 @@ Base URL: `/api/v1` (proxied by server)
 - Top applications by usage time
 - Usage by lab
 - Active users
-- UAC elevation panels (Top Elevated Apps, Top Users by UAC Elevations) under
-  the User Behavior report — Windows agents only, uses the 30-day login floor
-  because elevations are sparse
+- Privilege-elevation panels (Top Elevated Apps, Top Users by Elevations) under
+  the User Behavior report — UAC on Windows, sudo/admin authorization on macOS;
+  uses the 30-day login floor because elevations are sparse
 - Time range selector (24h, 7d, 30d)
 
 
