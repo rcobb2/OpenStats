@@ -20,6 +20,8 @@ import {
   getTopUsersByLogins,
   getTopUsersBySessionTime,
   getAvgSessionTime,
+  getTopAppsByElevations,
+  getTopUsersByElevations,
   ignoreApp,
   getUtilizationOverTime,
 } from '../api';
@@ -246,6 +248,8 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const [topUserLogins, setTopUserLogins] = useState(null);
   const [userSessionTime, setUserSessionTime] = useState(null);
   const [avgSession, setAvgSession] = useState(null);
+  const [elevatedApps, setElevatedApps] = useState(null);
+  const [elevatingUsers, setElevatingUsers] = useState(null);
 
   const loginRange = floorLoginRange(range);
   const loginRangeFloored = loginRange !== range;
@@ -257,6 +261,8 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
     setTopUserLogins(null);
     setUserSessionTime(null);
     setAvgSession(null);
+    setElevatedApps(null);
+    setElevatingUsers(null);
 
     getTopAppsByUsage(range, 10, filters)
       .then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
@@ -270,6 +276,10 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
       .then(r => setUserSessionTime(parsePromVector(r, 'user'))).catch(() => setUserSessionTime(false));
     getAvgSessionTime(loginRange, 10, filters)
       .then(r => setAvgSession(parsePromVector(r, 'user'))).catch(() => setAvgSession(false));
+    getTopAppsByElevations(loginRange, 10, filters)
+      .then(r => setElevatedApps(parsePromVector(r))).catch(() => setElevatedApps(false));
+    getTopUsersByElevations(loginRange, 10, filters)
+      .then(r => setElevatingUsers(parsePromVector(r, 'user'))).catch(() => setElevatingUsers(false));
   }, [range, loginRange, filters]);
 
   const loginSparse = loginRangeFloored
@@ -291,6 +301,12 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   // "fewer than 10 had usage" note would flatly contradict the line right
   // above it — those users did have usage, they were filtered by login count.
   const avgSessionSubtitle = [loginSparse, omittedNote].filter(Boolean).join('. ');
+  // Elevations only come from Windows agents and are rare events, so the panels
+  // borrow the 30-day login floor rather than the headline range.
+  const elevationSubtitle = [
+    'Windows machines only',
+    loginRangeFloored ? 'Elevations are sparse — showing last 30 days regardless of the range above' : undefined,
+  ].filter(Boolean).join('. ');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -358,6 +374,28 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
           })}
         >
           <HBarChart data={avgSession} valueLabel="minutes" height={300} />
+        </ChartCard>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
+        <ChartCard
+          title="Top Elevated Apps"
+          subtitle={elevationSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Apps by UAC Elevation Count', valueLabel: 'elevations', roundValues: true,
+            fetcher: () => getTopAppsByElevations(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r)),
+          })}
+        >
+          <HBarChart data={elevatedApps} valueLabel="elevations" roundValues height={300} />
+        </ChartCard>
+        <ChartCard
+          title="Top Users by UAC Elevations"
+          subtitle={elevationSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Users by UAC Elevation Count', valueLabel: 'elevations', roundValues: true,
+            fetcher: () => getTopUsersByElevations(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
+          })}
+        >
+          <HBarChart data={elevatingUsers} valueLabel="elevations" roundValues height={300} />
         </ChartCard>
       </div>
       {viewAllModal}

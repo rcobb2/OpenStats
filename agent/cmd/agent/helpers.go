@@ -34,6 +34,11 @@ func restoreMetrics(db *store.Store, m *metrics.Metrics, logger *slog.Logger) er
 		m.AppUsageSeconds.WithLabelValues(labels...).Add(t.TotalSeconds)
 		m.AppForegroundSeconds.WithLabelValues(labels...).Add(t.TotalForegroundSeconds)
 		m.AppLaunches.WithLabelValues(labels...).Add(float64(t.TotalLaunches))
+		// Guarded so restore doesn't materialize zero-valued elevation series
+		// for every app/user pair.
+		if t.TotalElevations > 0 {
+			m.PrivilegeElevations.WithLabelValues(labels...).Add(float64(t.TotalElevations))
+		}
 	}
 
 	logger.Info("restored metrics from store", "entries", len(totals))

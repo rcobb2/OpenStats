@@ -934,6 +934,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/reports/top-apps-by-elevations": {
+            "get": {
+                "description": "Returns top applications by UAC-elevated launch count over the given time range. Windows agents only; data is typically sparse.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top applications by UAC elevation count",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range (e.g. 24h, 7d, 30d)",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine",
+                        "name": "hostname",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab name",
+                        "name": "lab",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "json",
+                        "description": "Output format: json or csv",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
         "/api/v1/reports/top-apps-by-foreground": {
             "get": {
                 "description": "Returns top applications by total foreground (active) time.",
@@ -1099,6 +1151,51 @@ const docTemplate = `{
                                 "$ref": "#/definitions/api.labAvgUtilization"
                             }
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/top-users-by-elevations": {
+            "get": {
+                "description": "Returns the top N users ranked by UAC-elevated process launches over the time range. Windows agents only; data is typically sparse.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Top users by UAC elevation count",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "Time range",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific machine",
+                        "name": "hostname",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter to a specific lab name",
+                        "name": "lab",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
                     }
                 }
             }

@@ -102,6 +102,10 @@ export const getTopUsersBySessionTime = (range = '24h', limit = 10, filters = {}
   request(`/reports/top-users-by-session-time?${buildReportParams(range, limit, filters)}`);
 export const getAvgSessionTime = (range = '24h', limit = 10, filters = {}) =>
   request(`/reports/avg-session-time?${buildReportParams(range, limit, filters)}`);
+export const getTopAppsByElevations = (range = '24h', limit = 10, filters = {}) =>
+  request(`/reports/top-apps-by-elevations?${buildReportParams(range, limit, filters)}`);
+export const getTopUsersByElevations = (range = '24h', limit = 10, filters = {}) =>
+  request(`/reports/top-users-by-elevations?${buildReportParams(range, limit, filters)}`);
 
 // Parse a Prometheus instant-query vector response into [{name, category, value}]
 // nameLabel controls which metric label becomes the display name (default: 'app').

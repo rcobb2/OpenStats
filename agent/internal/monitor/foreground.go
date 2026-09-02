@@ -25,4 +25,3 @@ func getForegroundPID() uint32 {
 	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
 	return pid
 }
-

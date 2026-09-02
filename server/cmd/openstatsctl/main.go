@@ -512,6 +512,8 @@ var reports = map[string]reportDef{
 	"top-users-by-logins":       {"/reports/top-users-by-logins", "logins", "logins are sparse; try --range 30d"},
 	"top-users-by-session-time": {"/reports/top-users-by-session-time", "hours", ""},
 	"avg-session-time":          {"/reports/avg-session-time", "minutes", "needs a login inside the range to divide by"},
+	"top-apps-by-elevations":    {"/reports/top-apps-by-elevations", "elevations", "Windows agents 0.3.0+ only; sparse — try --range 30d"},
+	"top-users-by-elevations":   {"/reports/top-users-by-elevations", "elevations", "Windows agents 0.3.0+ only; sparse — try --range 30d"},
 }
 
 func cmdReports(c *client, args []string) error {

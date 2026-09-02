@@ -12,6 +12,7 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/metrics"
 	"github.com/rcobb/openlabstats-agent/internal/monitor"
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
+	"github.com/rcobb/openlabstats-agent/internal/store"
 	"github.com/rcobb/openlabstats-agent/internal/userid"
 )
 
@@ -132,6 +133,45 @@ func TestUserAliasMergesMacShortname(t *testing.T) {
 	got, ok := resolveUser("jdoe2")
 	if !ok || got != "jdoe" {
 		t.Errorf(`resolveUser("jdoe2") = (%q, %v), want ("jdoe", true)`, got, ok)
+	}
+}
+
+// ── Metric restoration from the local store ──────────────────────────────────
+
+// TestRestoreMetricsIncludesElevations verifies that persisted elevation totals
+// are restored into the counter (canonicalized), and that rows with zero
+// elevations don't materialize an elevation series.
+func TestRestoreMetricsIncludesElevations(t *testing.T) {
+	logger := discardSlogLogger()
+	db, err := store.New(t.TempDir()+"/agent.db", logger)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer db.Close()
+
+	host := metrics.Hostname()
+	if err := db.RecordElevation("setup.exe", "Setup", "Installer", `COLGATE\jdoe`, host); err != nil {
+		t.Fatalf("RecordElevation: %v", err)
+	}
+	if err := db.RecordElevation("setup.exe", "Setup", "Installer", `COLGATE\jdoe`, host); err != nil {
+		t.Fatalf("RecordElevation: %v", err)
+	}
+	// A launch-only row: must restore launches but produce no elevation series.
+	if err := db.RecordSession(42, "word.exe", `C:\word.exe`, "Word", "Office", "Microsoft",
+		`COLGATE\jdoe`, host, time.Now().Add(-time.Minute), time.Now(), 0); err != nil {
+		t.Fatalf("RecordSession: %v", err)
+	}
+
+	m := metrics.NewForTest()
+	if err := restoreMetrics(db, m, logger); err != nil {
+		t.Fatalf("restoreMetrics: %v", err)
+	}
+
+	if got := counterValue(t, m.PrivilegeElevations, "Setup", "setup.exe", "Installer", "jdoe", host); got != 2 {
+		t.Errorf("restored elevations = %v, want 2", got)
+	}
+	if n := testutil.CollectAndCount(m.PrivilegeElevations); n != 1 {
+		t.Errorf("expected 1 elevation series (zero rows skipped), got %d", n)
 	}
 }
 

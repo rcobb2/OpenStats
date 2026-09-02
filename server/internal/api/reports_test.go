@@ -225,3 +225,59 @@ func TestMergeAppNameDuplicatesSumsAcrossCategories(t *testing.T) {
 		t.Errorf("expected the surviving row to keep the larger-value duplicate's category, got %q", cc.Metric["category"])
 	}
 }
+
+// The elevations report deliberately passes a nil whitelist to
+// queryAndRespondFiltered: elevations usually come from unmapped one-off
+// executables (setup.exe-style installers), and hiding unmapped apps would
+// hide exactly what the report exists to surface. Guard both directions —
+// nil passes everything through, a populated whitelist filters.
+func TestQueryAndRespondFilteredNilWhitelistPassesUnmappedApps(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"resultType": "vector",
+				"result": []map[string]interface{}{
+					{"metric": map[string]string{"app": "setup.exe", "category": ""}, "value": []interface{}{1, "4"}},
+					{"metric": map[string]string{"app": "MATLAB", "category": "Math"}, "value": []interface{}{1, "2"}},
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	s := &Server{
+		cfg:        &config.Config{Prom: config.PromConfig{URL: ts.URL}},
+		logger:     slog.Default(),
+		promClient: &http.Client{},
+	}
+
+	run := func(allowed map[string]bool) []string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.queryAndRespondFiltered(rec, "irrelevant-query", "", 0, allowed, 10, false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		var out promQueryInstantResult
+		if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		apps := make([]string, 0, len(out.Data.Result))
+		for _, r := range out.Data.Result {
+			apps = append(apps, r.Metric["app"])
+		}
+		return apps
+	}
+
+	nilApps := run(nil)
+	if len(nilApps) != 2 {
+		t.Errorf("nil whitelist should pass every app through, got %v", nilApps)
+	}
+
+	filtered := run(map[string]bool{"matlab": true})
+	if len(filtered) != 1 || filtered[0] != "MATLAB" {
+		t.Errorf("whitelist should keep only mapped apps, got %v", filtered)
+	}
+}

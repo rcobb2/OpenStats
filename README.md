@@ -169,6 +169,7 @@ The central server (future) can push AI-informed mappings down to agents.
 |--------|------|-------------|
 | `openlabstats_app_usage_seconds_total` | Counter | Cumulative running time per app/user |
 | `openlabstats_app_launches_total` | Counter | Launch count per app/user |
+| `openlabstats_privilege_elevations_total` | Counter | UAC-elevated launch count per app/user (Windows only) |
 | `openlabstats_app_active` | Gauge | Whether an app is currently running |
 | `openlabstats_user_session_active` | Gauge | Whether a user session is active |
 | `openlabstats_user_session_duration_seconds` | Gauge | Current session duration |

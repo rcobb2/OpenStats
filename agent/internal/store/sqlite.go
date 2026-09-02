@@ -80,6 +80,7 @@ func (s *Store) migrate() error {
 		total_seconds REAL NOT NULL DEFAULT 0,
 		total_foreground_seconds REAL NOT NULL DEFAULT 0,
 		total_launches INTEGER NOT NULL DEFAULT 0,
+		total_elevations INTEGER NOT NULL DEFAULT 0,
 		last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (exe_name, user, hostname)
 	);
@@ -92,6 +93,7 @@ func (s *Store) migrate() error {
 	for _, stmt := range []string{
 		"ALTER TABLE process_sessions ADD COLUMN foreground_seconds REAL DEFAULT 0;",
 		"ALTER TABLE app_usage_totals ADD COLUMN total_foreground_seconds REAL DEFAULT 0;",
+		"ALTER TABLE app_usage_totals ADD COLUMN total_elevations INTEGER NOT NULL DEFAULT 0;",
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			s.logger.Warn("schema migration warning", "stmt", stmt, "err", err)
@@ -149,21 +151,42 @@ func (s *Store) RecordSession(
 	return tx.Commit()
 }
 
+// RecordElevation bumps the elevation total for an exe/user/host. Elevations
+// are counted at process start (a cancelled UAC prompt never creates a
+// process; a short-lived elevated installer must still count), so they can't
+// ride along in RecordSession. Deliberately does not overwrite display_name or
+// category on conflict — RecordSession owns those.
+func (s *Store) RecordElevation(exeName, displayName, category, user, hostname string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO app_usage_totals (exe_name, display_name, category, user, hostname, total_seconds, total_foreground_seconds, total_launches, total_elevations, last_updated)
+		VALUES (?, ?, ?, ?, ?, 0, 0, 0, 1, CURRENT_TIMESTAMP)
+		ON CONFLICT(exe_name, user, hostname) DO UPDATE SET
+			total_elevations = total_elevations + 1,
+			last_updated = CURRENT_TIMESTAMP`,
+		exeName, displayName, category, user, hostname,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record elevation: %w", err)
+	}
+	return nil
+}
+
 // GetUsageTotals returns all accumulated usage totals (for restoring metrics on restart).
 type UsageTotal struct {
-	ExeName      string
-	DisplayName  string
-	Category     string
-	User         string
-	Hostname     string
-	TotalSeconds          float64
+	ExeName                string
+	DisplayName            string
+	Category               string
+	User                   string
+	Hostname               string
+	TotalSeconds           float64
 	TotalForegroundSeconds float64
-	TotalLaunches         int64
+	TotalLaunches          int64
+	TotalElevations        int64
 }
 
 func (s *Store) GetUsageTotals() ([]UsageTotal, error) {
 	rows, err := s.db.Query(`
-		SELECT exe_name, display_name, category, user, hostname, total_seconds, total_foreground_seconds, total_launches
+		SELECT exe_name, display_name, category, user, hostname, total_seconds, total_foreground_seconds, total_launches, total_elevations
 		FROM app_usage_totals`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query totals: %w", err)
@@ -173,12 +196,14 @@ func (s *Store) GetUsageTotals() ([]UsageTotal, error) {
 	var totals []UsageTotal
 	for rows.Next() {
 		var t UsageTotal
-		// coalesce total_foreground_seconds in case it's newly added and null
+		// coalesce columns that may be null in databases created before they existed
 		var fg sql.NullFloat64
-		if err := rows.Scan(&t.ExeName, &t.DisplayName, &t.Category, &t.User, &t.Hostname, &t.TotalSeconds, &fg, &t.TotalLaunches); err != nil {
+		var elev sql.NullInt64
+		if err := rows.Scan(&t.ExeName, &t.DisplayName, &t.Category, &t.User, &t.Hostname, &t.TotalSeconds, &fg, &t.TotalLaunches, &elev); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		t.TotalForegroundSeconds = fg.Float64
+		t.TotalElevations = elev.Int64
 		totals = append(totals, t)
 	}
 	return totals, rows.Err()

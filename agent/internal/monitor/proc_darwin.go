@@ -52,7 +52,7 @@ type procSnapshot struct {
 	user      string
 	ppid      uint32
 	uid       uint32
-	startSec  uint64  // pbi_start_tvsec from proc_bsdinfo
+	startSec  uint64 // pbi_start_tvsec from proc_bsdinfo
 	startTime time.Time
 }
 
@@ -257,9 +257,9 @@ func (w *PollWatcher) currentSnapshot() map[uint32]procSnapshot {
 
 // procBSDInfo is a trimmed version of struct proc_bsdinfo.
 type procBSDInfo struct {
-	exeName string
-	ppid    uint32
-	uid     uint32
+	exeName  string
+	ppid     uint32
+	uid      uint32
 	startSec uint64
 }
 

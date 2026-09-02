@@ -23,6 +23,7 @@ type WMIWatcher struct {
 	familyResolver  func(exeName, exePath string) string // returns family key
 	onStart         func(pid uint32, exeName string, isNewGroup bool)
 	onStop          func(session *ProcessSession)
+	onElevated      func(pid uint32, exeName, exePath, user string)
 }
 
 // NewWMIWatcher creates a new WMI event watcher.
@@ -44,6 +45,7 @@ func NewWMIWatcher(tracker *Tracker, logger *slog.Logger, cfg WMIWatcherConfig) 
 		familyResolver:  cfg.FamilyResolver,
 		onStart:         cfg.OnStart,
 		onStop:          cfg.OnStop,
+		onElevated:      cfg.OnElevated,
 	}, nil
 }
 
@@ -156,6 +158,16 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 		}
 
 		user := getProcessUser(svc, processID)
+
+		// Elevation is checked here (not in ScanExistingProcesses) so processes
+		// already elevated when the agent starts are adopted, not counted — a
+		// restart must not manufacture elevation events. Deliberately not gated
+		// on isNewGroup: an elevated child joining an existing process group is
+		// still a distinct UAC consent; the parent-token check inside
+		// isUACElevatedLaunch is the inheritance dedup.
+		if w.onElevated != nil && isUACElevatedLaunch(processID, parentProcessID) {
+			w.onElevated(processID, processName, exePath, user)
+		}
 
 		isNewGroup := w.tracker.OnProcessStart(processID, parentProcessID, processName, exePath, user, familyKey)
 

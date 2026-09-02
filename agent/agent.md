@@ -24,6 +24,7 @@ Defines all Prometheus metrics exposed by the agent:
 | `openlabstats_app_foreground_seconds_total` | Counter | app, exe, category, user, hostname |
 | `openlabstats_app_launches_total` | Counter | app, exe, category, user, hostname |
 | `openlabstats_app_active` | Gauge | app, exe, category, user, hostname |
+| `openlabstats_privilege_elevations_total` | Counter | app, exe, category, user, hostname (Windows only) |
 | `openlabstats_user_session_active` | Gauge | user, hostname |
 | `openlabstats_user_session_duration_seconds` | Gauge | user, hostname |
 | `openlabstats_user_session_logins_total` | Counter | user, hostname |
@@ -37,7 +38,27 @@ WMI event subscription for process tracking:
 - Subscribes to `Win32_ProcessStartTrace` and `Win32_ProcessStopTrace`
 - Filters processes using `excludePatterns` config
 - Tracks process user via `Win32_Process` and token lookup
-- Emits events via callbacks: `OnStart`, `OnStop`
+- Emits events via callbacks: `OnStart`, `OnStop`, `OnElevated`
+
+### `internal/monitor/elevation.go` / `elevation_windows.go`
+
+UAC elevation detection (Windows only):
+- On each process start event, opens the process token and reads
+  `TOKEN_ELEVATION_TYPE`. Only `TokenElevationTypeFull` (the elevated half of a
+  UAC split token) counts — `Default` tokens (built-in Administrator, SYSTEM,
+  UAC-off machines) are always-elevated without a consent event and are ignored.
+- Children of an elevated process inherit the Full token, so the parent's token
+  is also checked: a Full child of a Full parent is not counted. If the parent
+  is gone or unreadable, the launch is counted (favor visibility).
+- Elevations are counted at **start time** via `OnElevated`, not in the OnStop
+  session path — a short-lived elevated installer must count even if it dies
+  before `minLifetime`. A cancelled UAC prompt never creates a process, so it is
+  never counted.
+- Processes already elevated when the agent starts are adopted, not counted
+  (`ScanExistingProcesses` doesn't run the check), so a restart never
+  manufactures elevation events.
+- Persisted in SQLite (`app_usage_totals.total_elevations`) and restored across
+  restarts like the other app counters.
 
 ### `internal/monitor/tracker.go`
 

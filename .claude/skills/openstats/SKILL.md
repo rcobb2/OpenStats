@@ -87,6 +87,13 @@ correct, not a bug — reach for `--range 30d`, and prefer
 `top-users-by-session-time` when the question is really "who uses these machines
 the most".
 
+**Elevation reports are Windows-only and sparse.** `top-apps-by-elevations` and
+`top-users-by-elevations` count UAC-elevated process launches, which only
+Windows agents v0.3.0+ emit and which are rare events — empty output on a short
+range is expected, try `--range 30d`. macOS machines never contribute. The count
+is attributed to the account whose credentials were used (an over-the-shoulder
+IT elevation shows the admin account, not the student at the keyboard).
+
 **Session-time totals exceed wall-clock.** A shared account signed in on 40
 machines accrues 40 hours per hour. Numbers in the hundreds or thousands of hours
 over 30 days are expected for accounts like `pubref`, not a data error.

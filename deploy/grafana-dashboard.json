@@ -228,6 +228,90 @@
           "decimals": 2
         }
       }
+    },
+    {
+      "type": "bargauge",
+      "title": "Top Elevated Apps",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (app) (increase(openlabstats_privilege_elevations_total{user!=\"\"}[$__range])))",
+          "legendFormat": "{{app}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "UAC-elevated (split-token full) process launches. Windows agents only; typically sparse."
+    },
+    {
+      "type": "bargauge",
+      "title": "Top Users by UAC Elevations",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (user) (increase(openlabstats_privilege_elevations_total{user!=\"\"}[$__range])))",
+          "legendFormat": "{{user}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "UAC-elevated (split-token full) process launches. Windows agents only; typically sparse."
     }
   ],
   "refresh": "",

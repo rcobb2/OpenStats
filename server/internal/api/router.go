@@ -121,6 +121,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		r.Route("/reports", func(r chi.Router) {
 			r.Get("/top-apps", s.ReportTopAppsUsage)
 			r.Get("/top-apps-by-launches", s.ReportTopAppsByLaunches)
+			r.Get("/top-apps-by-elevations", s.ReportTopAppsByElevations)
 			r.Get("/top-apps-by-foreground", s.ReportTopAppsByForegroundTime)
 			r.Get("/bottom-apps-by-launches", s.ReportBottomAppsByLaunches)
 			r.Get("/bottom-apps-by-foreground", s.ReportBottomAppsByForegroundTime)
@@ -129,6 +130,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Get("/active-users", s.ReportActiveUsers)
 			r.Get("/top-devices-by-sessions", s.ReportTopDevicesBySessionCount)
 			r.Get("/top-users-by-logins", s.ReportTopUsersByLoginCount)
+			r.Get("/top-users-by-elevations", s.ReportTopUsersByElevations)
 			r.Get("/top-users-by-session-time", s.ReportTopUsersBySessionTime)
 			r.Get("/avg-session-time", s.ReportAvgSessionTime)
 			r.Get("/summary", s.ReportSummary)

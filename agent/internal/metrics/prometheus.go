@@ -21,10 +21,11 @@ func init() {
 
 // Metrics holds all Prometheus metric collectors for the agent.
 type Metrics struct {
-	AppUsageSeconds *prometheus.CounterVec
-	AppForegroundSeconds *prometheus.CounterVec
-	AppLaunches     *prometheus.CounterVec
-	AppActive       *prometheus.GaugeVec
+	AppUsageSeconds         *prometheus.CounterVec
+	AppForegroundSeconds    *prometheus.CounterVec
+	AppLaunches             *prometheus.CounterVec
+	AppActive               *prometheus.GaugeVec
+	PrivilegeElevations     *prometheus.CounterVec
 	UserSessionActive       *prometheus.GaugeVec
 	UserSessionDuration     *prometheus.GaugeVec
 	UserSessionLogins       *prometheus.CounterVec
@@ -70,6 +71,14 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 				Namespace: namespace,
 				Name:      "app_launches_total",
 				Help:      "Total number of times an application has been launched.",
+			},
+			[]string{"app", "exe", "category", "user", "hostname"},
+		),
+		PrivilegeElevations: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "privilege_elevations_total",
+				Help:      "Total number of UAC-elevated (split-token full) process launches. Windows only.",
 			},
 			[]string{"app", "exe", "category", "user", "hostname"},
 		),
@@ -136,6 +145,7 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 		m.AppForegroundSeconds,
 		m.AppLaunches,
 		m.AppActive,
+		m.PrivilegeElevations,
 		m.UserSessionActive,
 		m.UserSessionDuration,
 		m.UserSessionLogins,

@@ -899,6 +899,42 @@ paths:
       summary: Top applications by usage time
       tags:
       - reports
+  /api/v1/reports/top-apps-by-elevations:
+    get:
+      description: Returns top applications by UAC-elevated launch count over the
+        given time range. Windows agents only; data is typically sparse.
+      parameters:
+      - default: 24h
+        description: Time range (e.g. 24h, 7d, 30d)
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - description: Filter to a specific machine
+        in: query
+        name: hostname
+        type: string
+      - description: Filter to a specific lab name
+        in: query
+        name: lab
+        type: string
+      - default: json
+        description: 'Output format: json or csv'
+        in: query
+        name: format
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top applications by UAC elevation count
+      tags:
+      - reports
   /api/v1/reports/top-apps-by-foreground:
     get:
       description: Returns top applications by total foreground (active) time.
@@ -1013,6 +1049,37 @@ paths:
               $ref: '#/definitions/api.labAvgUtilization'
             type: array
       summary: Top labs by average utilization
+      tags:
+      - reports
+  /api/v1/reports/top-users-by-elevations:
+    get:
+      description: Returns the top N users ranked by UAC-elevated process launches
+        over the time range. Windows agents only; data is typically sparse.
+      parameters:
+      - default: 24h
+        description: Time range
+        in: query
+        name: range
+        type: string
+      - default: 10
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - description: Filter to a specific machine
+        in: query
+        name: hostname
+        type: string
+      - description: Filter to a specific lab name
+        in: query
+        name: lab
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Top users by UAC elevation count
       tags:
       - reports
   /api/v1/reports/top-users-by-logins:

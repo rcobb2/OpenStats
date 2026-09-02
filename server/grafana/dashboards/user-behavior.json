@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -7,12 +9,25 @@
   "links": [],
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "multi" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "title": "Unique Users Over Time",
       "type": "timeseries",
@@ -24,16 +39,31 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 20, "gradientMode": "area" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "area"
+          },
           "unit": "short"
         }
       }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
       "id": 2,
-      "options": { "orientation": "horizontal", "showValue": "always" },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
+      },
       "title": "Top Users by Total Duration",
       "type": "barchart",
       "targets": [
@@ -44,14 +74,26 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "s" }
+        "defaults": {
+          "unit": "s"
+        }
       }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
       "id": 3,
-      "options": { "showHeader": true },
+      "options": {
+        "showHeader": true
+      },
       "title": "Concurrent User Sessions (Potential Risk)",
       "type": "table",
       "targets": [
@@ -63,11 +105,98 @@
         }
       ],
       "description": "Users logged into multiple machines at once."
+    },
+    {
+      "type": "bargauge",
+      "title": "Top Elevated Apps",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (app) (increase(openlabstats_privilege_elevations_total{user!=\"\"}[$__range])))",
+          "legendFormat": "{{app}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "UAC-elevated (split-token full) process launches. Windows agents only; typically sparse."
+    },
+    {
+      "type": "bargauge",
+      "title": "Top Users by UAC Elevations",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (user) (increase(openlabstats_privilege_elevations_total{user!=\"\"}[$__range])))",
+          "legendFormat": "{{user}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "UAC-elevated (split-token full) process launches. Windows agents only; typically sparse."
     }
   ],
   "refresh": "5m",
   "schemaVersion": 39,
-  "tags": ["user", "behavior"],
+  "tags": [
+    "user",
+    "behavior"
+  ],
   "templating": {
     "list": [
       {
@@ -78,7 +207,10 @@
       }
     ]
   },
-  "time": { "from": "now-7d", "to": "now" },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
   "title": "User Behavior Analytics",
   "uid": "ols-users"
 }

@@ -585,6 +585,40 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
 }
 
+// ReportTopAppsByElevations godoc
+// @Summary      Top applications by UAC elevation count
+// @Description  Returns top applications by UAC-elevated launch count over the given time range. Windows agents only; data is typically sparse.
+// @Tags         reports
+// @Produce      json
+// @Param        range    query  string  false  "Time range (e.g. 24h, 7d, 30d)"  default(24h)
+// @Param        limit    query  int     false  "Max results"  default(10)
+// @Param        hostname query  string  false  "Filter to a specific machine"
+// @Param        lab      query  string  false  "Filter to a specific lab name"
+// @Param        format   query  string  false  "Output format: json or csv"  default(json)
+// @Success      200
+// @Router       /api/v1/reports/top-apps-by-elevations [get]
+func (s *Server) ReportTopAppsByElevations(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+
+	limit := parseReportLimit(q, 10)
+
+	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	query := fmt.Sprintf(
+		`sum by (app, category) (increase(openlabstats_privilege_elevations_total%s[%s])) > 0`,
+		lf, timeRange,
+	)
+	// No mapping whitelist here: elevations frequently come from unmapped
+	// one-off executables (setup.exe-style installers), which are exactly what
+	// this report exists to surface.
+	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, nil, limit, false)
+}
+
 // ReportTopAppsByForegroundTime godoc
 // @Summary      Top applications by foreground time
 // @Description  Returns top applications by total foreground (active) time.
@@ -1026,6 +1060,50 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
 		`sum by (user, hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0`,
+		lf, timeRange,
+	)
+	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy, hostnameToLab, labFilter)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+	s.respondUserTotals(w, totals, q.Get("format"), limit)
+}
+
+// ReportTopUsersByElevations godoc
+// @Summary      Top users by UAC elevation count
+// @Description  Returns the top N users ranked by UAC-elevated process launches over the time range. Windows agents only; data is typically sparse.
+// @Tags         reports
+// @Produce      json
+// @Param        range    query  string  false  "Time range"  default(24h)
+// @Param        limit    query  int     false  "Max results"  default(10)
+// @Param        hostname query  string  false  "Filter to a specific machine"
+// @Param        lab      query  string  false  "Filter to a specific lab name"
+// @Success      200
+// @Router       /api/v1/reports/top-users-by-elevations [get]
+func (s *Server) ReportTopUsersByElevations(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	timeRange := safeTimeRange(q.Get("range"), "24h")
+	atTime := int64(0)
+	if dur, end, ok := parseCustomTimeRange(q.Get("start"), q.Get("end")); ok {
+		timeRange = dur
+		atTime = end
+	}
+	limit := parseReportLimit(q, 10)
+	ctx := r.Context()
+	policy := s.userPolicy(ctx)
+	hostnameToLab, err := s.buildHostnameLabMap(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build lab map")
+		return
+	}
+	labFilter := q.Get("lab")
+	// Hostname-only PromQL filter; the lab filter is applied during
+	// canonical-user folding, matching the other user-keyed reports.
+	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
+	query := fmt.Sprintf(
+		`sum by (user, hostname) (increase(openlabstats_privilege_elevations_total%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy, hostnameToLab, labFilter)
