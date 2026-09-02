@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/rcobb/openlabstats-server/internal/config"
@@ -181,5 +182,46 @@ func TestRankHostnamesByValueFiltersBeforeRanking(t *testing.T) {
 	limited := rankHostnamesByValue(raw, hostnameToLab, "Serpent Hall", 1)
 	if len(limited.Data.Result) != 1 {
 		t.Errorf("limit=1 should keep exactly 1 result, got %d", len(limited.Data.Result))
+	}
+}
+
+// The regression this guards against: a mapping edit renames an app's
+// category, but Prometheus keeps the old (app, category) series alive until
+// it expires. Both series pass the whitelist and both get counted as
+// separate "top 10" slots even though the frontend later merges them back
+// into one bar for display — so a panel labeled "Top 10" could render as few
+// as 5-8 bars. Filtering has to collapse by app name before the limit
+// truncation, not after, or the merged-down count silently falls short.
+func TestMergeAppNameDuplicatesSumsAcrossCategories(t *testing.T) {
+	raw := []struct {
+		Metric map[string]string `json:"metric"`
+		Value  []interface{}     `json:"value"`
+	}{
+		{Metric: map[string]string{"app": "Adobe Creative Cloud", "category": "Creative"}, Value: []interface{}{1, "15"}},
+		{Metric: map[string]string{"app": "adobe creative cloud", "category": "Utility"}, Value: []interface{}{1, "12"}}, // stale pre-rename series
+		{Metric: map[string]string{"app": "Google Chrome", "category": "Browser"}, Value: []interface{}{1, "71"}},
+	}
+
+	got := mergeAppNameDuplicates(raw)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 unique apps after merge, got %d: %+v", len(got), got)
+	}
+	byApp := make(map[string]struct {
+		Metric map[string]string `json:"metric"`
+		Value  []interface{}     `json:"value"`
+	})
+	for _, r := range got {
+		byApp[strings.ToLower(r.Metric["app"])] = r
+	}
+	cc, ok := byApp["adobe creative cloud"]
+	if !ok {
+		t.Fatal("adobe creative cloud missing from merged result")
+	}
+	if v := cc.Value[1].(string); v != "27" {
+		t.Errorf("adobe creative cloud total = %v, want 27 (15+12 summed across category duplicates)", v)
+	}
+	if cc.Metric["category"] != "Creative" {
+		t.Errorf("expected the surviving row to keep the larger-value duplicate's category, got %q", cc.Metric["category"])
 	}
 }

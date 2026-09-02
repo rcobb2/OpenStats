@@ -29,6 +29,12 @@ const CHART_COLORS = [
   '#34d399','#fb923c','#60a5fa','#f472b6','#818cf8',
 ];
 
+// "View all" fetches every row in one shot rather than paging — matches the
+// server's maxReportLimit ceiling (server/internal/api/reports.go), which is
+// generously sized because even a large fleet's distinct apps/users fit in
+// one in-memory sort.
+const VIEW_ALL_LIMIT = 1000;
+
 // Format a datetime-local string defaulting to now minus offsetHours
 function defaultDatetime(offsetHours = 0) {
   const d = new Date(Date.now() - offsetHours * 3600 * 1000);
@@ -92,22 +98,124 @@ function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 3
   );
 }
 
-function ChartCard({ title, subtitle, children }) {
+function ChartCard({ title, subtitle, children, onViewAll }) {
   return (
     <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', padding: '1.25rem' }}>
-      <div style={{ marginBottom: '1rem' }}>
-        <h3 style={{ margin: 0 }}>{title}</h3>
-        {subtitle && <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>{subtitle}</div>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', gap: '0.75rem' }}>
+        <div>
+          <h3 style={{ margin: 0 }}>{title}</h3>
+          {subtitle && <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>{subtitle}</div>}
+        </div>
+        {onViewAll && (
+          <button
+            className="btn-secondary"
+            style={{ fontSize: 12, padding: '3px 10px', whiteSpace: 'nowrap' }}
+            onClick={onViewAll}
+          >
+            View all →
+          </button>
+        )}
       </div>
       {children}
     </div>
   );
 }
 
+// Full-list companion to the top/bottom-N bar charts: those panels only ever
+// request `limit` rows, so a user asking "is my app really only used by 10
+// people?" has no way to see row 11 onward. This fetches once, with
+// VIEW_ALL_LIMIT, when opened — no pagination, since that ceiling already
+// covers realistic fleet sizes (see VIEW_ALL_LIMIT).
+function ViewAllModal({ title, valueLabel, roundValues, fetcher, onClose }) {
+  const [rows, setRows] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    fetcher()
+      .then(data => { if (!cancelled) setRows(data); })
+      .catch(() => { if (!cancelled) setRows(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fmt = v => v.toLocaleString(undefined, { maximumFractionDigits: roundValues ? 0 : 1 });
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '1.25rem', width: 'min(560px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <h3 style={{ margin: 0 }}>{title}</h3>
+          <button className="btn-secondary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={onClose}>Close</button>
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {rows === null && <div className="loading" style={{ padding: '1rem' }}>Loading…</div>}
+          {rows === false && <div style={{ padding: '1rem', color: 'var(--error, #e55353)' }}>Failed to load data.</div>}
+          {Array.isArray(rows) && rows.length === 0 && (
+            <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>
+          )}
+          {Array.isArray(rows) && rows.length > 0 && (
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}>#</th>
+                  <th>Name</th>
+                  <th style={{ textAlign: 'right' }}>{valueLabel}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={`${r.name}-${i}`}>
+                    <td style={{ color: 'var(--text-dim)' }}>{i + 1}</td>
+                    <td>{r.name}</td>
+                    <td style={{ textAlign: 'right' }}>{fmt(r.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {Array.isArray(rows) && rows.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: '0.6rem' }}>
+            {rows.length} row{rows.length === 1 ? '' : 's'}
+            {rows.length >= VIEW_ALL_LIMIT ? ` (capped at ${VIEW_ALL_LIMIT})` : ''}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Shared open/close state for a page's "view all" modal — one modal at a
+// time is enough since only one can be open per click.
+function useViewAllModal() {
+  const [viewAll, setViewAll] = useState(null); // { title, valueLabel, roundValues, fetcher } | null
+  const modal = viewAll && <ViewAllModal {...viewAll} onClose={() => setViewAll(null)} />;
+  return [modal, setViewAll];
+}
+
 function applyAppFilter(data, appFilter) {
   if (!appFilter || !Array.isArray(data)) return data;
   const q = appFilter.toLowerCase();
   return data.filter(r => r.name.toLowerCase().includes(q));
+}
+
+// A filtered-down lab or a short window can genuinely have fewer than
+// `limit` distinct entries — a single-lab filter is the common case, not a
+// short window, so this doesn't blame time specifically. Checked against the
+// *unfiltered* fetch (before the free-text appFilter search box narrows it
+// further, which is expected and shouldn't trigger this note). `clause`
+// should read naturally after "fewer than N" — e.g. "apps had usage",
+// "devices had logins".
+function sparseNote(data, limit, clause) {
+  if (!Array.isArray(data) || data.length === 0 || data.length >= limit) return undefined;
+  return `Showing all ${data.length} — fewer than ${limit} ${clause} for the current filters`;
 }
 
 // Login-derived metrics (device/user login counts, avg session duration) are
@@ -157,41 +265,95 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
       .then(r => setAvgSession(parsePromVector(r, 'user'))).catch(() => setAvgSession(false));
   }, [range, loginRange, filters]);
 
-  const loginSubtitle = loginRangeFloored
+  const loginSparse = loginRangeFloored
     ? 'Logins are sparse — showing last 30 days regardless of the range above'
     : undefined;
   // Users with under 3 logins in the window are omitted server-side — total
   // accrued time divided by 1-2 discrete sign-ins produces a distorted
   // "average" for shared/kiosk accounts that rarely sign fully out.
-  const avgSessionSubtitle = [loginSubtitle, 'Users with under 3 logins in the window are omitted']
-    .filter(Boolean).join('. ');
+  const omittedNote = 'Users with under 3 logins in the window are omitted';
+
+  const [viewAllModal, openViewAll] = useViewAllModal();
+
+  const foregroundSubtitle = sparseNote(foreground, 10, 'apps had usage');
+  const launchesSubtitle = sparseNote(launches, 10, 'apps had usage');
+  const topDevicesSubtitle = [loginSparse, sparseNote(topDevices, 10, 'devices had logins')].filter(Boolean).join('. ');
+  const topUserLoginsSubtitle = [loginSparse, sparseNote(topUserLogins, 10, 'users had logins')].filter(Boolean).join('. ');
+  const userSessionTimeSubtitle = sparseNote(userSessionTime, 10, 'users had usage');
+  // No sparseNote here: the 3-login floor is why this list is short, and a
+  // "fewer than 10 had usage" note would flatly contradict the line right
+  // above it — those users did have usage, they were filtered by login count.
+  const avgSessionSubtitle = [loginSparse, omittedNote].filter(Boolean).join('. ');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
-        <ChartCard title="Top 10 Apps by Active Time">
+        <ChartCard
+          title="Most Active Apps"
+          subtitle={foregroundSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Apps by Active Time', valueLabel: 'hours',
+            fetcher: () => getTopAppsByUsage(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
+          })}
+        >
           <HBarChart data={applyAppFilter(foreground, appFilter)} valueLabel="hours" height={300} onIgnore={onIgnore} />
         </ChartCard>
-        <ChartCard title="Top 10 Apps by Launch Count">
+        <ChartCard
+          title="Most Launched Apps"
+          subtitle={launchesSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Apps by Launch Count', valueLabel: 'launches', roundValues: true,
+            fetcher: () => getTopAppsByLaunches(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
+          })}
+        >
           <HBarChart data={applyAppFilter(launches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />
         </ChartCard>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
-        <ChartCard title="Top 10 Most Signed-In Devices" subtitle={loginSubtitle}>
+        <ChartCard
+          title="Most Signed-In Devices"
+          subtitle={topDevicesSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Devices by Login Count', valueLabel: 'logins', roundValues: true,
+            fetcher: () => getTopDevicesBySessions(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'hostname')),
+          })}
+        >
           <HBarChart data={topDevices} valueLabel="logins" roundValues height={300} />
         </ChartCard>
-        <ChartCard title="Top 10 Users by Login Count" subtitle={loginSubtitle}>
+        <ChartCard
+          title="Most Frequent Logins"
+          subtitle={topUserLoginsSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Users by Login Count', valueLabel: 'logins', roundValues: true,
+            fetcher: () => getTopUsersByLogins(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
+          })}
+        >
           <HBarChart data={topUserLogins} valueLabel="logins" roundValues height={300} />
         </ChartCard>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
-        <ChartCard title="Top 10 Users by Total Session Time">
+        <ChartCard
+          title="Most Active Users by Session Time"
+          subtitle={userSessionTimeSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Users by Total Session Time', valueLabel: 'hours',
+            fetcher: () => getTopUsersBySessionTime(range, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
+          })}
+        >
           <HBarChart data={userSessionTime} valueLabel="hours" height={300} />
         </ChartCard>
-        <ChartCard title="Average Session Duration per User" subtitle={avgSessionSubtitle}>
+        <ChartCard
+          title="Average Session Duration per User"
+          subtitle={avgSessionSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Users by Average Session Duration', valueLabel: 'minutes',
+            fetcher: () => getAvgSessionTime(loginRange, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r, 'user')),
+          })}
+        >
           <HBarChart data={avgSession} valueLabel="minutes" height={300} />
         </ChartCard>
       </div>
+      {viewAllModal}
     </div>
   );
 }
@@ -365,6 +527,15 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
     getTopAppsByUsage(range, 10, filters).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
   }, [range, filters]);
 
+  const [viewAllModal, openViewAll] = useViewAllModal();
+
+  // When a lab (or short window) has fewer than 10 apps with any usage at
+  // all, "top" and "bottom" 10 are the same apps — this is the same sparsity
+  // sparseNote surfaces on the panel titles below, not a bug in either list.
+  const topLaunchesSubtitle = sparseNote(topLaunches, 10, 'apps had usage');
+  const topForegroundSubtitle = sparseNote(topForeground, 10, 'apps had usage');
+  const bottomLaunchesSubtitle = sparseNote(bottomLaunches, 10, 'apps had usage');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -382,16 +553,38 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
         </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
-        <ChartCard title="Top 10 Apps — Launch Count">
+        <ChartCard
+          title="Most Launched Apps"
+          subtitle={topLaunchesSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Apps by Launch Count', valueLabel: 'launches', roundValues: true,
+            fetcher: () => getTopAppsByLaunches(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
+          })}
+        >
           <HBarChart data={applyAppFilter(topLaunches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />
         </ChartCard>
-        <ChartCard title="Top 10 Apps — Active Time">
+        <ChartCard
+          title="Most Active Apps"
+          subtitle={topForegroundSubtitle}
+          onViewAll={() => openViewAll({
+            title: 'All Apps by Active Time', valueLabel: 'hours',
+            fetcher: () => getTopAppsByUsage(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
+          })}
+        >
           <HBarChart data={applyAppFilter(topForeground, appFilter)} valueLabel="hours" height={300} onIgnore={onIgnore} />
         </ChartCard>
       </div>
-      <ChartCard title="Bottom 10 Apps — Launch Count (Underutilized)">
+      <ChartCard
+        title="Least Launched Apps (Underutilized)"
+        subtitle={bottomLaunchesSubtitle}
+        onViewAll={() => openViewAll({
+          title: 'All Underutilized Apps by Launch Count', valueLabel: 'launches', roundValues: true,
+          fetcher: () => getBottomAppsByLaunches(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r, 'app', true), appFilter)),
+        })}
+      >
         <HBarChart data={applyAppFilter(bottomLaunches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />
       </ChartCard>
+      {viewAllModal}
     </div>
   );
 }

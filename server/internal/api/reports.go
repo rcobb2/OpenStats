@@ -335,6 +335,60 @@ func (s *Server) allowedAppSet(ctx context.Context) map[string]bool {
 	return set
 }
 
+// mergeAppNameDuplicates sums values for rows that share the same `app` label
+// (case-insensitive) but differ in `category`, keeping one row per app. The
+// surviving row's category is whichever individual row had the larger value —
+// the newer/more-current mapping is the one still accumulating usage.
+func mergeAppNameDuplicates(rows []struct {
+	Metric map[string]string `json:"metric"`
+	Value  []interface{}     `json:"value"`
+}) []struct {
+	Metric map[string]string `json:"metric"`
+	Value  []interface{}     `json:"value"`
+} {
+	type merged struct {
+		row struct {
+			Metric map[string]string `json:"metric"`
+			Value  []interface{}     `json:"value"`
+		}
+		total    float64
+		maxValue float64
+	}
+	order := make([]string, 0, len(rows))
+	byName := make(map[string]*merged, len(rows))
+	for _, r := range rows {
+		key := strings.ToLower(r.Metric["app"])
+		val := 0.0
+		if len(r.Value) >= 2 {
+			if v, ok := r.Value[1].(string); ok {
+				val, _ = strconv.ParseFloat(v, 64)
+			}
+		}
+		m, ok := byName[key]
+		if !ok {
+			m = &merged{row: r}
+			byName[key] = m
+			order = append(order, key)
+		}
+		m.total += val
+		if val >= m.maxValue {
+			m.maxValue = val
+			m.row.Metric = r.Metric // keep the category from the largest-value duplicate
+		}
+	}
+	out := make([]struct {
+		Metric map[string]string `json:"metric"`
+		Value  []interface{}     `json:"value"`
+	}, 0, len(order))
+	for _, key := range order {
+		m := byName[key]
+		row := m.row
+		row.Value = []interface{}{time.Now().Unix(), fmt.Sprintf("%g", m.total)}
+		out = append(out, row)
+	}
+	return out
+}
+
 // queryAndRespondFiltered queries Prometheus, applies the whitelist, sorts by value,
 // and limits to the top/bottom N results. This must be done server-side because topk/
 // bottomk in PromQL runs before filtering — unmapped apps can crowd out mapped ones.
@@ -370,6 +424,16 @@ func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format st
 		}
 		result.Data.Result = filtered
 	}
+
+	// Merge rows that are the same app under different `category` labels — a
+	// mapping edit (or an app that changed categories) leaves Prometheus with
+	// both the old and new label combination alive until the stale series
+	// expires, so "app" alone isn't a unique key yet. This has to happen
+	// before the limit truncation below, not after: if it ran after, "top 10"
+	// could return two rows for one app and silently render fewer than 10
+	// bars once the frontend (which does its own by-name merge for display)
+	// collapses them back down.
+	result.Data.Result = mergeAppNameDuplicates(result.Data.Result)
 
 	// Server-side sort + limit (replaces PromQL topk/bottomk).
 	if limit > 0 || ascending {
@@ -455,6 +519,23 @@ func safeTimeRange(s, defaultRange string) string {
 	return defaultRange
 }
 
+// maxReportLimit caps how many rows a single report response can return. The
+// "view all" frontend list requests this ceiling directly rather than paging
+// — even a large fleet's distinct apps/users comfortably fit in one
+// in-memory sort, so a second request type isn't worth the added surface.
+const maxReportLimit = 1000
+
+// parseReportLimit reads the `limit` query param, falling back to def when
+// it's absent or outside (0, maxReportLimit].
+func parseReportLimit(q url.Values, def int) int {
+	if l := q.Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= maxReportLimit {
+			return parsed
+		}
+	}
+	return def
+}
+
 // proxyPromQuery executes an instant query against Prometheus and returns the result.
 func (s *Server) proxyPromQuery(w http.ResponseWriter, query string) {
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
@@ -493,12 +574,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 		atTime = end
 	}
 
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	// topk is applied server-side after whitelist filtering.
@@ -528,12 +604,7 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 		atTime = end
 	}
 
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
@@ -562,12 +633,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 		atTime = end
 	}
 
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
@@ -596,12 +662,7 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 		atTime = end
 	}
 
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
@@ -852,12 +913,7 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 		timeRange = dur
 		atTime = end
 	}
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 	ctx := r.Context()
 	hostnameToLab, err := s.buildHostnameLabMap(ctx)
 	if err != nil {
@@ -958,12 +1014,7 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 		timeRange = dur
 		atTime = end
 	}
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 	ctx := r.Context()
 	policy := s.userPolicy(ctx)
 	hostnameToLab, err := s.buildHostnameLabMap(ctx)
@@ -1005,12 +1056,7 @@ func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Requ
 		timeRange = dur
 		atTime = end
 	}
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 	ctx := r.Context()
 	policy := s.userPolicy(ctx)
 	hostnameToLab, err := s.buildHostnameLabMap(ctx)
@@ -1079,12 +1125,7 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 		timeRange = dur
 		atTime = end
 	}
-	limit := 10
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 10)
 	ctx := r.Context()
 	policy := s.userPolicy(ctx)
 	hostnameToLab, err := s.buildHostnameLabMap(ctx)
@@ -1138,12 +1179,7 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 		atTime = end
 	}
 
-	limit := 20
-	if l := q.Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
-			limit = parsed
-		}
-	}
+	limit := parseReportLimit(q, 20)
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
