@@ -23,6 +23,7 @@ export const getAgents = () => request('/agents');
 export const getAgent = (id) => request(`/agents/${id}`);
 export const deleteAgent = (id) => request(`/agents/${id}`, { method: 'DELETE' });
 export const forceAgentUpdate = (id) => request(`/agents/${id}/force-update`, { method: 'POST' });
+export const getRolloutStatus = () => request('/agents/rollout-status');
 export const assignAgentToLab = (agentId, labId) =>
   request(`/agents/${agentId}/lab`, { method: 'PUT', body: JSON.stringify({ labId }) });
 

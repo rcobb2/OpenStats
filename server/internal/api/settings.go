@@ -49,6 +49,14 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "staleTimeoutDays must be >= 1")
 		return
 	}
+	if settings.RolloutMaxConcurrent < 0 {
+		writeError(w, http.StatusBadRequest, "rolloutMaxConcurrent must be >= 0 (0 = unlimited)")
+		return
+	}
+	if settings.RolloutGraceSeconds != 0 && settings.RolloutGraceSeconds < 60 {
+		writeError(w, http.StatusBadRequest, "rolloutGraceSeconds must be >= 60")
+		return
+	}
 
 	if err := s.store.UpdateSettings(r.Context(), &settings); err != nil {
 		s.logger.Error("failed to update settings", "error", err)

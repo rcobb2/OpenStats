@@ -99,6 +99,36 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/agents/rollout-status": {
+            "get": {
+                "description": "Per-platform rollout progress: how many agents are updated, currently updating, or pending, plus the current version distribution and target.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Agent auto-update rollout status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/agents/{agentID}": {
             "get": {
                 "description": "Returns a single agent's details.",
@@ -2067,6 +2097,13 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
+                "updateOfferedAt": {
+                    "description": "Staggered-rollout state. UpdateOfferedAt is nil when the agent is not\ncurrently in flight for an auto-update; UpdateTargetVersion is the version\nit was last offered toward.",
+                    "type": "string"
+                },
+                "updateTargetVersion": {
+                    "type": "string"
+                },
                 "updatedAt": {
                     "type": "string"
                 }
@@ -2136,6 +2173,10 @@ const docTemplate = `{
         "store.SystemSettings": {
             "type": "object",
             "properties": {
+                "autoUpdateEnabled": {
+                    "description": "Staggered auto-update rollout. AutoUpdateEnabled is the master switch;\nRolloutMaxConcurrent bounds how many agents may be installing at once\n(0 = unlimited); RolloutGraceSeconds is how long a slot is held before an\nunfinished update is assumed stuck and the slot is freed;\nTargetAgentVersion pins the rollout target (\"\" = auto-track the newest\ninstaller on disk, per platform).",
+                    "type": "boolean"
+                },
                 "heartbeatIntervalSeconds": {
                     "type": "integer"
                 },
@@ -2150,8 +2191,17 @@ const docTemplate = `{
                 "minAgentVersion": {
                     "type": "string"
                 },
+                "rolloutGraceSeconds": {
+                    "type": "integer"
+                },
+                "rolloutMaxConcurrent": {
+                    "type": "integer"
+                },
                 "staleTimeoutDays": {
                     "type": "integer"
+                },
+                "targetAgentVersion": {
+                    "type": "string"
                 },
                 "updateIntervalSeconds": {
                     "type": "integer"

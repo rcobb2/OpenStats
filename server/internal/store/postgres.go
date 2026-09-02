@@ -125,8 +125,23 @@ func (s *Store) migrate(ctx context.Context) error {
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_start', '') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_end', '') ON CONFLICT DO NOTHING;
 
+	-- Staggered auto-update rollout controls (see server/internal/api RegisterAgent).
+	INSERT INTO settings (key, value) VALUES ('auto_update_enabled', 'false') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('rollout_max_concurrent', '20') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('rollout_grace_seconds', '900') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('target_agent_version', '') ON CONFLICT DO NOTHING;
+
 	-- Migration: add pending_update column if it doesn't exist
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS pending_update TEXT NOT NULL DEFAULT '';
+
+	-- Migration: staggered-rollout bookkeeping. update_offered_at is when the
+	-- server last handed this agent a version-based update URL (NULL = not in
+	-- flight); update_target_version is the version it was offered toward. A slot
+	-- is held from offer until the agent reports >= target or the grace window
+	-- lapses (see ClaimUpdateSlot / ReleaseUpdateSlot).
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS update_offered_at TIMESTAMPTZ;
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS update_target_version TEXT NOT NULL DEFAULT '';
+	CREATE INDEX IF NOT EXISTS idx_agents_update_offered ON agents(update_offered_at);
 
 	-- Migration: add ignored column to software_mappings if it doesn't exist
 	ALTER TABLE software_mappings ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT FALSE;
@@ -141,20 +156,25 @@ func (s *Store) migrate(ctx context.Context) error {
 // --- Agent operations ---
 
 type Agent struct {
-	ID            string    `json:"id"`
-	Hostname      string    `json:"hostname"`
-	IPAddress     string    `json:"ipAddress"`
-	OSVersion     string    `json:"osVersion"`
-	AgentVersion  string    `json:"agentVersion"`
-	LabID         *string   `json:"labId,omitempty"`
-	Port          int       `json:"port"`
-	Status        string    `json:"status"`
-	PendingUpdate string    `json:"pendingUpdate,omitempty"`
-	Building      string    `json:"building"`
-	Room          string    `json:"room"`
-	LastSeen      time.Time `json:"lastSeen"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID            string  `json:"id"`
+	Hostname      string  `json:"hostname"`
+	IPAddress     string  `json:"ipAddress"`
+	OSVersion     string  `json:"osVersion"`
+	AgentVersion  string  `json:"agentVersion"`
+	LabID         *string `json:"labId,omitempty"`
+	Port          int     `json:"port"`
+	Status        string  `json:"status"`
+	PendingUpdate string  `json:"pendingUpdate,omitempty"`
+	Building      string  `json:"building"`
+	Room          string  `json:"room"`
+	// Staggered-rollout state. UpdateOfferedAt is nil when the agent is not
+	// currently in flight for an auto-update; UpdateTargetVersion is the version
+	// it was last offered toward.
+	UpdateOfferedAt     *time.Time `json:"updateOfferedAt,omitempty"`
+	UpdateTargetVersion string     `json:"updateTargetVersion,omitempty"`
+	LastSeen            time.Time  `json:"lastSeen"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 // UpsertAgent registers or updates an agent (idempotent on hostname).
@@ -203,7 +223,7 @@ func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
 // ListAgents returns all enrolled agents.
 func (s *Store) ListAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, pending_update, last_seen, created_at, updated_at
+		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, pending_update, update_offered_at, update_target_version, last_seen, created_at, updated_at
 		FROM agents ORDER BY hostname`)
 	if err != nil {
 		return nil, err
@@ -213,7 +233,7 @@ func (s *Store) ListAgents(ctx context.Context) ([]Agent, error) {
 	var agents []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.PendingUpdate, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.PendingUpdate, &a.UpdateOfferedAt, &a.UpdateTargetVersion, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
@@ -225,9 +245,9 @@ func (s *Store) ListAgents(ctx context.Context) ([]Agent, error) {
 func (s *Store) GetAgent(ctx context.Context, id string) (*Agent, error) {
 	a := &Agent{}
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, pending_update, last_seen, created_at, updated_at
+		SELECT id, hostname, ip_address, os_version, agent_version, lab_id, port, status, pending_update, update_offered_at, update_target_version, last_seen, created_at, updated_at
 		FROM agents WHERE id = $1`, id).
-		Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.PendingUpdate, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt)
+		Scan(&a.ID, &a.Hostname, &a.IPAddress, &a.OSVersion, &a.AgentVersion, &a.LabID, &a.Port, &a.Status, &a.PendingUpdate, &a.UpdateOfferedAt, &a.UpdateTargetVersion, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +316,93 @@ func (s *Store) TakeAgentPendingUpdate(ctx context.Context, id string) (string, 
 		return "", nil
 	}
 	return url, err
+}
+
+// ClaimUpdateSlot decides whether to hand agentID a staggered auto-update this
+// heartbeat, enforcing a global in-flight budget. It returns true only when the
+// agent should receive the update URL now.
+//
+//   - renew: the agent was already offered this same target within the grace
+//     window — return false (send ""), leaving the slot held and the timestamp
+//     untouched. Re-sending would make old, guard-less agents restack installers.
+//   - claim: not currently in flight (never offered, a different/newer target, or
+//     the grace window lapsed) — take a transaction advisory lock, count agents
+//     still in flight, and if under maxConcurrent, stamp update_offered_at=NOW().
+//
+// maxConcurrent == 0 means unlimited (the count is skipped). The advisory lock is
+// only taken on a genuine claim attempt, so the common renew/idle heartbeats do
+// not serialize.
+func (s *Store) ClaimUpdateSlot(ctx context.Context, agentID, target string, maxConcurrent int, grace time.Duration) (bool, error) {
+	graceSecs := int64(grace.Seconds())
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Cheap pre-check: is this agent already in flight for this exact target?
+	var withinGrace bool
+	if err := tx.QueryRow(ctx, `
+		SELECT update_offered_at IS NOT NULL
+		   AND update_offered_at > NOW() - ($2 * INTERVAL '1 second')
+		   AND update_target_version = $3
+		FROM agents WHERE id = $1`,
+		agentID, graceSecs, target,
+	).Scan(&withinGrace); err != nil {
+		return false, err
+	}
+	if withinGrace {
+		return false, tx.Commit(ctx) // renew — still installing, send "" this tick
+	}
+
+	// Genuine claim attempt: serialize so the concurrency cap is exact.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('agent_update_rollout'))`); err != nil {
+		return false, err
+	}
+
+	if maxConcurrent > 0 {
+		var inFlight int
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*) FROM agents
+			WHERE update_offered_at > NOW() - ($1 * INTERVAL '1 second')
+			  AND id <> $2`,
+			graceSecs, agentID,
+		).Scan(&inFlight); err != nil {
+			return false, err
+		}
+		if inFlight >= maxConcurrent {
+			return false, tx.Commit(ctx) // budget full — wait its turn
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE agents SET update_offered_at = NOW(), update_target_version = $2, updated_at = NOW()
+		WHERE id = $1`, agentID, target); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
+}
+
+// ReleaseUpdateSlot clears an agent's in-flight update marker, freeing its slot.
+// Called once the agent reports a version at or above its target (success), or
+// when it is no longer a rollout candidate. No-op when nothing is held.
+func (s *Store) ReleaseUpdateSlot(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE agents SET update_offered_at = NULL, update_target_version = '', updated_at = NOW()
+		 WHERE id = $1 AND update_offered_at IS NOT NULL`, id)
+	return err
+}
+
+// CountInFlightUpdates returns how many agents were offered an update within the
+// grace window (i.e. are presumed still installing).
+func (s *Store) CountInFlightUpdates(ctx context.Context, grace time.Duration) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM agents WHERE update_offered_at > NOW() - ($1 * INTERVAL '1 second')`,
+		int64(grace.Seconds()),
+	).Scan(&n)
+	return n, err
 }
 
 // MarkStaleAgents sets agents that haven't checked in recently to 'offline'.
@@ -660,6 +767,17 @@ type SystemSettings struct {
 	MinAgentVersion          string `json:"minAgentVersion"`
 	MaintenanceWindowStart   string `json:"maintenanceWindowStart"` // HH:mm
 	MaintenanceWindowEnd     string `json:"maintenanceWindowEnd"`   // HH:mm
+
+	// Staggered auto-update rollout. AutoUpdateEnabled is the master switch;
+	// RolloutMaxConcurrent bounds how many agents may be installing at once
+	// (0 = unlimited); RolloutGraceSeconds is how long a slot is held before an
+	// unfinished update is assumed stuck and the slot is freed;
+	// TargetAgentVersion pins the rollout target ("" = auto-track the newest
+	// installer on disk, per platform).
+	AutoUpdateEnabled    bool   `json:"autoUpdateEnabled"`
+	RolloutMaxConcurrent int    `json:"rolloutMaxConcurrent"`
+	RolloutGraceSeconds  int    `json:"rolloutGraceSeconds"`
+	TargetAgentVersion   string `json:"targetAgentVersion"`
 }
 
 func (s *Store) GetSettings(ctx context.Context) (*SystemSettings, error) {
@@ -676,6 +794,10 @@ func (s *Store) GetSettings(ctx context.Context) (*SystemSettings, error) {
 		MinAgentVersion:          "0.1.0",
 		MaintenanceWindowStart:   "22:00",
 		MaintenanceWindowEnd:     "04:00",
+		AutoUpdateEnabled:        false,
+		RolloutMaxConcurrent:     20,
+		RolloutGraceSeconds:      900,
+		TargetAgentVersion:       "",
 	}
 
 	for rows.Next() {
@@ -696,6 +818,14 @@ func (s *Store) GetSettings(ctx context.Context) (*SystemSettings, error) {
 			settings.MaintenanceWindowStart = value
 		case "maintenance_window_end":
 			settings.MaintenanceWindowEnd = value
+		case "auto_update_enabled":
+			settings.AutoUpdateEnabled = value == "true"
+		case "rollout_max_concurrent":
+			fmt.Sscanf(value, "%d", &settings.RolloutMaxConcurrent)
+		case "rollout_grace_seconds":
+			fmt.Sscanf(value, "%d", &settings.RolloutGraceSeconds)
+		case "target_agent_version":
+			settings.TargetAgentVersion = value
 		}
 	}
 	return settings, rows.Err()
@@ -717,6 +847,10 @@ func (s *Store) UpdateSettings(ctx context.Context, settings *SystemSettings) er
 		"min_agent_version":          settings.MinAgentVersion,
 		"maintenance_window_start":   settings.MaintenanceWindowStart,
 		"maintenance_window_end":     settings.MaintenanceWindowEnd,
+		"auto_update_enabled":        fmt.Sprintf("%t", settings.AutoUpdateEnabled),
+		"rollout_max_concurrent":     fmt.Sprintf("%d", settings.RolloutMaxConcurrent),
+		"rollout_grace_seconds":      fmt.Sprintf("%d", settings.RolloutGraceSeconds),
+		"target_agent_version":       settings.TargetAgentVersion,
 	}
 
 	for k, v := range updates {

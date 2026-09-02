@@ -13,6 +13,7 @@ import (
 	"github.com/rcobb/openlabstats-server/internal/api"
 	"github.com/rcobb/openlabstats-server/internal/config"
 	"github.com/rcobb/openlabstats-server/internal/discovery"
+	"github.com/rcobb/openlabstats-server/internal/installersync"
 	"github.com/rcobb/openlabstats-server/internal/store"
 
 	_ "github.com/rcobb/openlabstats-server/docs"
@@ -67,6 +68,16 @@ func main() {
 
 	// Start background stale-agent checker.
 	go runStaleChecker(rootCtx, db, disc, logger)
+
+	// Start the installer sync poller so newly published GitHub releases become
+	// available for auto-update without a manual fetch. Inert with respect to
+	// rollout — it only stocks the installers dir; whether agents actually update
+	// is gated separately by the auto_update_enabled setting.
+	if cfg.InstallerSync.Enabled != nil && *cfg.InstallerSync.Enabled {
+		interval := time.Duration(cfg.InstallerSync.IntervalMinutes) * time.Minute
+		logger.Info("installer sync enabled", "repo", cfg.InstallerSync.GitHubRepo, "interval", interval)
+		go installersync.Run(rootCtx, cfg.Server.PublicDir, cfg.InstallerSync.GitHubRepo, interval, logger)
+	}
 
 	// Set up HTTP server.
 	router := api.NewRouter(db, cfg, disc, logger)

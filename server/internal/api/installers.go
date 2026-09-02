@@ -102,6 +102,18 @@ func (s *Server) GetLatestInstallerURL(osVersion ...string) string {
 	return "/installers/" + filename
 }
 
+// GetLatestInstallerVersion returns the dotted version string of the newest
+// installer appropriate for the given OS (e.g. "0.4.0"), or "" if none exists.
+// It resolves the exact same file GetLatestInstallerURL would serve, so the
+// rollout target always matches what the agent would actually download.
+func (s *Server) GetLatestInstallerVersion(osVersion string) string {
+	filename, err := findLatestInstaller(s.cfg.Server.PublicDir, osVersion)
+	if err != nil || filename == "" {
+		return ""
+	}
+	return installerVersionRe.FindString(filename)
+}
+
 // DownloadLatestInstaller serves the latest installer file directly.
 // Use ?platform=mac to download the macOS .pkg; omit for the Windows .msi.
 // @Router /api/v1/installers/latest [get]

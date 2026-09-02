@@ -108,18 +108,25 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("agent registered", "hostname", req.Hostname, "ip", req.IPAddress)
 
-	// Determine update URL - server-directed takes priority over version-based.
-	// TakeAgentPendingUpdate reads and clears atomically so concurrent heartbeats
-	// cannot both receive the same update command.
+	// Decide what update URL (if any) to hand this agent. Two independent paths:
+	//
+	//  1. A manual force-update (SetAgentPendingUpdate) always wins and bypasses
+	//     both the maintenance window and the rollout throttle — an admin forcing
+	//     one machine should not wait its turn. TakeAgentPendingUpdate reads and
+	//     clears atomically so concurrent heartbeats can't double-deliver it.
+	//  2. Otherwise, when auto-update is enabled, the staggered rollout controller
+	//     decides: is the agent below the target version, are we inside the
+	//     maintenance window, and is there a free slot in the concurrency budget?
+	//
+	// See s.decideRolloutUpdate for the throttled path.
 	updateURL := ""
 	if url, err := s.store.TakeAgentPendingUpdate(r.Context(), req.ID); err != nil {
 		s.logger.Error("failed to check pending update", "error", err)
 	} else if url != "" {
 		updateURL = url
 		s.logger.Info("sending pending update to agent", "agentID", req.ID, "url", updateURL)
-	} else if status == "outdated" {
-		// Fallback: version-based outdated check.
-		updateURL = s.GetLatestInstallerURL(req.OSVersion)
+	} else {
+		updateURL = s.decideRolloutUpdate(r.Context(), req, settings)
 	}
 
 	var ignoredExeNames []string

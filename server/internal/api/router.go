@@ -75,6 +75,7 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 			r.Post("/register", s.RegisterAgent)
 			r.Post("/metrics", s.PushAgentMetrics)
 			r.Get("/", s.ListAgents)
+			r.Get("/rollout-status", s.RolloutStatus)
 			r.Get("/{agentID}", s.GetAgent)
 			r.Put("/{agentID}/lab", s.AssignAgentToLab)
 			r.Delete("/{agentID}", s.DeleteAgent)

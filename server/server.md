@@ -79,6 +79,33 @@ Agent registration handler:
 - Upserts agent to DB
 - Triggers target refresh on change
 - Handles heartbeat (re-registration)
+- Decides each heartbeat's `updateUrl`: a manual force-update (one-shot, via
+  `SetAgentPendingUpdate`) always wins and bypasses the throttle; otherwise the
+  staggered rollout controller decides (see `rollout.go`).
+
+### `internal/api/rollout.go`
+
+Staggered auto-update rollout controller. When `auto_update_enabled` is on, the
+server rolls agents forward to the newest installer for their platform (macOS
+`.pkg` / Windows `.msi` tracked independently, or a pinned `target_agent_version`),
+a bounded number at a time (`rollout_max_concurrent`), only inside the
+maintenance window (enforced server-side here, mirroring the agent's window
+check). A "slot" is claimed via `store.ClaimUpdateSlot` (exact cap via a Postgres
+advisory lock) and held until the agent reports a version >= target
+(`ReleaseUpdateSlot`) or `rollout_grace_seconds` lapses. While in flight the
+server sends `""` rather than re-offering, so guard-less older agents don't stack
+installers. `GET /agents/rollout-status` reports per-platform progress. Nothing
+here fires while `auto_update_enabled` is false — the fleet is frozen by default.
+
+### `internal/installersync/`
+
+Background poller (started from `cmd/server/main.go` when
+`installerSync.enabled`, default on) that fetches new `.pkg`/`.msi` assets from
+the latest GitHub release into `<publicDir>/installers/`, so a published release
+becomes available to the rollout with no manual fetch step. It only adds files
+(never deletes) and writes from inside the container (correct SELinux label). It
+is independent of the rollout switch — it stocks installers; `auto_update_enabled`
+controls whether agents actually move.
 
 ### `internal/userid/`
 

@@ -9,10 +9,23 @@ import (
 
 // Config holds the full server configuration.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Prom     PromConfig     `yaml:"prometheus"`
-	FileSD   FileSDConfig   `yaml:"fileSD"`
+	Server        ServerConfig        `yaml:"server"`
+	Database      DatabaseConfig      `yaml:"database"`
+	Prom          PromConfig          `yaml:"prometheus"`
+	FileSD        FileSDConfig        `yaml:"fileSD"`
+	InstallerSync InstallerSyncConfig `yaml:"installerSync"`
+}
+
+// InstallerSyncConfig controls the background poller that keeps the local
+// installers directory in sync with the latest GitHub release, so newly
+// published agent builds become available for the staggered auto-update rollout
+// without a manual fetch step.
+type InstallerSyncConfig struct {
+	// Enabled is a pointer so an omitted config key defaults to on (set in
+	// setDefaults); set `enabled: false` explicitly to disable the poller.
+	Enabled         *bool  `yaml:"enabled"`
+	GitHubRepo      string `yaml:"githubRepo"`
+	IntervalMinutes int    `yaml:"intervalMinutes"`
 }
 
 type ServerConfig struct {
@@ -100,5 +113,15 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.FileSD.OutputPath == "" {
 		cfg.FileSD.OutputPath = "/etc/prometheus/file_sd/openlabstats.json"
+	}
+	if cfg.InstallerSync.GitHubRepo == "" {
+		cfg.InstallerSync.GitHubRepo = "rcobb2/OpenStats"
+	}
+	if cfg.InstallerSync.IntervalMinutes == 0 {
+		cfg.InstallerSync.IntervalMinutes = 30
+	}
+	if cfg.InstallerSync.Enabled == nil {
+		enabled := true
+		cfg.InstallerSync.Enabled = &enabled
 	}
 }

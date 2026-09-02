@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	neturl "net/url"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rcobb/openlabstats-agent/internal/urlutil"
@@ -75,10 +77,40 @@ type Client struct {
 	ignoredMu       sync.RWMutex
 	ignoredExeNames []string
 
+	// updateInProgress guards executeSelfUpdate. Heartbeats fire on every
+	// interval and the server may return the same update URL for several ticks;
+	// without this a slow download/install would stack concurrent installers
+	// (each re-downloading the full package) until the service finally restarted.
+	updateInProgress atomic.Bool
+
 	// onUserPolicy, when set, receives the policy from every successful
 	// registration so the agent can apply changes without restarting.
 	onUserPolicy func(*UserPolicy)
 }
+
+// launchSelfUpdate starts a self-update at most once at a time, after a small
+// random jitter. The jitter smooths the herd when the server offers an update to
+// several agents in the same window; the in-progress guard prevents subsequent
+// heartbeat ticks from re-triggering while an install is already running. If the
+// update fails (e.g. a download error) the guard is released so a later window
+// can retry; on a successful install the service is torn down and restarted, so
+// the reset is moot.
+func (c *Client) launchSelfUpdate(url string) {
+	if !c.updateInProgress.CompareAndSwap(false, true) {
+		c.logger.Debug("self-update already in progress, skipping duplicate trigger")
+		return
+	}
+	go func() {
+		defer c.updateInProgress.Store(false)
+		jitter := time.Duration(rand.Intn(selfUpdateJitterSeconds)) * time.Second
+		c.logger.Info("self-update scheduled", "jitter", jitter)
+		time.Sleep(jitter)
+		c.executeSelfUpdate(url)
+	}()
+}
+
+// selfUpdateJitterSeconds bounds the random delay before a self-update download.
+const selfUpdateJitterSeconds = 30
 
 // WithUserPolicyHandler registers a callback invoked with the server's user
 // policy on each successful registration.
@@ -250,7 +282,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 	if updateURL != "" {
 		if s != nil && IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
 			c.logger.Info("startup: server-directed update received, initiating self-update", "url", updateURL)
-			go c.executeSelfUpdate(updateURL)
+			c.launchSelfUpdate(updateURL)
 		} else {
 			c.logger.Info("startup: update available but outside maintenance window, deferring", "url", updateURL)
 		}
@@ -279,7 +311,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 				if updateURL != "" {
 					if IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
 						c.logger.Info("server-directed update received, initiating self-update", "url", updateURL)
-						go c.executeSelfUpdate(updateURL)
+						c.launchSelfUpdate(updateURL)
 					} else {
 						c.logger.Info("update available but outside maintenance window, deferring", "url", updateURL)
 					}
