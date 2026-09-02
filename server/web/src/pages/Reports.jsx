@@ -121,6 +121,13 @@ function ChartCard({ title, subtitle, children, onViewAll }) {
   );
 }
 
+// The global `th, td` rule sets a tight fixed padding plus text-overflow:
+// ellipsis for every table in the app — fine for names, but it clips a
+// 2-digit rank ("48") down to "4…" in this narrow column. Override both
+// (inline styles win over the stylesheet's element selector) and drop the
+// padding enough that even 3-digit ranks fit within VIEW_ALL_LIMIT.
+const rankCellStyle = { width: 48, padding: '0.6rem 0.4rem', overflow: 'visible', textOverflow: 'unset' };
+
 // Full-list companion to the top/bottom-N bar charts: those panels only ever
 // request `limit` rows, so a user asking "is my app really only used by 10
 // people?" has no way to see row 11 onward. This fetches once, with
@@ -164,7 +171,7 @@ function ViewAllModal({ title, valueLabel, roundValues, fetcher, onClose }) {
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: 40 }}>#</th>
+                  <th style={rankCellStyle}>#</th>
                   <th>Name</th>
                   <th style={{ textAlign: 'right' }}>{valueLabel}</th>
                 </tr>
@@ -172,7 +179,7 @@ function ViewAllModal({ title, valueLabel, roundValues, fetcher, onClose }) {
               <tbody>
                 {rows.map((r, i) => (
                   <tr key={`${r.name}-${i}`}>
-                    <td style={{ color: 'var(--text-dim)' }}>{i + 1}</td>
+                    <td style={{ ...rankCellStyle, color: 'var(--text-dim)' }}>{i + 1}</td>
                     <td>{r.name}</td>
                     <td style={{ textAlign: 'right' }}>{fmt(r.value)}</td>
                   </tr>
