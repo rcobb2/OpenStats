@@ -130,8 +130,11 @@ Base URL: `/api/v1` (proxied by server)
 - Usage by lab
 - Active users
 - Privilege-elevation panels (Top Elevated Apps, Top Users by Elevations) under
-  the User Behavior report — UAC on Windows, sudo/admin authorization on macOS;
-  uses the 30-day login floor because elevations are sparse
+  the User Behavior report — UAC on Windows, sudo/admin authorization on
+  macOS; honors the page-level range selector like every other panel (a
+  forced 30-day floor for sparse login-derived panels was tried and then
+  removed — see git history on Reports.jsx — since it hid genuinely sparse
+  data instead of showing it)
 - Time range selector (24h, 7d, 30d)
 
 
