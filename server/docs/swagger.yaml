@@ -876,7 +876,9 @@ paths:
       - reports
   /api/v1/reports/bottom-apps-by-launches:
     get:
-      description: Returns bottom (least used) applications by launch count.
+      description: Returns bottom (least used) applications by launch count. With
+        includeZero=true, known apps (non-ignored software mappings) that never launched
+        in the window are included with a count of 0.
       parameters:
       - default: 24h
         description: Time range
@@ -888,6 +890,10 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Include known apps with zero launches in the window
+        in: query
+        name: includeZero
+        type: boolean
       - default: json
         description: 'Output format: json or csv'
         in: query

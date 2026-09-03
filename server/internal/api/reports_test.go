@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rcobb/openlabstats-server/internal/config"
+	"github.com/rcobb/openlabstats-server/internal/store"
 	"github.com/rcobb/openlabstats-server/internal/userid"
 )
 
@@ -279,5 +280,76 @@ func TestQueryAndRespondFilteredNilWhitelistPassesUnmappedApps(t *testing.T) {
 	filtered := run(map[string]bool{"matlab": true})
 	if len(filtered) != 1 || filtered[0] != "MATLAB" {
 		t.Errorf("whitelist should keep only mapped apps, got %v", filtered)
+	}
+}
+
+// The underutilized "view all" must include known apps that never launched in
+// the window (count 0), summed same-name launched rows, whitelist-filtered, and
+// ordered 0-launch-first. Mirrors mergeBottomAppsWithZeros' contract.
+func TestMergeBottomAppsWithZeros(t *testing.T) {
+	raw := promQueryInstantResult{}
+	raw.Data.Result = []struct {
+		Metric map[string]string `json:"metric"`
+		Value  []interface{}     `json:"value"`
+	}{
+		{Metric: map[string]string{"app": "Firefox", "category": "Browser"}, Value: []interface{}{1, "3"}},
+		{Metric: map[string]string{"app": "Keynote", "category": "Business"}, Value: []interface{}{1, "1"}},
+		{Metric: map[string]string{"app": "NotMapped", "category": "X"}, Value: []interface{}{1, "9"}}, // dropped by whitelist
+	}
+	allowed := map[string]bool{"firefox": true, "keynote": true, "texmaker": true, "stata": true}
+	mappings := []store.SoftwareMapping{
+		{DisplayName: "Firefox"},                  // launched → not re-added
+		{DisplayName: "texmaker", Category: "Ed"}, // never launched → 0
+		{DisplayName: "Stata"},                    // never launched → 0
+		{DisplayName: "Ignored App", Ignored: true},
+		{DisplayName: "texmaker"}, // dup display name → counted once
+	}
+
+	got := mergeBottomAppsWithZeros(raw, allowed, mappings, 10)
+	res := got.Data.Result
+
+	// NotMapped excluded; Firefox+Keynote+texmaker+Stata = 4.
+	if len(res) != 4 {
+		t.Fatalf("expected 4 rows, got %d: %+v", len(res), res)
+	}
+	// Ascending, 0-launch first, ties by name: Stata(0), texmaker(0), Keynote(1), Firefox(3).
+	wantOrder := []struct {
+		app string
+		val string
+	}{{"Stata", "0"}, {"texmaker", "0"}, {"Keynote", "1"}, {"Firefox", "3"}}
+	for i, w := range wantOrder {
+		gotApp := res[i].Metric["app"]
+		gotVal := res[i].Value[1].(string)
+		if gotApp != w.app || gotVal != w.val {
+			t.Errorf("row %d = (%s, %s), want (%s, %s)", i, gotApp, gotVal, w.app, w.val)
+		}
+	}
+	// Whitelisted-out app absent.
+	for _, r := range res {
+		if r.Metric["app"] == "NotMapped" {
+			t.Error("NotMapped should have been dropped by the whitelist")
+		}
+	}
+}
+
+// With a limit smaller than the candidate set, the most-underutilized
+// (0-launch) apps must win the truncation.
+func TestMergeBottomAppsWithZerosLimit(t *testing.T) {
+	raw := promQueryInstantResult{}
+	raw.Data.Result = []struct {
+		Metric map[string]string `json:"metric"`
+		Value  []interface{}     `json:"value"`
+	}{
+		{Metric: map[string]string{"app": "Busy"}, Value: []interface{}{1, "50"}},
+	}
+	mappings := []store.SoftwareMapping{{DisplayName: "Za"}, {DisplayName: "Zb"}, {DisplayName: "Busy"}}
+	got := mergeBottomAppsWithZeros(raw, nil, mappings, 2)
+	if len(got.Data.Result) != 2 {
+		t.Fatalf("limit=2 should return 2 rows, got %d", len(got.Data.Result))
+	}
+	for _, r := range got.Data.Result {
+		if r.Value[1].(string) != "0" {
+			t.Errorf("expected only 0-launch apps within limit, got %s=%s", r.Metric["app"], r.Value[1])
+		}
 	}
 }

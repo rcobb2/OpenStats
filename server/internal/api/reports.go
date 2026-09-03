@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rcobb/openlabstats-server/internal/store"
 	"github.com/rcobb/openlabstats-server/internal/userid"
 )
 
@@ -650,12 +651,13 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 
 // ReportBottomAppsByLaunches godoc
 // @Summary      Bottom applications by launch count
-// @Description  Returns bottom (least used) applications by launch count.
+// @Description  Returns bottom (least used) applications by launch count. With includeZero=true, known apps (non-ignored software mappings) that never launched in the window are included with a count of 0.
 // @Tags         reports
 // @Produce      json
-// @Param        range  query  string  false  "Time range"  default(24h)
-// @Param        limit  query  int     false  "Max results"  default(10)
-// @Param        format query  string  false  "Output format: json or csv"  default(json)
+// @Param        range       query  string  false  "Time range"  default(24h)
+// @Param        limit       query  int     false  "Max results"  default(10)
+// @Param        includeZero query  bool    false  "Include known apps with zero launches in the window"
+// @Param        format      query  string  false  "Output format: json or csv"  default(json)
 // @Success      200
 // @Router       /api/v1/reports/bottom-apps-by-launches [get]
 func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Request) {
@@ -670,11 +672,125 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 	limit := parseReportLimit(q, 10)
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+
+	// includeZero surfaces the truly underutilized: known apps (non-ignored
+	// software mappings) that never launched in the window. The bar chart omits
+	// them (a 0-length bar is meaningless), so this drives the "view all" list.
+	if q.Get("includeZero") == "true" {
+		s.respondBottomAppsWithZeros(w, r, lf, timeRange, atTime, limit)
+		return
+	}
+
 	query := fmt.Sprintf(
 		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, true)
+}
+
+// respondBottomAppsWithZeros returns the least-launched apps including known apps
+// with zero launches in the window. The "known" universe is every non-ignored
+// software mapping's display name; any that didn't appear in the launch results
+// is added with a count of 0. Results are ascending (0-launch apps first) and
+// truncated to limit.
+func (s *Server) respondBottomAppsWithZeros(w http.ResponseWriter, r *http.Request, lf, timeRange string, atTime int64, limit int) {
+	ctx := r.Context()
+	query := fmt.Sprintf(
+		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
+		lf, timeRange,
+	)
+	raw, err := s.fetchInstantVector(ctx, query, atTime)
+	if err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
+		return
+	}
+
+	mappings, err := s.store.ListMappings(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list mappings for zero-fill", "error", err)
+	}
+	result := mergeBottomAppsWithZeros(raw, s.allowedAppSet(ctx), mappings, limit)
+
+	if r.URL.Query().Get("format") == "csv" {
+		s.writeCSV(w, result.Data.Result)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// mergeBottomAppsWithZeros combines launched apps from a Prometheus result with
+// zero-launch entries for every non-ignored mapping display name that didn't
+// appear, then sorts ascending by launches (0-launch apps first, ties by name)
+// and truncates to limit. Apps not in `allowed` (when non-empty) are dropped, and
+// same-name launched rows are summed (mirrors the whitelist/merge that
+// queryAndRespondFiltered + parsePromVector do for the non-zero path).
+func mergeBottomAppsWithZeros(raw promQueryInstantResult, allowed map[string]bool, mappings []store.SoftwareMapping, limit int) promQueryInstantResult {
+	type appVal struct {
+		app      string
+		category string
+		value    float64
+	}
+	byLower := make(map[string]*appVal)
+	order := make([]*appVal, 0, len(raw.Data.Result))
+	for _, entry := range raw.Data.Result {
+		app := entry.Metric["app"]
+		if len(allowed) > 0 && !allowed[strings.ToLower(app)] {
+			continue
+		}
+		if len(entry.Value) < 2 {
+			continue
+		}
+		v, ok := entry.Value[1].(string)
+		if !ok {
+			continue
+		}
+		val, _ := strconv.ParseFloat(v, 64)
+		lower := strings.ToLower(app)
+		if av, seen := byLower[lower]; seen {
+			av.value += val
+			continue
+		}
+		av := &appVal{app: app, category: entry.Metric["category"], value: val}
+		byLower[lower] = av
+		order = append(order, av)
+	}
+
+	// Add non-ignored mapping display names that never launched, as 0. Dedup by
+	// display name so multiple exes mapping to one app count once.
+	for _, m := range mappings {
+		if m.Ignored || m.DisplayName == "" {
+			continue
+		}
+		lower := strings.ToLower(m.DisplayName)
+		if _, seen := byLower[lower]; seen {
+			continue
+		}
+		av := &appVal{app: m.DisplayName, category: m.Category, value: 0}
+		byLower[lower] = av
+		order = append(order, av)
+	}
+
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].value != order[j].value {
+			return order[i].value < order[j].value
+		}
+		return order[i].app < order[j].app
+	})
+	if limit > 0 && len(order) > limit {
+		order = order[:limit]
+	}
+
+	result := newVectorResult()
+	for _, av := range order {
+		metric := map[string]string{"app": av.app}
+		if av.category != "" {
+			metric["category"] = av.category
+		}
+		appendVectorSample(&result, metric, av.value)
+	}
+	return result
 }
 
 // ReportBottomAppsByForegroundTime godoc

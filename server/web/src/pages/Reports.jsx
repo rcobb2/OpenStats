@@ -544,7 +544,12 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
     setBottomLaunches(null);
     setTopForeground(null);
     getTopAppsByLaunches(range, 10, filters).then(r => setTopLaunches(parsePromVector(r))).catch(() => setTopLaunches(false));
-    getBottomAppsByLaunches(range, 10, filters).then(r => setBottomLaunches(parsePromVector(r, 'app', true))).catch(() => setBottomLaunches(false));
+    // Bottom-N least-launched apps, displayed longest-bar-at-top (descending) to
+    // match the "Most Launched" chart's convention. The server still selects the
+    // 10 *least*-launched; this only flips the display order. Zero-launch apps are
+    // omitted from the chart (a 0-length bar isn't meaningful) — they appear in
+    // the View all list instead.
+    getBottomAppsByLaunches(range, 10, filters).then(r => setBottomLaunches(parsePromVector(r, 'app', false))).catch(() => setBottomLaunches(false));
     getTopAppsByUsage(range, 10, filters).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
   }, [range, filters]);
 
@@ -599,8 +604,10 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
         title="Least Launched Apps (Underutilized)"
         subtitle={bottomLaunchesSubtitle}
         onViewAll={() => openViewAll({
+          // includeZero=true adds known apps with no launches in the window — the
+          // truly underutilized. Kept ascending so those 0-launch apps lead the list.
           title: 'All Underutilized Apps by Launch Count', valueLabel: 'launches', roundValues: true,
-          fetcher: () => getBottomAppsByLaunches(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r, 'app', true), appFilter)),
+          fetcher: () => getBottomAppsByLaunches(range, VIEW_ALL_LIMIT, filters, true).then(r => applyAppFilter(parsePromVector(r, 'app', true), appFilter)),
         })}
       >
         <HBarChart data={applyAppFilter(bottomLaunches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />

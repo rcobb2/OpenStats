@@ -866,7 +866,7 @@ const docTemplate = `{
         },
         "/api/v1/reports/bottom-apps-by-launches": {
             "get": {
-                "description": "Returns bottom (least used) applications by launch count.",
+                "description": "Returns bottom (least used) applications by launch count. With includeZero=true, known apps (non-ignored software mappings) that never launched in the window are included with a count of 0.",
                 "produces": [
                     "application/json"
                 ],
@@ -887,6 +887,12 @@ const docTemplate = `{
                         "default": 10,
                         "description": "Max results",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include known apps with zero launches in the window",
+                        "name": "includeZero",
                         "in": "query"
                     },
                     {
