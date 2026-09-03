@@ -144,7 +144,30 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 
 		event.Release()
 
-		if processName == "" || w.isExcluded(processName) {
+		if processName == "" {
+			continue
+		}
+
+		// Elevation detection runs before the exclude-pattern filtering below
+		// — mirrors the macOS design, for the same reason: the most common
+		// escalation targets are terminals and shells (cmd.exe,
+		// powershell.exe, pwsh.exe, WindowsTerminal.exe), and every one of
+		// those is in the default agent.yaml's exclude list as noise for
+		// usage tracking. Filtering before this check ran meant elevating
+		// cmd.exe produced nothing at all — confirmed on real hardware.
+		// Checked here (not in ScanExistingProcesses) so processes already
+		// elevated when the agent starts are adopted, not counted — a
+		// restart must not manufacture elevation events. Deliberately not
+		// gated on isNewGroup: an elevated child joining an existing process
+		// group is still a distinct UAC consent; the parent-token check
+		// inside isUACElevatedLaunch is the inheritance dedup.
+		if w.onElevated != nil && isUACElevatedLaunch(processID, parentProcessID) {
+			exePath := getProcessExePath(svc, processID)
+			user := getProcessUser(svc, processID)
+			w.onElevated(processID, processName, exePath, user)
+		}
+
+		if w.isExcluded(processName) {
 			continue
 		}
 
@@ -158,16 +181,6 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 		}
 
 		user := getProcessUser(svc, processID)
-
-		// Elevation is checked here (not in ScanExistingProcesses) so processes
-		// already elevated when the agent starts are adopted, not counted — a
-		// restart must not manufacture elevation events. Deliberately not gated
-		// on isNewGroup: an elevated child joining an existing process group is
-		// still a distinct UAC consent; the parent-token check inside
-		// isUACElevatedLaunch is the inheritance dedup.
-		if w.onElevated != nil && isUACElevatedLaunch(processID, parentProcessID) {
-			w.onElevated(processID, processName, exePath, user)
-		}
 
 		isNewGroup := w.tracker.OnProcessStart(processID, parentProcessID, processName, exePath, user, familyKey)
 

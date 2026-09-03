@@ -56,6 +56,16 @@ counted. If the parent is gone or unreadable, the launch is still counted
 (favor visibility) — a UAC split token keeps the original user's identity, so
 attribution never depends on the parent.
 
+**This check runs inside `processStartEvents` (`wmi.go`) before the
+exclude-pattern filter, not after.** The most common UAC targets are
+terminals and shells — `cmd.exe`, `powershell.exe`, `pwsh.exe`,
+`WindowsTerminal.exe` — and every one of those is in the default
+`agent.yaml`'s exclude list, since a terminal window isn't "app usage" worth
+tracking. Checking elevation after that filter meant elevating `cmd.exe`
+produced nothing at all: confirmed on real hardware, the first time this
+code ran against an actual UAC prompt. Same fix, same reasoning, as the
+macOS side below.
+
 **macOS** (`elevation_darwin.go` + `findEscalatingAncestor` in `elevation.go`):
 on each poll cycle, a newly-started process running as uid 0 is a genuine
 escalation (`sudo`, an admin AppleScript, an installer's root helper) if
