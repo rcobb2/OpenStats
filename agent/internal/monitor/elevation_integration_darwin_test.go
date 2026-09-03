@@ -66,18 +66,20 @@ func TestPollWatcherDetectsSimulatedSudoElevation(t *testing.T) {
 		t.Fatalf("NewPollWatcher: %v", err)
 	}
 
-	// First snapshot seeds prevPIDs exactly like Run() does at startup
-	// (detectElevations=false) — pre-existing processes are adopted, not
-	// reported as fresh elevations.
+	// First snapshot seeds elevatedSeen (and prevPIDs) exactly like Run() does
+	// at startup (detectElevations=false) — pre-existing processes are
+	// adopted, not reported as fresh elevations.
 	w.prevPIDs = w.currentSnapshot(false)
 	if len(got) != 0 {
 		t.Fatalf("initial snapshot must not fire OnElevated (adopt, don't count), got %v", got)
 	}
 
 	// Second pass mimics a real poll() tick: the fake child now looks "new"
-	// against prevPIDs, the same way a real sudo child appears mid-poll after
-	// having not existed a second ago.
-	delete(w.prevPIDs, fakeElevatedChildPID)
+	// against elevatedSeen (not prevPIDs — see the elevatedSeen field doc:
+	// sleep lives under /bin, which usage-tracking exclusion means it would
+	// never appear in prevPIDs at all), the same way a real sudo child
+	// appears mid-poll after having not existed a second ago.
+	delete(w.elevatedSeen, fakeElevatedChildPID)
 	current := w.currentSnapshot(true)
 
 	if len(got) != 1 {
@@ -92,6 +94,41 @@ func TestPollWatcherDetectsSimulatedSudoElevation(t *testing.T) {
 	// exactly the "unreadable root path → system daemon" skip.
 	if _, present := current[fakeElevatedChildPID]; present {
 		t.Error("the fake elevated child should not appear in the usage-tracking snapshot")
+	}
+}
+
+// TestPollWatcherCountsElevationOnceAcrossMultiplePolls guards against a real
+// bug: keying "is this new?" off prevPIDs instead of elevatedSeen meant an
+// elevated process living under an excluded path (sleep is under /bin, which
+// isSystemPath excludes from usage tracking) never landed in prevPIDs at
+// all, so it looked "new" on every single poll for its entire lifetime —
+// re-firing OnElevated once per second instead of once at genuine start.
+func TestPollWatcherCountsElevationOnceAcrossMultiplePolls(t *testing.T) {
+	if me, err := user.Current(); err != nil || me.Uid == "0" {
+		t.Skip("need a determinable non-root test user")
+	}
+
+	withFakeElevatedChild(t, uint32(os.Getpid()))
+
+	var got []string
+	w, err := NewPollWatcher(NewTracker(discardLogger()), discardLogger(), WMIWatcherConfig{
+		OnElevated: func(pid uint32, exeName, exePath, user string) {
+			got = append(got, user)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewPollWatcher: %v", err)
+	}
+
+	w.prevPIDs = w.currentSnapshot(false)
+	delete(w.elevatedSeen, fakeElevatedChildPID) // first real poll: looks new
+
+	for i := 0; i < 5; i++ {
+		w.currentSnapshot(true) // same fake pid, same startSec, every time
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 elevation across 5 poll ticks of the same still-running process, got %d: %v", len(got), got)
 	}
 }
 
@@ -113,7 +150,7 @@ func TestPollWatcherRootParentIsNotAnElevation(t *testing.T) {
 	}
 
 	w.prevPIDs = w.currentSnapshot(false)
-	delete(w.prevPIDs, fakeElevatedChildPID)
+	delete(w.elevatedSeen, fakeElevatedChildPID)
 	w.currentSnapshot(true)
 
 	if len(got) != 0 {

@@ -30,23 +30,50 @@ func shouldCountElevation(procType, parentType uint32, parentKnown bool) bool {
 	return true
 }
 
-// shouldCountRootLaunch decides whether a just-started macOS process
-// represents a genuine privilege escalation (sudo, an admin AppleScript, an
-// installer's root helper). Only a process now running as uid 0 with a live,
-// non-root parent counts — a root process forked by another root process (a
-// daemon's own child, launchd's tree) is not a new escalation, it's just root
-// software running.
+// procAncestorLookup returns a pid's (uid, ppid, ok) — an indirection over
+// getProcBSDInfo so findEscalatingAncestor is unit-testable with a fake
+// process chain, no real OS calls or genuine root privilege required.
+type procAncestorLookup func(pid uint32) (uid, ppid uint32, ok bool)
+
+// maxAncestorHops bounds the walk in findEscalatingAncestor. Real process
+// trees resolve in 1-3 hops; this is generous headroom against unexpected
+// process-tree shapes without risking an unbounded loop.
+const maxAncestorHops = 8
+
+// findEscalatingAncestor walks up the process tree from startPID looking for
+// the first non-root ancestor — the human whose shell or app ultimately
+// triggered a root-owned child.
 //
-// Unlike the Windows check, parentKnown=false always means "do not count".
-// A UAC split token keeps the original user's identity even once elevated, so
-// Windows can attribute an elevation regardless of the parent. sudo fully
-// changes the process owner to root, so on macOS the elevated process itself
-// can never be attributed to a human — attribution has to come from the
-// parent's owner. Without a readable parent there is no one to attribute the
-// event to, so it isn't counted.
-func shouldCountRootLaunch(childUID, parentUID uint32, parentKnown bool) bool {
-	if childUID != 0 {
-		return false
+// This can't stop at the immediate parent: modern sudo (1.8.15+, including
+// macOS's) forks an internal "monitor" subprocess that calls setuid(0)
+// *before* it execs the target command, so the immediate parent of a
+// sudo'd process is sudo's own already-root plumbing, not the invoking
+// shell. Stopping at one hop means every real sudo invocation looks
+// identical to "a root process forked by another root process" (a daemon's
+// own child, launchd's tree) — exactly the case that should NOT count. This
+// was found by a real sudo command going completely uncounted: the process
+// was observed and evaluated, just rejected by the one-hop check.
+//
+// Walking stops and returns found=false when: the chain becomes unreadable
+// (no one to attribute to — same "don't count without a readable ancestor"
+// rule as before, now applied to the whole chain instead of one hop), when
+// an ancestor's ppid loops back on itself or hits 0 without ever finding a
+// non-root uid (the chain terminates at launchd/init — a genuine root-owned
+// tree, not a new escalation), or when maxAncestorHops is exceeded.
+func findEscalatingAncestor(startPID uint32, lookup procAncestorLookup) (invokingUID uint32, found bool) {
+	pid := startPID
+	for i := 0; i < maxAncestorHops; i++ {
+		uid, ppid, ok := lookup(pid)
+		if !ok {
+			return 0, false
+		}
+		if uid != 0 {
+			return uid, true
+		}
+		if ppid == 0 || ppid == pid {
+			return 0, false
+		}
+		pid = ppid
 	}
-	return parentKnown && parentUID != 0
+	return 0, false
 }

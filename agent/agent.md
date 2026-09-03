@@ -56,19 +56,35 @@ counted. If the parent is gone or unreadable, the launch is still counted
 (favor visibility) — a UAC split token keeps the original user's identity, so
 attribution never depends on the parent.
 
-**macOS** (`elevation_darwin.go`): on each poll cycle, a newly-started process
-running as uid 0 with a non-root parent is a genuine escalation (`sudo`, an
-admin AppleScript, an installer's root helper); a root process forked by
-another root process (a daemon's own child, launchd's tree) is not. Unlike
-Windows, `sudo` fully replaces the process owner with root, so the elevated
-process can never be attributed to a human — attribution comes from the
-**parent's** owner instead, and if the parent can no longer be inspected there
-is no one to attribute to, so the launch is *not* counted (the opposite bias
-from Windows). This check runs inside `currentSnapshot()`'s per-PID loop
-*before* the usual exclude/system-path filtering, because the most common
-escalation targets (`sudo softwareupdate`, `sudo launchctl`, `/usr/sbin/*`,
-`/usr/bin/*`) are exactly the paths that filtering treats as noise for usage
-tracking.
+**macOS** (`elevation_darwin.go` + `findEscalatingAncestor` in `elevation.go`):
+on each poll cycle, a newly-started process running as uid 0 is a genuine
+escalation (`sudo`, an admin AppleScript, an installer's root helper) if
+*any* ancestor up the process tree is non-root; a chain that terminates at
+launchd/init without ever finding one is an ordinary root-owned tree (a
+daemon's own child), not a new escalation. Unlike Windows, `sudo` fully
+replaces the process owner with root, so the elevated process can never be
+attributed to a human — attribution comes from the first non-root
+**ancestor's** owner instead, and if the chain becomes unreadable there is no
+one to attribute to, so the launch is *not* counted (the opposite bias from
+Windows).
+
+The walk can't stop at the immediate parent: modern `sudo` (1.8.15+,
+including macOS's) forks an internal "monitor" subprocess that calls
+`setuid(0)` *before* it execs the target command, so the immediate parent of
+a `sudo`'d process is sudo's own already-root plumbing, not the invoking
+shell. A one-hop check treats every real `sudo` invocation as "a root process
+forked by another root process" — exactly the case meant to be excluded —
+and silently counts nothing. This was found by a real `sudo sleep` going
+completely uncounted in CI: the process was observed and evaluated, just
+rejected by the one-hop version of this check (`counted: false` in the debug
+log, with a root ppid one hop up). `findEscalatingAncestor` is bounded to
+`maxAncestorHops` (8) and guards against a self-referential ppid, so it can't
+loop forever on a malformed process tree.
+
+This check runs inside `currentSnapshot()`'s per-PID loop *before* the usual
+exclude/system-path filtering, because the most common escalation targets
+(`sudo softwareupdate`, `sudo launchctl`, `/usr/sbin/*`, `/usr/bin/*`) are
+exactly the paths that filtering treats as noise for usage tracking.
 
 **macOS requires the agent to run as root.** `proc_pidinfo(PROC_PIDTBSDINFO)` —
 what `getProcBSDInfo` calls — only succeeds for a process the caller owns or

@@ -68,6 +68,14 @@ type PollWatcher struct {
 	onStop          func(session *ProcessSession)
 	onElevated      func(pid uint32, exeName, exePath, user string)
 	prevPIDs        map[uint32]procSnapshot
+	// elevatedSeen tracks pid -> startSec for every uid-0 process already
+	// evaluated for elevation, independent of prevPIDs. Many escalation
+	// targets (sudo'd /usr/sbin, /usr/bin utilities) are excluded from the
+	// usage-tracking snapshot by isExcluded/isSystemPath, so they never land
+	// in prevPIDs — keying "is this new?" off prevPIDs would make such a
+	// process look new on every single poll for its entire lifetime,
+	// re-firing OnElevated once per second instead of once at genuine start.
+	elevatedSeen map[uint32]uint64
 }
 
 // NewPollWatcher creates a new macOS process watcher.
@@ -91,6 +99,7 @@ func NewPollWatcher(tracker *Tracker, logger *slog.Logger, cfg WMIWatcherConfig)
 		onStop:          cfg.OnStop,
 		onElevated:      cfg.OnElevated,
 		prevPIDs:        make(map[uint32]procSnapshot),
+		elevatedSeen:    make(map[uint32]uint64),
 	}, nil
 }
 
@@ -242,6 +251,11 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 	// usage tracking for other users) will silently see nothing.
 	var infoFailures, root0Seen int
 
+	// Rebuilt wholesale each pass (mirrors how prevPIDs itself gets replaced
+	// in poll()) so pids that disappeared are pruned automatically — see the
+	// elevatedSeen field doc for why this can't just reuse prevPIDs.
+	newElevatedSeen := make(map[uint32]uint64, root0Seen)
+
 	for _, pid := range pids {
 		if pid == 0 {
 			continue
@@ -251,9 +265,15 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 			infoFailures++
 			continue
 		}
+
+		var isNewRoot bool
 		if info.uid == 0 {
 			root0Seen++
+			prevStart, seen := w.elevatedSeen[pid]
+			isNewRoot = !seen || info.startSec != prevStart
+			newElevatedSeen[pid] = info.startSec
 		}
+
 		exeName := info.exeName
 		if exeName == "" {
 			continue
@@ -271,24 +291,23 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 		// so it also fires during the startup seed; cheap, since uid-0
 		// processes are a small fraction of the process table.
 		if info.uid == 0 {
-			w.logger.Debug("observed root-owned process", "pid", pid, "exe", exeName, "ppid", info.ppid, "pathUnreadable", pathUnreadable)
+			w.logger.Debug("observed root-owned process", "pid", pid, "exe", exeName, "ppid", info.ppid, "pathUnreadable", pathUnreadable, "isNewRoot", isNewRoot)
 		}
 
 		// Elevation detection runs before the exclude/system-path filtering
 		// below, and before the "unreadable root path → system daemon" skip.
 		// The most common escalation targets — sudo'd /usr/sbin, /usr/bin
 		// utilities (softwareupdate, launchctl, installer...) — are exactly
-		// what those filters treat as noise for usage tracking. They are not
-		// noise for elevation tracking; they're the whole point.
-		if detectElevations && w.onElevated != nil {
-			prev, seen := w.prevPIDs[pid]
-			isNew := !seen || info.startSec != prev.startSec
-			if isNew && info.uid == 0 {
-				invokingUser, ok := rootEscalationInvoker(info.uid, info.ppid)
-				w.logger.Debug("evaluated possible elevation", "pid", pid, "exe", exeName, "ppid", info.ppid, "counted", ok, "invokingUser", invokingUser)
-				if ok {
-					w.onElevated(pid, exeName, exePath, invokingUser)
-				}
+		// what those filters treat as noise for usage tracking, which is
+		// exactly why isNewRoot above is tracked independently of prevPIDs:
+		// an excluded-path process is never in prevPIDs at all, which would
+		// otherwise make it look "new" on every single poll for its entire
+		// lifetime.
+		if detectElevations && w.onElevated != nil && isNewRoot {
+			invokingUser, ok := rootEscalationInvoker(info.uid, info.ppid)
+			w.logger.Debug("evaluated possible elevation", "pid", pid, "exe", exeName, "ppid", info.ppid, "counted", ok, "invokingUser", invokingUser)
+			if ok {
+				w.onElevated(pid, exeName, exePath, invokingUser)
 			}
 		}
 
@@ -312,6 +331,11 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 			startTime: time.Unix(int64(info.startSec), 0),
 		}
 	}
+	// Unconditional, including the detectElevations=false startup seed: the
+	// seed call's whole purpose is recording which root processes already
+	// exist so the first real poll correctly treats them as already-seen
+	// rather than firing a spurious elevation for each one.
+	w.elevatedSeen = newElevatedSeen
 	w.logger.Debug("snapshot pass complete", "totalPIDs", len(pids), "infoFailures", infoFailures, "root0Seen", root0Seen)
 	return snap
 }

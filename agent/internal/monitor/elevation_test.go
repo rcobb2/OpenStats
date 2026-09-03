@@ -28,25 +28,96 @@ func TestShouldCountElevation(t *testing.T) {
 	}
 }
 
-func TestShouldCountRootLaunch(t *testing.T) {
+// fakeProcTree builds a procAncestorLookup from a map of pid -> (uid, ppid),
+// so tests can construct arbitrary process chains without any real OS calls.
+func fakeProcTree(procs map[uint32][2]uint32) procAncestorLookup {
+	return func(pid uint32) (uid, ppid uint32, ok bool) {
+		p, exists := procs[pid]
+		if !exists {
+			return 0, 0, false
+		}
+		return p[0], p[1], true
+	}
+}
+
+func TestFindEscalatingAncestor(t *testing.T) {
 	tests := []struct {
-		name        string
-		childUID    uint32
-		parentUID   uint32
-		parentKnown bool
-		want        bool
+		name      string
+		startPID  uint32
+		procs     map[uint32][2]uint32 // pid -> {uid, ppid}
+		wantUID   uint32
+		wantFound bool
 	}{
-		{"root child, non-root parent (sudo)", 0, 501, true, true},
-		{"root child, root parent (daemon's own child)", 0, 0, true, false},
-		{"root child, parent unknown (already exited: no one to attribute to)", 0, 0, false, false},
-		{"non-root child, non-root parent", 501, 501, true, false},
-		{"non-root child, root parent (ordinary fork from a daemon)", 501, 0, true, false},
+		{
+			name:     "immediate non-root parent (plain sudo, no monitor subprocess)",
+			startPID: 100,
+			procs:    map[uint32][2]uint32{100: {501, 50}},
+			wantUID:  501, wantFound: true,
+		},
+		{
+			name:     "root parent whose own parent is non-root (sudo's monitor subprocess)",
+			startPID: 100, // sleep's ppid
+			procs: map[uint32][2]uint32{
+				100: {0, 90},   // sudo's monitor: already root
+				90:  {501, 50}, // the invoking shell: not root
+			},
+			wantUID: 501, wantFound: true,
+		},
+		{
+			name:     "chain terminates at launchd without a non-root ancestor",
+			startPID: 100,
+			procs: map[uint32][2]uint32{
+				100: {0, 1}, // some daemon's child
+				1:   {0, 0}, // launchd: ppid 0
+			},
+			wantFound: false,
+		},
+		{
+			name:      "unreadable immediate parent: no one to attribute to",
+			startPID:  100,
+			procs:     map[uint32][2]uint32{}, // lookup(100) fails
+			wantFound: false,
+		},
+		{
+			name:     "unreadable ancestor mid-chain",
+			startPID: 100,
+			procs: map[uint32][2]uint32{
+				100: {0, 90}, // readable, root, points further up
+				// 90 is not in the map: lookup(90) fails
+			},
+			wantFound: false,
+		},
+		{
+			name:     "self-referential ppid does not loop forever",
+			startPID: 100,
+			procs: map[uint32][2]uint32{
+				100: {0, 100}, // pathological: its own parent
+			},
+			wantFound: false,
+		},
+		{
+			name:     "hop count is bounded",
+			startPID: 1,
+			procs: func() map[uint32][2]uint32 {
+				// A chain of maxAncestorHops+2 all-root pids, never resolving
+				// to a non-root ancestor within the bound.
+				m := make(map[uint32][2]uint32)
+				for i := uint32(1); i <= maxAncestorHops+2; i++ {
+					m[i] = [2]uint32{0, i + 1}
+				}
+				return m
+			}(),
+			wantFound: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldCountRootLaunch(tt.childUID, tt.parentUID, tt.parentKnown); got != tt.want {
-				t.Errorf("shouldCountRootLaunch(%d, %d, %v) = %v, want %v",
-					tt.childUID, tt.parentUID, tt.parentKnown, got, tt.want)
+			uid, found := findEscalatingAncestor(tt.startPID, fakeProcTree(tt.procs))
+			if found != tt.wantFound {
+				t.Fatalf("found = %v, want %v", found, tt.wantFound)
+			}
+			if found && uid != tt.wantUID {
+				t.Errorf("uid = %d, want %d", uid, tt.wantUID)
 			}
 		})
 	}
