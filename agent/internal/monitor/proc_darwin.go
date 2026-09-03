@@ -147,7 +147,9 @@ func (w *PollWatcher) Run(ctx context.Context) error {
 
 	// Do initial snapshot to populate prevPIDs without firing OnStart for
 	// pre-existing processes (those are handled by ScanExistingProcesses).
-	w.prevPIDs = w.currentSnapshot()
+	// detectElevations=false: a process already root when the agent starts is
+	// adopted, not counted — an agent restart must not manufacture elevations.
+	w.prevPIDs = w.currentSnapshot(false)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -165,7 +167,7 @@ func (w *PollWatcher) Run(ctx context.Context) error {
 
 // poll diffs the current PID list against the previous snapshot and fires callbacks.
 func (w *PollWatcher) poll() {
-	current := w.currentSnapshot()
+	current := w.currentSnapshot(true)
 	now := time.Now()
 
 	// Detect new PIDs and PID reuse (same PID, different startSec = new process).
@@ -213,16 +215,30 @@ func (w *PollWatcher) poll() {
 	w.prevPIDs = current
 }
 
+// listAllPIDsFn and getProcBSDInfoFn indirect the real libproc calls so tests
+// can simulate a root-owned process (e.g. a sudo child) flowing through the
+// real, unmodified currentSnapshot()/poll() pipeline without requiring actual
+// root privileges — genuinely elevating a test process isn't possible without
+// an interactive password. Production code always uses the real functions;
+// only tests override these.
+var (
+	listAllPIDsFn    = listAllPIDs
+	getProcBSDInfoFn = getProcBSDInfo
+)
+
 // currentSnapshot returns a map of all running PIDs and their info.
-func (w *PollWatcher) currentSnapshot() map[uint32]procSnapshot {
-	pids := listAllPIDs()
+// detectElevations must be false for the one-time startup seed (Run() calling
+// this before prevPIDs exists, where every already-running process would
+// otherwise look "new") and true for every subsequent poll tick.
+func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnapshot {
+	pids := listAllPIDsFn()
 	snap := make(map[uint32]procSnapshot, len(pids))
 
 	for _, pid := range pids {
 		if pid == 0 {
 			continue
 		}
-		info, ok := getProcBSDInfo(pid)
+		info, ok := getProcBSDInfoFn(pid)
 		if !ok {
 			continue
 		}
@@ -242,7 +258,7 @@ func (w *PollWatcher) currentSnapshot() map[uint32]procSnapshot {
 		// utilities (softwareupdate, launchctl, installer...) — are exactly
 		// what those filters treat as noise for usage tracking. They are not
 		// noise for elevation tracking; they're the whole point.
-		if w.onElevated != nil {
+		if detectElevations && w.onElevated != nil {
 			prev, seen := w.prevPIDs[pid]
 			isNew := !seen || info.startSec != prev.startSec
 			if isNew {
