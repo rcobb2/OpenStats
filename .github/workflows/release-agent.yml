@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: {} # manual test build from any branch; skips the release job below
+
+# Explicit least-privilege default for the whole workflow: workflow_dispatch
+# means any branch with push access can trigger build-macos/build-windows,
+# so they should never inherit a broader ambient GITHUB_TOKEN default than
+# "read". Only the release job (tag pushes only, gated below) escalates to
+# contents: write, and declares that itself.
+permissions:
+  contents: read
 
 jobs:
   build-macos:
@@ -62,6 +71,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/') # manual workflow_dispatch runs stop at build artifacts, no release
     runs-on: ubuntu-latest
     permissions:
       contents: write

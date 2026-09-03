@@ -1,0 +1,297 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Least-privilege default: none of these jobs write to the repo, upload
+# releases, or need anything beyond reading code to build/test/smoke-test it.
+permissions:
+  contents: read
+
+jobs:
+  test-agent-darwin:
+    name: Agent tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: go vet
+        working-directory: agent
+        run: go vet ./...
+      - name: go test
+        working-directory: agent
+        run: go test ./...
+
+  test-agent-windows:
+    name: Agent tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: go vet
+        working-directory: agent
+        run: go vet ./...
+      - name: go test
+        working-directory: agent
+        run: go test ./...
+
+  test-server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: go vet
+        working-directory: server
+        run: go vet ./...
+      - name: go test
+        working-directory: server
+        run: go test ./...
+
+  # macOS-hosted runners give the `runner` user passwordless sudo, which is
+  # exactly what real elevation detection needs to exercise and that a human
+  # developer's laptop can't safely automate. This is a black-box smoke test:
+  # it builds the real binary, runs it as root — matching how the real agent
+  # is actually deployed (a LaunchDaemon) — against the real process table,
+  # and asserts against the real /metrics HTTP response.
+  #
+  # Running the agent as root is not optional here: proc_pidinfo(
+  # PROC_PIDTBSDINFO) requires the caller to own the target process or be
+  # root (see internal/monitor/diagnostic_darwin_test.go), so an unprivileged
+  # agent can never see another user's — or root's — processes at all. That
+  # cost real debugging time: an earlier version of this test ran the agent
+  # unprivileged and silently detected zero elevations despite a genuine
+  # sudo command succeeding.
+  macos-elevation-smoke:
+    name: macOS elevation smoke test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      - name: Build agent
+        working-directory: agent
+        run: go build -o /tmp/openlabstats-agent ./cmd/agent/
+
+      - name: Write local-only test config
+        run: |
+          mkdir -p /tmp/agent-smoke/data /tmp/agent-smoke/logs
+          cat > /tmp/agent-smoke/agent.yaml <<EOF
+          server:
+            port: 19183
+            metricsPath: /metrics
+            reportURL: ""
+          monitor:
+            reconcileInterval: 10s
+            minLifetime: 1s
+            building: ""
+            room: ""
+            excludePatterns: []
+          normalizer:
+            mappingFile: ${{ github.workspace }}/agent/configs/software-map.json
+            mappingUpdateURL: ""
+            mappingRefreshInterval: 1h
+          inventory:
+            scanInterval: 1h
+          store:
+            dbPath: /tmp/agent-smoke/data/openlabstats.db
+          logging:
+            level: debug
+            filePath: /tmp/agent-smoke/logs/agent.log
+          EOF
+
+      - name: Write test helpers
+        run: |
+          cat > /tmp/agent-smoke/lib.sh <<'EOF'
+          # Sums privilege_elevations_total for exe="sleep" specifically (not
+          # just any matching line) so unrelated root activity elsewhere on a
+          # shared CI runner — a different exe — can't cross-contaminate this
+          # test's counter, and sums defensively in case more than one label
+          # combination (e.g. differing category) still matches.
+          get_elevation_count() {
+            curl -s localhost:19183/metrics \
+              | grep 'privilege_elevations_total{' \
+              | grep 'exe="sleep"' \
+              | awk '{sum+=$NF} END {print sum+0}'
+          }
+
+          # kill "$(cat pid)" only killed sudo's own wrapper process in an
+          # earlier version of this test — sudo forks a child for the actual
+          # command rather than exec'ing in place, so the real (root-owned)
+          # agent process kept running, unnoticed, through a supposed
+          # "restart". Kill by matching the actual command line instead, and
+          # confirm the port is actually free before starting a new instance
+          # — otherwise a still-alive old agent silently keeps answering
+          # curl and every subsequent assertion is checking the wrong process.
+          kill_agent_and_wait() {
+            sudo pkill -f '/tmp/openlabstats-agent --config' 2>/dev/null || true
+            for i in $(seq 1 20); do
+              curl -sf localhost:19183/health >/dev/null 2>&1 || return 0
+              sleep 0.5
+            done
+            echo "agent port still answering after kill — it was not actually terminated"
+            return 1
+          }
+
+          launch_agent() {
+            sudo nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
+              >> /tmp/agent-smoke/console.log 2>&1 &
+            for i in $(seq 1 20); do
+              curl -sf localhost:19183/health >/dev/null 2>&1 && return 0
+              sleep 0.5
+            done
+            echo "agent never became healthy"
+            cat /tmp/agent-smoke/console.log
+            return 1
+          }
+          EOF
+
+      - name: Launch agent as root
+        run: |
+          source /tmp/agent-smoke/lib.sh
+          launch_agent
+
+      - name: Confirm clean baseline (no elevations yet)
+        run: |
+          source /tmp/agent-smoke/lib.sh
+          count=$(get_elevation_count)
+          if [ "$count" != "0" ]; then
+            echo "unexpected elevation count $count present before any sudo command ran"
+            curl -s localhost:19183/metrics | grep privilege_elevations_total
+            exit 1
+          fi
+
+      - name: Trigger a real sudo elevation
+        run: |
+          # GitHub-hosted macOS runners grant the runner user passwordless
+          # sudo, so this is a genuine elevation with no password handling.
+          #
+          # Wrapped in its own `bash -c` rather than backgrounded directly:
+          # this step's own script process exits the instant it backgrounds
+          # a job, which orphans the child straight to launchd before
+          # anyone can observe who actually invoked it — a CI-script
+          # artifact, not how a real interactive Terminal.app session
+          # behaves (its shell stays alive, synchronously, for the whole
+          # duration of a foreground sudo command). The trailing `; :` is
+          # not decoration — bash optimizes a single simple command in -c
+          # mode by exec'ing it in place with no fork at all, so a bare
+          # `bash -c 'sudo sleep 6'` becomes indistinguishable from running
+          # sudo directly (confirmed: it still showed up as sudo with
+          # ppid=launchd). Giving bash something to run *after* the command
+          # forces a real fork, so this inner shell genuinely stays alive as
+          # a non-root process for sleep's entire lifetime, matching a real
+          # shell.
+          bash -c 'sudo sleep 6; :' &
+          echo $! > /tmp/agent-smoke/sudo.pid
+
+      - name: Ground truth - actual process tree above the sleep child
+        run: |
+          # ps (sysctl KERN_PROC) sees cross-user processes regardless of
+          # caller privilege — already proven — so this doesn't need root.
+          # Walks pid -> ppid by hand up to 6 hops to see the REAL chain
+          # shape on this system, since findEscalatingAncestor still isn't
+          # finding a non-root ancestor within its own walk.
+          pid=$(pgrep -x sleep | head -1)
+          echo "sleep pid found via pgrep: $pid"
+          for i in $(seq 1 6); do
+            [ -z "$pid" ] && break
+            line=$(ps -eo pid,ppid,uid,comm | awk -v p="$pid" '$1==p')
+            echo "hop $i: $line"
+            pid=$(echo "$line" | awk '{print $2}')
+          done
+
+      - name: Wait for the elevation to be observed
+        run: |
+          source /tmp/agent-smoke/lib.sh
+          for i in $(seq 1 15); do
+            count=$(get_elevation_count)
+            if [ "$count" != "0" ]; then
+              echo "elevation count: $count"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "elevation was never recorded within 15s"
+          echo "--- console log ---"
+          cat /tmp/agent-smoke/console.log
+          echo "--- metrics ---"
+          curl -s localhost:19183/metrics | grep -i privilege || true
+          exit 1
+
+      - name: Verify attribution and count
+        run: |
+          metric=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | grep 'exe="sleep"')
+          echo "$metric"
+          echo "$metric" | grep -q 'user="runner"' || { echo "expected attribution to the runner user"; exit 1; }
+
+      - name: Start a long-lived elevation to restart against
+        run: |
+          source /tmp/agent-smoke/lib.sh
+          # The sudo sleep 6 from the earlier step may well have already
+          # exited by now (several polling/verification steps ran since it
+          # started) — restarting against it would only prove SQLite
+          # persistence, not "don't recount a still-running elevated
+          # process". Start a deliberately longer one and wait for it to be
+          # counted before touching the agent.
+          before=$(get_elevation_count)
+          bash -c 'sudo sleep 60; :' &
+          echo $! > /tmp/agent-smoke/sudo2.pid
+          for i in $(seq 1 15); do
+            now=$(get_elevation_count)
+            [ "$now" -gt "$before" ] && break
+            sleep 1
+          done
+          now=$(get_elevation_count)
+          echo "before=$before after-second-elevation=$now"
+          if [ "$now" -le "$before" ]; then
+            echo "second elevation was never counted"
+            exit 1
+          fi
+          echo "$now" > /tmp/agent-smoke/count-before-restart.txt
+
+      - name: Verify a restart does not double-count the still-elevated process
+        run: |
+          source /tmp/agent-smoke/lib.sh
+          # sudo sleep 60 (previous step) is still alive here. Restart the
+          # agent and confirm the counter comes back at the same value —
+          # ScanExistingProcesses / the startup snapshot must adopt it, not
+          # recount it (see the "adopt, don't count" fix in this branch).
+          before=$(cat /tmp/agent-smoke/count-before-restart.txt)
+          kill_agent_and_wait
+          launch_agent
+          sleep 3
+          after=$(get_elevation_count)
+          echo "before restart: $before, after restart: $after"
+          # sudo sleep 60 is still running (only ~10-20s elapsed) and must be
+          # adopted, not recounted — restored from SQLite, so exactly equal.
+          if [ "$after" != "$before" ]; then
+            echo "restart must not have re-counted the already-elevated process"
+            exit 1
+          fi
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "--- console log ---"
+          cat /tmp/agent-smoke/console.log || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo pkill -f '/tmp/openlabstats-agent --config' 2>/dev/null || true
+          sudo kill "$(cat /tmp/agent-smoke/sudo.pid)" 2>/dev/null || true
+          sudo kill "$(cat /tmp/agent-smoke/sudo2.pid)" 2>/dev/null || true

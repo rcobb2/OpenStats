@@ -46,29 +46,115 @@ Privilege-elevation detection. `elevation.go` holds the pure, platform-agnostic
 decision logic (unit-tested on any OS); the platform files supply the actual
 process-token / process-owner lookups.
 
-**Windows** (`elevation_windows.go`): on each process start event, opens the
-process token and reads `TOKEN_ELEVATION_TYPE`. Only `TokenElevationTypeFull`
-(the elevated half of a UAC split token) counts — `Default` tokens (built-in
-Administrator, SYSTEM, UAC-off machines) are always-elevated without a consent
-event and are ignored. Children of an elevated process inherit the Full token,
-so the parent's token is also checked: a Full child of a Full parent is not
-counted. If the parent is gone or unreadable, the launch is still counted
-(favor visibility) — a UAC split token keeps the original user's identity, so
-attribution never depends on the parent.
+**Windows** (`elevation_windows.go` + `findElevationBoundary` in
+`elevation.go`): on each process start event, opens the process token with
+`PROCESS_QUERY_INFORMATION` (not the newer `PROCESS_QUERY_LIMITED_INFORMATION`
+— real-hardware testing showed `OpenProcessToken` failing on ordinary,
+still-running processes with the limited right) and reads
+`TOKEN_ELEVATION_TYPE`. Only `TokenElevationTypeFull` (the elevated half of a
+UAC split token) counts — `Default` tokens (built-in Administrator, SYSTEM,
+UAC-off machines) are always-elevated without a consent event and are
+ignored.
 
-**macOS** (`elevation_darwin.go`): on each poll cycle, a newly-started process
-running as uid 0 with a non-root parent is a genuine escalation (`sudo`, an
-admin AppleScript, an installer's root helper); a root process forked by
-another root process (a daemon's own child, launchd's tree) is not. Unlike
-Windows, `sudo` fully replaces the process owner with root, so the elevated
-process can never be attributed to a human — attribution comes from the
-**parent's** owner instead, and if the parent can no longer be inspected there
-is no one to attribute to, so the launch is *not* counted (the opposite bias
-from Windows). This check runs inside `currentSnapshot()`'s per-PID loop
-*before* the usual exclude/system-path filtering, because the most common
-escalation targets (`sudo softwareupdate`, `sudo launchctl`, `/usr/sbin/*`,
-`/usr/bin/*`) are exactly the paths that filtering treats as noise for usage
-tracking.
+A process created without a different token simply reuses its parent's token
+object, so its own `TokenElevationType` reports the identical `Full` value —
+indistinguishable from a fresh UAC consent by looking at the type alone.
+`findElevationBoundary` walks up from the parent looking for the first
+ancestor that is *not* Full, proving a genuine new consent happened
+somewhere along the way; if every ancestor up to `maxAncestorHops` is Full,
+it's ordinary inheritance, not new. A one-hop check isn't enough: real
+hardware rejected a genuinely UAC-approved process (`procType` Full, a live
+`consent.exe` fired moments before) because WMI's reported immediate parent
+was *also* Full — a conpty/terminal-hosting indirection put one more
+purely-inherited hop between the elevation and its true origin than the
+check accounted for. If the ancestor chain becomes unreadable before
+resolving either way, the launch is still counted (favor visibility) — a UAC
+split token keeps the original user's identity, so attribution doesn't
+depend on this walk succeeding.
+
+**Pseudo-console hosts never count**, even though they're genuinely
+Full-token: elevating a shell inside Windows Terminal spawns both
+`OpenConsole.exe` (the conpty host) and the shell itself as siblings under
+the same parent PID, and the ancestor walk correctly finds both to be
+genuine new consents — but that's one user action, not two. `conhost.exe`
+is the pre-Windows-Terminal equivalent. See `isIncidentalConsoleHost` in
+`elevation.go`; same idea as macOS's `isIncidentalSetuidTool`, different
+reason (there it's "always privileged regardless of intent", here it's
+"not the thing the user actually chose to run").
+
+**This check runs inside `processStartEvents` (`wmi.go`) before the
+exclude-pattern filter, not after.** The most common UAC targets are
+terminals and shells — `cmd.exe`, `powershell.exe`, `pwsh.exe`,
+`WindowsTerminal.exe` — and every one of those is in the default
+`agent.yaml`'s exclude list, since a terminal window isn't "app usage" worth
+tracking. Checking elevation after that filter meant elevating `cmd.exe`
+produced nothing at all: confirmed on real hardware, the first time this
+code ran against an actual UAC prompt. Same fix, same reasoning, as the
+macOS side below.
+
+**macOS** (`elevation_darwin.go` + `findEscalatingAncestor` in `elevation.go`):
+on each poll cycle, a newly-started process running as uid 0 is a genuine
+escalation (`sudo`, an admin AppleScript, an installer's root helper) if
+*any* ancestor up the process tree is non-root; a chain that terminates at
+launchd/init without ever finding one is an ordinary root-owned tree (a
+daemon's own child), not a new escalation. Unlike Windows, `sudo` fully
+replaces the process owner with root, so the elevated process can never be
+attributed to a human — attribution comes from the first non-root
+**ancestor's** owner instead, and if the chain becomes unreadable there is no
+one to attribute to, so the launch is *not* counted (the opposite bias from
+Windows).
+
+The walk can't stop at the immediate parent: modern `sudo` (1.8.15+,
+including macOS's) forks an internal "monitor" subprocess that calls
+`setuid(0)` *before* it execs the target command, so the immediate parent of
+a `sudo`'d process is sudo's own already-root plumbing, not the invoking
+shell. A one-hop check treats every real `sudo` invocation as "a root process
+forked by another root process" — exactly the case meant to be excluded —
+and silently counts nothing. This was found by a real `sudo sleep` going
+completely uncounted in CI: the process was observed and evaluated, just
+rejected by the one-hop version of this check (`counted: false` in the debug
+log, with a root ppid one hop up). `findEscalatingAncestor` is bounded to
+`maxAncestorHops` (8) and guards against a self-referential ppid, so it can't
+loop forever on a malformed process tree.
+
+This check runs inside `currentSnapshot()`'s per-PID loop *before* the usual
+exclude/system-path filtering, because the most common escalation targets
+(`sudo softwareupdate`, `sudo launchctl`, `/usr/sbin/*`, `/usr/bin/*`) are
+exactly the paths that filtering treats as noise for usage tracking.
+
+**Incidental setuid tools never count**, even though their uid/parent shape
+is otherwise indistinguishable from a genuine escalation: `ps`, `top`,
+`traceroute(6)`, `at`/`atq`/`atrm`/`batch`, `crontab`, `quota`, `newgrp` ship
+setuid-root on macOS purely as an implementation detail and run that way on
+*every* invocation regardless of intent — unlike `sudo`/`su`/`login`, running
+one isn't a deliberate request for elevated access. Found via a CI
+diagnostic step's own `ps -eo ...` call getting counted as a real elevation,
+attributed to whoever happened to run it. See `isIncidentalSetuidTool` in
+`elevation.go`; the list is deliberately hardcoded rather than reusing the
+per-deployment exclude-patterns config, since it's a fixed OS-level fact, not
+a site preference.
+
+"is this new?" for elevation purposes is tracked in a separate map
+(`elevatedSeen`), not `prevPIDs`: an escalation target living under an
+excluded path (`/bin/sleep`, say) is never present in `prevPIDs` at all,
+which would make it look "new" on every single poll for its entire
+lifetime — re-firing `OnElevated` once per second instead of once at genuine
+start. This was a real bug, caught by
+`TestPollWatcherCountsElevationOnceAcrossMultiplePolls`.
+
+**macOS requires the agent to run as root.** `proc_pidinfo(PROC_PIDTBSDINFO)` —
+what `getProcBSDInfo` calls — only succeeds for a process the caller owns or
+when the caller is root; an unprivileged caller gets `ok=false` for *any*
+other user's process, root's included (see
+`TestGetProcBSDInfoCrossUserRequiresRoot`). This isn't a gap in production —
+the agent already runs as root via a LaunchDaemon, which is also why it can
+see every user's app usage on a shared lab Mac in the first place — but it
+means an agent run unprivileged (ad hoc local testing, a misconfigured
+install) silently detects zero elevations, the same way it silently misses
+other users' usage. This cost real debugging time once: a CI smoke test
+running the agent unprivileged saw a genuine `sudo` command produce nothing
+at all, no error, no log line — see `root0Seen` in `currentSnapshot`'s debug
+logging, a cheap field signal for exactly this failure mode.
 
 Both platforms share these properties:
 - Elevations are counted at **start time** via `OnElevated`, not in the OnStop
@@ -80,6 +166,17 @@ Both platforms share these properties:
   manufactures elevation events.
 - Persisted in SQLite (`app_usage_totals.total_elevations`) and restored across
   restarts like the other app counters.
+
+**Known limitation (Windows):** `OpenProcess` intermittently fails with
+"The parameter is incorrect" for some short-lived or MSIX-packaged
+processes (`msedge.exe`, `consent.exe`, `WindowsTerminal.exe` were all
+observed on real hardware) — logged as `"could not read token for
+elevation check"`, treated as unknown and simply not counted, same as any
+other unreadable process. Root cause not yet identified (possibly a race
+with process exit, possibly a packaged-app access restriction); harmless
+in that it fails safe, but means an elevation of exactly one of these
+processes could go uncounted. Not observed for ordinary unpackaged
+executables (`cmd.exe`, `powershell.exe`).
 
 ### `internal/monitor/tracker.go`
 

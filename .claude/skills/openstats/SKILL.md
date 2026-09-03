@@ -113,9 +113,14 @@ the most".
 
 **Elevation reports are sparse.** `top-apps-by-elevations` and
 `top-users-by-elevations` count privilege-elevation launches — UAC-elevated
-processes on Windows (agent v0.3.0+), root escalations via sudo or admin
-authorization on macOS (agent v0.4.0+) — which are rare events; empty output on
-a short range is expected, try `--range 30d`. The count is attributed to the
+processes on Windows, root escalations via sudo or admin authorization on
+macOS — which are rare events; empty output on a short range is expected, try
+`--range 30d`. Requires agent v0.4.5+ on both platforms: earlier 0.3.x/0.4.x
+builds have detection bugs found and fixed via real-hardware testing (Windows
+elevation checked against an exclude-filtered process list, a token-access
+right too narrow for some processes, and a one-hop parent check that missed
+elevations behind a terminal-hosting process; macOS double-counted a
+still-running elevation across restarts). The count is attributed to the
 account whose credentials authorized the elevation: on Windows that's the
 elevated token's own owner (an over-the-shoulder IT elevation shows the admin
 account, not the student at the keyboard); on macOS it's the parent

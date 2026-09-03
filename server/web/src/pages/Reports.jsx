@@ -234,8 +234,6 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   const [topUserLogins, setTopUserLogins] = useState(null);
   const [userSessionTime, setUserSessionTime] = useState(null);
   const [avgSession, setAvgSession] = useState(null);
-  const [elevatedApps, setElevatedApps] = useState(null);
-  const [elevatingUsers, setElevatingUsers] = useState(null);
 
   useEffect(() => {
     setForeground(null);
@@ -244,8 +242,6 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
     setTopUserLogins(null);
     setUserSessionTime(null);
     setAvgSession(null);
-    setElevatedApps(null);
-    setElevatingUsers(null);
 
     getTopAppsByUsage(range, 10, filters)
       .then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
@@ -259,10 +255,6 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
       .then(r => setUserSessionTime(parsePromVector(r, 'user'))).catch(() => setUserSessionTime(false));
     getAvgSessionTime(range, 10, filters)
       .then(r => setAvgSession(parsePromVector(r, 'user'))).catch(() => setAvgSession(false));
-    getTopAppsByElevations(range, 10, filters)
-      .then(r => setElevatedApps(parsePromVector(r))).catch(() => setElevatedApps(false));
-    getTopUsersByElevations(range, 10, filters)
-      .then(r => setElevatingUsers(parsePromVector(r, 'user'))).catch(() => setElevatingUsers(false));
   }, [range, filters]);
 
   // Users with under 3 logins in the window are omitted server-side — total
@@ -281,8 +273,6 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
   // "fewer than 10 had usage" note would flatly contradict the line right
   // above it — those users did have usage, they were filtered by login count.
   const avgSessionSubtitle = omittedNote;
-  const elevatedAppsSubtitle = sparseNote(elevatedApps, 10, 'apps had elevations');
-  const elevatingUsersSubtitle = sparseNote(elevatingUsers, 10, 'users had elevations');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -351,6 +341,42 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
         >
           <HBarChart data={avgSession} valueLabel="minutes" height={300} />
         </ChartCard>
+      </div>
+      {viewAllModal}
+    </div>
+  );
+}
+
+// Privilege elevations (UAC on Windows, sudo/admin authorization on macOS)
+// live on their own report tab rather than under User Behavior: they're a
+// security signal, not a usage-analytics one, and bundling them in made the
+// "who elevates and for what" question one panel among a dozen instead of
+// the whole point of a view.
+function ElevationReport({ range, filters }) {
+  const [elevatedApps, setElevatedApps] = useState(null);
+  const [elevatingUsers, setElevatingUsers] = useState(null);
+
+  useEffect(() => {
+    setElevatedApps(null);
+    setElevatingUsers(null);
+
+    getTopAppsByElevations(range, 10, filters)
+      .then(r => setElevatedApps(parsePromVector(r))).catch(() => setElevatedApps(false));
+    getTopUsersByElevations(range, 10, filters)
+      .then(r => setElevatingUsers(parsePromVector(r, 'user'))).catch(() => setElevatingUsers(false));
+  }, [range, filters]);
+
+  const [viewAllModal, openViewAll] = useViewAllModal();
+
+  const elevatedAppsSubtitle = sparseNote(elevatedApps, 10, 'apps had elevations');
+  const elevatingUsersSubtitle = sparseNote(elevatingUsers, 10, 'users had elevations');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div style={{ padding: '0.75rem 1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+        Elevations are rare events — UAC prompts on Windows, <code>sudo</code>/admin
+        authorization on macOS. Empty or sparse results on a short range are
+        expected; try a longer range or Last 30 Days.
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
         <ChartCard
@@ -678,6 +704,7 @@ export default function Reports() {
     user: 'User Behavior Analytics',
     hardware: 'Hardware & Lab Utilization',
     software: 'Software Metering',
+    elevations: 'Privilege Elevations',
   };
 
   return (
@@ -701,6 +728,7 @@ export default function Reports() {
             <option value="user">User Behavior</option>
             <option value="hardware">Hardware Utilization</option>
             <option value="software">Software Metering</option>
+            <option value="elevations">Privilege Elevations</option>
           </select>
         </div>
 
@@ -794,6 +822,9 @@ export default function Reports() {
               handleExport={handleExport}
               onIgnore={handleIgnore}
             />
+          )}
+          {reportType === 'elevations' && (
+            <ElevationReport key={chartKey} range={effectiveRange} filters={filters} />
           )}
         </>
       )}
