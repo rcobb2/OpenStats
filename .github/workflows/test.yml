@@ -56,11 +56,18 @@ jobs:
 
   # macOS-hosted runners give the `runner` user passwordless sudo, which is
   # exactly what real elevation detection needs to exercise and that a human
-  # developer's laptop can't safely automate (see agent/agent.md — attribution
-  # requires reading the parent process's real owner via a genuinely live
-  # sudo invocation, not a mock). This is a black-box smoke test: it builds
-  # the real binary, runs the real poller against the real process table, and
-  # asserts against the real /metrics HTTP response.
+  # developer's laptop can't safely automate. This is a black-box smoke test:
+  # it builds the real binary, runs it as root — matching how the real agent
+  # is actually deployed (a LaunchDaemon) — against the real process table,
+  # and asserts against the real /metrics HTTP response.
+  #
+  # Running the agent as root is not optional here: proc_pidinfo(
+  # PROC_PIDTBSDINFO) requires the caller to own the target process or be
+  # root (see internal/monitor/diagnostic_darwin_test.go), so an unprivileged
+  # agent can never see another user's — or root's — processes at all. That
+  # cost real debugging time: an earlier version of this test ran the agent
+  # unprivileged and silently detected zero elevations despite a genuine
+  # sudo command succeeding.
   macos-elevation-smoke:
     name: macOS elevation smoke test
     runs-on: macos-latest
@@ -74,14 +81,6 @@ jobs:
       - name: Build agent
         working-directory: agent
         run: go build -o /tmp/openlabstats-agent ./cmd/agent/
-
-      - name: Diagnose proc_pidinfo cross-user visibility (unprivileged vs root)
-        working-directory: agent
-        run: |
-          echo "--- unprivileged (matches how this smoke test runs the agent) ---"
-          go test -count=1 ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
-          echo "--- as root (matches how the real installed agent runs, per agent.md's LaunchDaemon) ---"
-          sudo "$(go env GOROOT)/bin/go" test -count=1 ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
 
       - name: Write local-only test config
         run: |
@@ -110,9 +109,9 @@ jobs:
             filePath: /tmp/agent-smoke/logs/agent.log
           EOF
 
-      - name: Launch agent
+      - name: Launch agent as root
         run: |
-          nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
+          sudo nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
             > /tmp/agent-smoke/console.log 2>&1 &
           echo $! > /tmp/agent-smoke/agent.pid
           for i in $(seq 1 20); do
@@ -138,22 +137,6 @@ jobs:
           # backgrounded so it's still alive across at least one 1s poll tick.
           sudo sleep 6 &
           echo $! > /tmp/agent-smoke/sudo.pid
-
-      - name: Ground truth - can this account see the elevated process at all?
-        run: |
-          # Independent of our Go/cgo code: does ps (running as the same
-          # unprivileged runner account as the agent) see the root-owned
-          # sleep process, and are there other root processes on this VM at
-          # all (launchd, syslogd, etc.)? This isolates whether a visibility
-          # restriction is environmental or specific to our proc_pidinfo call.
-          echo "--- whoami / id ---"
-          whoami; id
-          echo "--- full process table (uid 0 rows) ---"
-          ps -eo pid,ppid,uid,user,comm | awk 'NR==1 || $3==0'
-          echo "--- sleep processes (any owner) ---"
-          ps -eo pid,ppid,uid,user,comm | grep -i sleep || echo "(none visible via ps)"
-          echo "--- total process count ---"
-          ps -e | wc -l
 
       - name: Wait for the elevation to be observed
         run: |
@@ -211,9 +194,9 @@ jobs:
           # ScanExistingProcesses / the startup snapshot must adopt it, not
           # recount it (see the "adopt, don't count" fix in this branch).
           before=$(cat /tmp/agent-smoke/count-before-restart.txt)
-          kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
+          sudo kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
           sleep 1
-          nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
+          sudo nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
             >> /tmp/agent-smoke/console.log 2>&1 &
           echo $! > /tmp/agent-smoke/agent.pid
           for i in $(seq 1 20); do
@@ -239,6 +222,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
+          sudo kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
           sudo kill "$(cat /tmp/agent-smoke/sudo.pid)" 2>/dev/null || true
           sudo kill "$(cat /tmp/agent-smoke/sudo2.pid)" 2>/dev/null || true

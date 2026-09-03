@@ -70,6 +70,20 @@ escalation targets (`sudo softwareupdate`, `sudo launchctl`, `/usr/sbin/*`,
 `/usr/bin/*`) are exactly the paths that filtering treats as noise for usage
 tracking.
 
+**macOS requires the agent to run as root.** `proc_pidinfo(PROC_PIDTBSDINFO)` —
+what `getProcBSDInfo` calls — only succeeds for a process the caller owns or
+when the caller is root; an unprivileged caller gets `ok=false` for *any*
+other user's process, root's included (see
+`TestGetProcBSDInfoCrossUserRequiresRoot`). This isn't a gap in production —
+the agent already runs as root via a LaunchDaemon, which is also why it can
+see every user's app usage on a shared lab Mac in the first place — but it
+means an agent run unprivileged (ad hoc local testing, a misconfigured
+install) silently detects zero elevations, the same way it silently misses
+other users' usage. This cost real debugging time once: a CI smoke test
+running the agent unprivileged saw a genuine `sudo` command produce nothing
+at all, no error, no log line — see `root0Seen` in `currentSnapshot`'s debug
+logging, a cheap field signal for exactly this failure mode.
+
 Both platforms share these properties:
 - Elevations are counted at **start time** via `OnElevated`, not in the OnStop
   session path — a short-lived elevated installer must count even if it dies

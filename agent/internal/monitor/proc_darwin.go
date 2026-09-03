@@ -234,9 +234,12 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 	pids := listAllPIDsFn()
 	snap := make(map[uint32]procSnapshot, len(pids))
 
-	// Diagnostic only: establishes whether proc_listallpids/proc_pidinfo see
-	// other-user (especially root) processes at all from this unprivileged
-	// caller in the current environment.
+	// root0Seen is a cheap field-diagnostic signal: proc_pidinfo requires the
+	// caller to own the target process or be root (see
+	// TestGetProcBSDInfoCrossUserRequiresRoot), so root0Seen==0 with a
+	// nonzero infoFailures count means this agent isn't running privileged
+	// enough to see other users' processes at all — elevation detection (and
+	// usage tracking for other users) will silently see nothing.
 	var infoFailures, root0Seen int
 
 	for _, pid := range pids {
@@ -261,11 +264,12 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 			exePath = exeName
 		}
 
-		// Diagnostic only: confirms this unprivileged agent can actually see
-		// root-owned processes via proc_pidinfo at all. Unconditional (not
-		// gated by detectElevations) so it also fires during the startup
-		// seed, and cheap since uid-0 processes are a small fraction of the
-		// process table.
+		// Field-diagnostic breadcrumb: if this never fires despite real
+		// elevation activity on a machine, it means the agent isn't running
+		// privileged enough to see root-owned processes at all (see
+		// root0Seen above). Unconditional — not gated by detectElevations —
+		// so it also fires during the startup seed; cheap, since uid-0
+		// processes are a small fraction of the process table.
 		if info.uid == 0 {
 			w.logger.Debug("observed root-owned process", "pid", pid, "exe", exeName, "ppid", info.ppid, "pathUnreadable", pathUnreadable)
 		}
