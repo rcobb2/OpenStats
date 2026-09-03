@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getAgents, deleteAgent, assignAgentToLab, getLabs, forceAgentUpdate } from '../../api';
 import ResizableTable from '../../components/Table';
 
@@ -9,6 +9,7 @@ export default function AgentsList() {
   const [updating, setUpdating] = useState({});
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sort, setSort] = useState({ key: 'hostname', dir: 'asc' });
 
   const load = () => {
     setError(null); setLoading(true);
@@ -58,6 +59,53 @@ export default function AgentsList() {
     }
   };
 
+  const labName = (a) => {
+    const l = labs.find(l => l.id === a.labId);
+    return l ? l.name : '';
+  };
+
+  // Value used to compare a row for each sortable column.
+  const sortValue = (a, key) => {
+    switch (key) {
+      case 'hostname': return a.hostname || '';
+      case 'ipAddress': return a.ipAddress || '';
+      case 'osVersion': return a.osVersion || '';
+      case 'status': return a.status || '';
+      case 'agentVersion': return a.agentVersion || '';
+      case 'lab': return labName(a);
+      case 'lastSeen': return a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+      default: return '';
+    }
+  };
+
+  const sortedAgents = useMemo(() => {
+    const rows = [...agents];
+    rows.sort((a, b) => {
+      const av = sortValue(a, sort.key);
+      const bv = sortValue(b, sort.key);
+      let cmp;
+      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+      else cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+      return sort.dir === 'asc' ? cmp : -cmp;
+    });
+    return rows;
+  }, [agents, labs, sort]);
+
+  const toggleSort = (key) => {
+    setSort(s => s.key === key
+      ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: 'asc' });
+  };
+
+  const SortHeader = ({ label, sortKey }) => (
+    <th onClick={() => toggleSort(sortKey)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+      {label}
+      <span style={{ opacity: sort.key === sortKey ? 0.9 : 0.25, marginLeft: '0.35em', fontSize: '0.8em' }}>
+        {sort.key === sortKey ? (sort.dir === 'asc' ? '▲' : '▼') : '▲'}
+      </span>
+    </th>
+  );
+
   if (error) return <div className="error">{error}</div>;
 
   return (
@@ -76,18 +124,18 @@ export default function AgentsList() {
       <ResizableTable>
         <thead>
           <tr>
-            <th>Hostname</th>
-            <th>IP</th>
-            <th>OS Version</th>
-            <th>Status</th>
-            <th>Agent Ver.</th>
-            <th>Lab</th>
-            <th>Last Seen</th>
+            <SortHeader label="Hostname" sortKey="hostname" />
+            <SortHeader label="IP" sortKey="ipAddress" />
+            <SortHeader label="OS Version" sortKey="osVersion" />
+            <SortHeader label="Status" sortKey="status" />
+            <SortHeader label="Agent Ver." sortKey="agentVersion" />
+            <SortHeader label="Lab" sortKey="lab" />
+            <SortHeader label="Last Seen" sortKey="lastSeen" />
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {agents.map(a => (
+          {sortedAgents.map(a => (
             <tr key={a.id}>
               <td>{a.hostname}</td>
               <td>{a.ipAddress}</td>
