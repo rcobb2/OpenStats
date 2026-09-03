@@ -178,6 +178,22 @@ jobs:
           sudo sleep 6 &
           echo $! > /tmp/agent-smoke/sudo.pid
 
+      - name: Ground truth - actual process tree above the sleep child
+        run: |
+          # ps (sysctl KERN_PROC) sees cross-user processes regardless of
+          # caller privilege — already proven — so this doesn't need root.
+          # Walks pid -> ppid by hand up to 6 hops to see the REAL chain
+          # shape on this system, since findEscalatingAncestor still isn't
+          # finding a non-root ancestor within its own walk.
+          pid=$(pgrep -x sleep | head -1)
+          echo "sleep pid found via pgrep: $pid"
+          for i in $(seq 1 6); do
+            [ -z "$pid" ] && break
+            line=$(ps -eo pid,ppid,uid,comm | awk -v p="$pid" '$1==p')
+            echo "hop $i: $line"
+            pid=$(echo "$line" | awk '{print $2}')
+          done
+
       - name: Wait for the elevation to be observed
         run: |
           source /tmp/agent-smoke/lib.sh
