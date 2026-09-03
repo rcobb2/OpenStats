@@ -131,6 +131,22 @@ jobs:
           sudo sleep 6 &
           echo $! > /tmp/agent-smoke/sudo.pid
 
+      - name: Ground truth - can this account see the elevated process at all?
+        run: |
+          # Independent of our Go/cgo code: does ps (running as the same
+          # unprivileged runner account as the agent) see the root-owned
+          # sleep process, and are there other root processes on this VM at
+          # all (launchd, syslogd, etc.)? This isolates whether a visibility
+          # restriction is environmental or specific to our proc_pidinfo call.
+          echo "--- whoami / id ---"
+          whoami; id
+          echo "--- full process table (uid 0 rows) ---"
+          ps -eo pid,ppid,uid,user,comm | awk 'NR==1 || $3==0'
+          echo "--- sleep processes (any owner) ---"
+          ps -eo pid,ppid,uid,user,comm | grep -i sleep || echo "(none visible via ps)"
+          echo "--- total process count ---"
+          ps -e | wc -l
+
       - name: Wait for the elevation to be observed
         run: |
           for i in $(seq 1 15); do

@@ -234,13 +234,22 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 	pids := listAllPIDsFn()
 	snap := make(map[uint32]procSnapshot, len(pids))
 
+	// Diagnostic only: establishes whether proc_listallpids/proc_pidinfo see
+	// other-user (especially root) processes at all from this unprivileged
+	// caller in the current environment.
+	var infoFailures, root0Seen int
+
 	for _, pid := range pids {
 		if pid == 0 {
 			continue
 		}
 		info, ok := getProcBSDInfoFn(pid)
 		if !ok {
+			infoFailures++
 			continue
+		}
+		if info.uid == 0 {
+			root0Seen++
 		}
 		exeName := info.exeName
 		if exeName == "" {
@@ -299,6 +308,7 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 			startTime: time.Unix(int64(info.startSec), 0),
 		}
 	}
+	w.logger.Debug("snapshot pass complete", "totalPIDs", len(pids), "infoFailures", infoFailures, "root0Seen", root0Seen)
 	return snap
 }
 
