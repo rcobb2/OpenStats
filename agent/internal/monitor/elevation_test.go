@@ -121,6 +121,21 @@ func TestIsIncidentalSetuidTool(t *testing.T) {
 	}
 }
 
+func TestIsIncidentalConsoleHost(t *testing.T) {
+	// Case-insensitive: Windows process names aren't consistently normalized
+	// at the source (WMI reports whatever casing the OS gives it).
+	for _, exe := range []string{"OpenConsole.exe", "openconsole.exe", "conhost.exe", "CONHOST.EXE"} {
+		if !isIncidentalConsoleHost(exe) {
+			t.Errorf("isIncidentalConsoleHost(%q) = false, want true", exe)
+		}
+	}
+	for _, exe := range []string{"powershell.exe", "cmd.exe", "WindowsTerminal.exe", ""} {
+		if isIncidentalConsoleHost(exe) {
+			t.Errorf("isIncidentalConsoleHost(%q) = true, want false — this is a real shell, not just a pty host", exe)
+		}
+	}
+}
+
 func TestFindEscalatingAncestor(t *testing.T) {
 	tests := []struct {
 		name      string

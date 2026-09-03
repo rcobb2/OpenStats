@@ -1,5 +1,7 @@
 package monitor
 
+import "strings"
+
 // Token elevation types (winnt.h TOKEN_ELEVATION_TYPE). golang.org/x/sys/windows
 // exports the TokenElevationType info class but not these values, and this file
 // is unit-tested on non-Windows platforms, so they are defined here untagged.
@@ -137,4 +139,26 @@ var incidentalSetuidTools = map[string]bool{
 // utility that should never itself be counted as an elevation.
 func isIncidentalSetuidTool(exeName string) bool {
 	return incidentalSetuidTools[exeName]
+}
+
+// incidentalConsoleHosts are Windows pseudo-console host processes that ride
+// along with an elevated shell as a side effect of one UAC consent, not a
+// separate deliberate action — found the hard way: elevating a shell inside
+// Windows Terminal counted twice, once for OpenConsole.exe (the conpty host)
+// and once for the shell itself, both siblings under the same parent PID and
+// both genuinely Full-token. A lab admin looking at "Top Elevated Apps"
+// would see a confusing OpenConsole.exe entry for something no one chose to
+// run. conhost.exe is the pre-Windows-Terminal equivalent, included for the
+// same reason even though it wasn't observed directly in testing.
+var incidentalConsoleHosts = map[string]bool{
+	"openconsole.exe": true,
+	"conhost.exe":     true,
+}
+
+// isIncidentalConsoleHost reports whether exeName is a known pseudo-console
+// host that should never itself be counted as an elevation. exeName is
+// lowercased before matching since Windows process names aren't
+// case-normalized consistently at the source.
+func isIncidentalConsoleHost(exeName string) bool {
+	return incidentalConsoleHosts[strings.ToLower(exeName)]
 }

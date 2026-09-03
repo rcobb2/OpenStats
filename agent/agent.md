@@ -72,6 +72,16 @@ resolving either way, the launch is still counted (favor visibility) — a UAC
 split token keeps the original user's identity, so attribution doesn't
 depend on this walk succeeding.
 
+**Pseudo-console hosts never count**, even though they're genuinely
+Full-token: elevating a shell inside Windows Terminal spawns both
+`OpenConsole.exe` (the conpty host) and the shell itself as siblings under
+the same parent PID, and the ancestor walk correctly finds both to be
+genuine new consents — but that's one user action, not two. `conhost.exe`
+is the pre-Windows-Terminal equivalent. See `isIncidentalConsoleHost` in
+`elevation.go`; same idea as macOS's `isIncidentalSetuidTool`, different
+reason (there it's "always privileged regardless of intent", here it's
+"not the thing the user actually chose to run").
+
 **This check runs inside `processStartEvents` (`wmi.go`) before the
 exclude-pattern filter, not after.** The most common UAC targets are
 terminals and shells — `cmd.exe`, `powershell.exe`, `pwsh.exe`,
@@ -156,6 +166,17 @@ Both platforms share these properties:
   manufactures elevation events.
 - Persisted in SQLite (`app_usage_totals.total_elevations`) and restored across
   restarts like the other app counters.
+
+**Known limitation (Windows):** `OpenProcess` intermittently fails with
+"The parameter is incorrect" for some short-lived or MSIX-packaged
+processes (`msedge.exe`, `consent.exe`, `WindowsTerminal.exe` were all
+observed on real hardware) — logged as `"could not read token for
+elevation check"`, treated as unknown and simply not counted, same as any
+other unreadable process. Root cause not yet identified (possibly a race
+with process exit, possibly a packaged-app access restriction); harmless
+in that it fails safe, but means an elevation of exactly one of these
+processes could go uncounted. Not observed for ordinary unpackaged
+executables (`cmd.exe`, `powershell.exe`).
 
 ### `internal/monitor/tracker.go`
 

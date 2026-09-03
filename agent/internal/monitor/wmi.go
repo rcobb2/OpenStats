@@ -176,7 +176,11 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 				w.logger.Debug("could not read token for elevation check",
 					"pid", processID, "exe", processName, "failStep", eval.procFailStep, "failErr", eval.procFailErr)
 			}
-			if eval.counted {
+			// Pseudo-console hosts (OpenConsole.exe, conhost.exe) ride along
+			// with an elevated shell as a side effect of one UAC consent —
+			// counting them separately double-counts a single user action
+			// and pollutes reports with a process no one chose to run.
+			if eval.counted && !isIncidentalConsoleHost(processName) {
 				exePath := getProcessExePath(svc, processID)
 				user := getProcessUser(svc, processID)
 				w.onElevated(processID, processName, exePath, user)
