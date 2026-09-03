@@ -79,9 +79,9 @@ jobs:
         working-directory: agent
         run: |
           echo "--- unprivileged (matches how this smoke test runs the agent) ---"
-          go test ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
+          go test -count=1 ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
           echo "--- as root (matches how the real installed agent runs, per agent.md's LaunchDaemon) ---"
-          sudo "$(go env GOROOT)/bin/go" test ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
+          sudo "$(go env GOROOT)/bin/go" test -count=1 ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
 
       - name: Write local-only test config
         run: |
