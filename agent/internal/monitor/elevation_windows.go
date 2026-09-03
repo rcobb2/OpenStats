@@ -34,18 +34,31 @@ func getTokenElevationType(pid uint32) (elevType uint32, ok bool) {
 	return elevType, true
 }
 
+// elevationEvaluation carries the intermediate token-check results behind an
+// isUACElevatedLaunch decision, for debug logging. "No return on Windows"
+// with a bare bool gave no way to tell OpenProcess failure, a Default token,
+// or an inherited Full-parent apart — this makes that diagnosable without
+// re-deriving the token checks a second time just for logging.
+type elevationEvaluation struct {
+	procKnown, parentKnown bool
+	procType, parentType   uint32
+	counted                bool
+}
+
+func evaluateUACElevation(pid, parentPID uint32) elevationEvaluation {
+	procType, procKnown := getTokenElevationType(pid)
+	var parentType uint32
+	var parentKnown bool
+	if parentPID != 0 {
+		parentType, parentKnown = getTokenElevationType(parentPID)
+	}
+	counted := procKnown && shouldCountElevation(procType, parentType, parentKnown)
+	return elevationEvaluation{procKnown, parentKnown, procType, parentType, counted}
+}
+
 // isUACElevatedLaunch reports whether a just-started process represents a
 // user-driven UAC elevation (split-token Full, not inherited from an already
 // elevated parent).
 func isUACElevatedLaunch(pid, parentPID uint32) bool {
-	procType, ok := getTokenElevationType(pid)
-	if !ok {
-		return false
-	}
-	var parentType uint32
-	parentKnown := false
-	if parentPID != 0 {
-		parentType, parentKnown = getTokenElevationType(parentPID)
-	}
-	return shouldCountElevation(procType, parentType, parentKnown)
+	return evaluateUACElevation(pid, parentPID).counted
 }

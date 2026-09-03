@@ -161,10 +161,25 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 		// gated on isNewGroup: an elevated child joining an existing process
 		// group is still a distinct UAC consent; the parent-token check
 		// inside isUACElevatedLaunch is the inheritance dedup.
-		if w.onElevated != nil && isUACElevatedLaunch(processID, parentProcessID) {
-			exePath := getProcessExePath(svc, processID)
-			user := getProcessUser(svc, processID)
-			w.onElevated(processID, processName, exePath, user)
+		if w.onElevated != nil {
+			eval := evaluateUACElevation(processID, parentProcessID)
+			// Field-diagnostic breadcrumb, same spirit as the macOS side's
+			// "evaluated possible elevation" log: only logged for processes
+			// with an actual (non-Limited) token state worth explaining, to
+			// avoid flooding this at ordinary process-start volume.
+			if eval.procKnown && eval.procType != tokenElevationTypeLimited {
+				w.logger.Debug("evaluated possible elevation",
+					"pid", processID, "exe", processName, "ppid", parentProcessID,
+					"procType", eval.procType, "parentKnown", eval.parentKnown, "parentType", eval.parentType,
+					"counted", eval.counted)
+			} else if !eval.procKnown {
+				w.logger.Debug("could not read token for elevation check", "pid", processID, "exe", processName)
+			}
+			if eval.counted {
+				exePath := getProcessExePath(svc, processID)
+				user := getProcessUser(svc, processID)
+				w.onElevated(processID, processName, exePath, user)
+			}
 		}
 
 		if w.isExcluded(processName) {
