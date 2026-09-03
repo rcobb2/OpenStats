@@ -109,12 +109,22 @@ func findEscalatingAncestor(startPID uint32, lookup procAncestorLookup) (invokin
 }
 
 // incidentalSetuidTools are macOS binaries that ship setuid-root purely as an
-// implementation detail (reading other users' process/network/scheduling
-// state) and run that way on *every* invocation regardless of what they're
-// asked to do — unlike sudo/su/login, running one isn't a deliberate request
-// for elevated access in any sense a lab admin cares about. Found the hard
-// way: a CI diagnostic step's own `ps -eo ...` call got counted as a real
-// elevation, attributed to the account that happened to run it.
+// implementation detail and run that way on *every* invocation regardless of
+// what they're asked to do or who asked — running one isn't a deliberate
+// request for elevated access in any sense a lab admin cares about.
+//
+// login was originally left off this list on the theory that it's
+// "escalation-adjacent like su" — wrong. su and sudo require an explicit,
+// deliberate user action; login is invoked automatically by macOS as routine
+// session-establishment plumbing (every SSH session, su -l, fast user
+// switching), with no user intent to elevate anything. Confirmed on real
+// production data: two accounts showed 50,000-60,000+ "elevations" of
+// login/ps apiece — utterly implausible as deliberate escalations, and an
+// exact match for "a setuid binary the OS invokes constantly on its own".
+//
+// ps was found the same way, earlier: a CI diagnostic step's own
+// `ps -eo ...` call got counted as a real elevation, attributed to the
+// account that happened to run it.
 //
 // This list is deliberately narrow (confirmed setuid-root on macOS) rather
 // than reusing the general exclude-patterns mechanism, which exists for a
@@ -122,6 +132,7 @@ func findEscalatingAncestor(startPID uint32, lookup procAncestorLookup) (invokin
 // per-deployment configurable — this is about a fixed OS-level fact, not a
 // site's preference.
 var incidentalSetuidTools = map[string]bool{
+	"login":       true,
 	"ps":          true,
 	"top":         true,
 	"traceroute":  true,

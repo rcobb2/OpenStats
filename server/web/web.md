@@ -126,15 +126,18 @@ Base URL: `/api/v1` (proxied by server)
 - Tabs: All, Tracked, Ignored, Merged, Rules
 
 ### Reports (`pages/Reports.jsx`)
+Report type is a dropdown ("Report" selector), not literal tabs — `reportType`
+state switches which component renders: `UserBehaviorReport`, `LabUsageReport`
+(hardware), `SoftwareMeteringReport`, `ElevationReport`.
 - Top applications by usage time
 - Usage by lab
 - Active users
-- Privilege-elevation panels (Top Elevated Apps, Top Users by Elevations) under
-  the User Behavior report — UAC on Windows, sudo/admin authorization on
-  macOS; honors the page-level range selector like every other panel (a
-  forced 30-day floor for sparse login-derived panels was tried and then
-  removed — see git history on Reports.jsx — since it hid genuinely sparse
-  data instead of showing it)
+- **Privilege Elevations** (`ElevationReport`) — its own report type, not a
+  panel under User Behavior: Top Elevated Apps, Top Users by Elevations. UAC
+  on Windows, sudo/admin authorization on macOS. Honors the page-level range
+  selector like every other panel (a forced 30-day floor for sparse
+  login-derived panels was tried and then removed — see git history on
+  Reports.jsx — since it hid genuinely sparse data instead of showing it).
 - Time range selector (24h, 7d, 30d)
 
 

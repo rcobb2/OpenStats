@@ -109,12 +109,15 @@ func fakeProcTree(procs map[uint32][2]uint32) procAncestorLookup {
 }
 
 func TestIsIncidentalSetuidTool(t *testing.T) {
-	for _, exe := range []string{"ps", "top", "traceroute", "traceroute6", "crontab"} {
+	// login moved here after real production data showed 50,000-60,000+
+	// "elevations" for it — invoked automatically by macOS session
+	// plumbing, not a deliberate user action, unlike su/sudo.
+	for _, exe := range []string{"ps", "top", "traceroute", "traceroute6", "crontab", "login"} {
 		if !isIncidentalSetuidTool(exe) {
 			t.Errorf("isIncidentalSetuidTool(%q) = false, want true", exe)
 		}
 	}
-	for _, exe := range []string{"sudo", "su", "login", "softwareupdate", "installer", ""} {
+	for _, exe := range []string{"sudo", "su", "softwareupdate", "installer", ""} {
 		if isIncidentalSetuidTool(exe) {
 			t.Errorf("isIncidentalSetuidTool(%q) = true, want false — this should still count as a deliberate elevation", exe)
 		}
