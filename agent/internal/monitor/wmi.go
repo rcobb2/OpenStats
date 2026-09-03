@@ -173,7 +173,8 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 					"procType", eval.procType, "parentKnown", eval.parentKnown, "parentType", eval.parentType,
 					"counted", eval.counted)
 			} else if !eval.procKnown {
-				w.logger.Debug("could not read token for elevation check", "pid", processID, "exe", processName)
+				w.logger.Debug("could not read token for elevation check",
+					"pid", processID, "exe", processName, "failStep", eval.procFailStep, "failErr", eval.procFailErr)
 			}
 			if eval.counted {
 				exePath := getProcessExePath(svc, processID)
