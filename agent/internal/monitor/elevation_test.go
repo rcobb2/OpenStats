@@ -2,27 +2,95 @@ package monitor
 
 import "testing"
 
-func TestShouldCountElevation(t *testing.T) {
+// fakeWindowsProcTree builds a windowsAncestorLookup from a map of
+// pid -> (elevationType, ppid), so tests can construct arbitrary process
+// chains without any real Win32 calls.
+func fakeWindowsProcTree(procs map[uint32][2]uint32) windowsAncestorLookup {
+	return func(pid uint32) (elevType, ppid uint32, ok bool) {
+		p, exists := procs[pid]
+		if !exists {
+			return 0, 0, false
+		}
+		return p[0], p[1], true
+	}
+}
+
+func TestFindElevationBoundary(t *testing.T) {
 	tests := []struct {
-		name        string
-		procType    uint32
-		parentType  uint32
-		parentKnown bool
-		want        bool
+		name              string
+		startPID          uint32
+		procs             map[uint32][2]uint32 // pid -> {elevationType, ppid}
+		wantFound         bool
+		wantChainReadable bool
 	}{
-		{"full token, limited parent (UAC consent)", tokenElevationTypeFull, tokenElevationTypeLimited, true, true},
-		{"full token, default parent (launched by service)", tokenElevationTypeFull, tokenElevationTypeDefault, true, true},
-		{"full token inherited from full parent", tokenElevationTypeFull, tokenElevationTypeFull, true, false},
-		{"full token, parent unknown (favor counting)", tokenElevationTypeFull, 0, false, true},
-		{"default token (built-in admin / UAC off)", tokenElevationTypeDefault, tokenElevationTypeLimited, true, false},
-		{"limited token (ordinary user)", tokenElevationTypeLimited, tokenElevationTypeLimited, true, false},
-		{"limited token, parent unknown", tokenElevationTypeLimited, 0, false, false},
+		{
+			name:      "immediate non-Full parent (plain UAC consent, no indirection)",
+			startPID:  100,
+			procs:     map[uint32][2]uint32{100: {tokenElevationTypeLimited, 50}},
+			wantFound: true, wantChainReadable: true,
+		},
+		{
+			name:     "Full parent whose own parent is non-Full (conpty/terminal indirection)",
+			startPID: 100, // the elevated process's ppid
+			procs: map[uint32][2]uint32{
+				100: {tokenElevationTypeFull, 90},    // e.g. a terminal-hosting process: also Full
+				90:  {tokenElevationTypeLimited, 50}, // the true non-elevated origin
+			},
+			wantFound: true, wantChainReadable: true,
+		},
+		{
+			name:     "Full all the way to the top: ordinary token inheritance, not new",
+			startPID: 100,
+			procs: map[uint32][2]uint32{
+				100: {tokenElevationTypeFull, 1},
+				1:   {tokenElevationTypeFull, 0},
+			},
+			wantFound: false, wantChainReadable: true,
+		},
+		{
+			name:      "unreadable immediate parent",
+			startPID:  100,
+			procs:     map[uint32][2]uint32{},
+			wantFound: false, wantChainReadable: false,
+		},
+		{
+			name:     "unreadable ancestor mid-chain",
+			startPID: 100,
+			procs: map[uint32][2]uint32{
+				100: {tokenElevationTypeFull, 90},
+				// 90 not in the map: lookup(90) fails
+			},
+			wantFound: false, wantChainReadable: false,
+		},
+		{
+			name:     "self-referential ppid does not loop forever",
+			startPID: 100,
+			procs: map[uint32][2]uint32{
+				100: {tokenElevationTypeFull, 100},
+			},
+			wantFound: false, wantChainReadable: true,
+		},
+		{
+			name:     "hop count is bounded",
+			startPID: 1,
+			procs: func() map[uint32][2]uint32 {
+				m := make(map[uint32][2]uint32)
+				for i := uint32(1); i <= maxAncestorHops+2; i++ {
+					m[i] = [2]uint32{tokenElevationTypeFull, i + 1}
+				}
+				return m
+			}(),
+			wantFound: false, wantChainReadable: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldCountElevation(tt.procType, tt.parentType, tt.parentKnown); got != tt.want {
-				t.Errorf("shouldCountElevation(%d, %d, %v) = %v, want %v",
-					tt.procType, tt.parentType, tt.parentKnown, got, tt.want)
+			found, chainReadable := findElevationBoundary(tt.startPID, fakeWindowsProcTree(tt.procs))
+			if found != tt.wantFound {
+				t.Errorf("found = %v, want %v", found, tt.wantFound)
+			}
+			if chainReadable != tt.wantChainReadable {
+				t.Errorf("chainReadable = %v, want %v", chainReadable, tt.wantChainReadable)
 			}
 		})
 	}

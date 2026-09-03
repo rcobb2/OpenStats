@@ -9,25 +9,53 @@ const (
 	tokenElevationTypeLimited uint32 = 3 // filtered (ordinary) half of a UAC split token
 )
 
-// shouldCountElevation decides whether a process start represents a user-driven
-// UAC elevation. Only TokenElevationTypeFull counts — a Default token (built-in
-// Administrator, service accounts, UAC-off machines) is elevated without any
-// consent event, which is not what we're measuring.
+// windowsAncestorLookup returns a pid's (elevationType, ppid, ok) — an
+// indirection over the real token/process-tree lookups so
+// findElevationBoundary is unit-testable with a fake process chain, no real
+// Win32 calls required.
+type windowsAncestorLookup func(pid uint32) (elevType, ppid uint32, ok bool)
+
+// findElevationBoundary decides whether a TokenElevationTypeFull process
+// represents a genuine new UAC consent, by walking up from startPID (the
+// process's parent) looking for the first ancestor that is NOT Full.
 //
-// Children of an elevated process inherit the Full token, so a Full child of a
-// Full parent is not a new consent. parentKnown=false means the parent's token
-// could not be inspected (parent exited, access denied): we favor counting,
-// since the genuine UAC path re-parents the elevated process to a live,
-// non-elevated requester (explorer.exe etc.), while an unknowable parent is
-// usually a short-lived launcher.
-func shouldCountElevation(procType, parentType uint32, parentKnown bool) bool {
-	if procType != tokenElevationTypeFull {
-		return false
+// A one-hop check ("is the parent also Full?") isn't enough: when a process
+// is created without a different token, the child simply reuses its
+// parent's token object, so its own TokenElevationType reports the
+// identical Full value — indistinguishable from a fresh UAC consent by
+// looking at the type alone. The existing one-hop check tried to filter
+// this by rejecting a Full child of a Full parent, but real-hardware
+// testing rejected a *genuinely* UAC-approved process (procType Full, a
+// live consent.exe fired moments before) this way: WMI's reported parent
+// was also Full, one hop up from the true origin — likely a conpty/terminal
+// hosting indirection. Mirrors macOS's findEscalatingAncestor exactly (same
+// reasoning, opposite polarity: there a non-root uid proves a boundary,
+// here a non-Full token type does).
+//
+// found=true (chainReadable implied true): a non-Full ancestor exists —
+// this is a genuine new elevation. found=false, chainReadable=true: every
+// ancestor up to maxAncestorHops was Full — ordinary token inheritance, not
+// new. found=false, chainReadable=false: the chain became unreadable before
+// resolving either way — callers should favor counting here, same bias as
+// the original check (a UAC split token keeps the original user's
+// identity, so attribution doesn't depend on this walk succeeding, unlike
+// the macOS case where the parent IS the attribution).
+func findElevationBoundary(startPID uint32, lookup windowsAncestorLookup) (found, chainReadable bool) {
+	pid := startPID
+	for i := 0; i < maxAncestorHops; i++ {
+		elevType, ppid, ok := lookup(pid)
+		if !ok {
+			return false, false
+		}
+		if elevType != tokenElevationTypeFull {
+			return true, true
+		}
+		if ppid == 0 || ppid == pid {
+			return false, true
+		}
+		pid = ppid
 	}
-	if parentKnown && parentType == tokenElevationTypeFull {
-		return false
-	}
-	return true
+	return false, true
 }
 
 // procAncestorLookup returns a pid's (uid, ppid, ok) — an indirection over

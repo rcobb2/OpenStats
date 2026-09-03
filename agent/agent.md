@@ -46,15 +46,31 @@ Privilege-elevation detection. `elevation.go` holds the pure, platform-agnostic
 decision logic (unit-tested on any OS); the platform files supply the actual
 process-token / process-owner lookups.
 
-**Windows** (`elevation_windows.go`): on each process start event, opens the
-process token and reads `TOKEN_ELEVATION_TYPE`. Only `TokenElevationTypeFull`
-(the elevated half of a UAC split token) counts — `Default` tokens (built-in
-Administrator, SYSTEM, UAC-off machines) are always-elevated without a consent
-event and are ignored. Children of an elevated process inherit the Full token,
-so the parent's token is also checked: a Full child of a Full parent is not
-counted. If the parent is gone or unreadable, the launch is still counted
-(favor visibility) — a UAC split token keeps the original user's identity, so
-attribution never depends on the parent.
+**Windows** (`elevation_windows.go` + `findElevationBoundary` in
+`elevation.go`): on each process start event, opens the process token with
+`PROCESS_QUERY_INFORMATION` (not the newer `PROCESS_QUERY_LIMITED_INFORMATION`
+— real-hardware testing showed `OpenProcessToken` failing on ordinary,
+still-running processes with the limited right) and reads
+`TOKEN_ELEVATION_TYPE`. Only `TokenElevationTypeFull` (the elevated half of a
+UAC split token) counts — `Default` tokens (built-in Administrator, SYSTEM,
+UAC-off machines) are always-elevated without a consent event and are
+ignored.
+
+A process created without a different token simply reuses its parent's token
+object, so its own `TokenElevationType` reports the identical `Full` value —
+indistinguishable from a fresh UAC consent by looking at the type alone.
+`findElevationBoundary` walks up from the parent looking for the first
+ancestor that is *not* Full, proving a genuine new consent happened
+somewhere along the way; if every ancestor up to `maxAncestorHops` is Full,
+it's ordinary inheritance, not new. A one-hop check isn't enough: real
+hardware rejected a genuinely UAC-approved process (`procType` Full, a live
+`consent.exe` fired moments before) because WMI's reported immediate parent
+was *also* Full — a conpty/terminal-hosting indirection put one more
+purely-inherited hop between the elevation and its true origin than the
+check accounted for. If the ancestor chain becomes unreadable before
+resolving either way, the launch is still counted (favor visibility) — a UAC
+split token keeps the original user's identity, so attribution doesn't
+depend on this walk succeeding.
 
 **This check runs inside `processStartEvents` (`wmi.go`) before the
 exclude-pattern filter, not after.** The most common UAC targets are

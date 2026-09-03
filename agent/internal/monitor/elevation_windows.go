@@ -43,6 +43,34 @@ func getTokenElevationType(pid uint32) (elevType uint32, ok bool, failStep strin
 	return elevType, true, "", nil
 }
 
+// getParentPID looks up a pid's parent via a Toolhelp snapshot, needed to
+// walk more than one hop up the process tree (findElevationBoundary):
+// Win32_ProcessStartTrace only ever gives us the *original* new process's
+// immediate parent, not an arbitrary ancestor's. A full snapshot per lookup
+// is not cheap, but this only runs for the rare Full-token case, not on
+// every process start.
+func getParentPID(pid uint32) (ppid uint32, ok bool) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0, false
+	}
+	defer windows.CloseHandle(snap)
+
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	if err := windows.Process32First(snap, &entry); err != nil {
+		return 0, false
+	}
+	for {
+		if entry.ProcessID == pid {
+			return entry.ParentProcessID, true
+		}
+		if err := windows.Process32Next(snap, &entry); err != nil {
+			return 0, false
+		}
+	}
+}
+
 // elevationEvaluation carries the intermediate token-check results behind an
 // isUACElevatedLaunch decision, for debug logging.
 type elevationEvaluation struct {
@@ -64,7 +92,26 @@ func evaluateUACElevation(pid, parentPID uint32) elevationEvaluation {
 	if parentPID != 0 {
 		parentType, parentKnown, _, _ = getTokenElevationType(parentPID)
 	}
-	counted := procKnown && shouldCountElevation(procType, parentType, parentKnown)
+
+	var counted bool
+	switch {
+	case !procKnown || procType != tokenElevationTypeFull:
+		counted = false
+	default:
+		// Full token: walk the ancestor chain from the parent to tell a
+		// genuine new consent apart from ordinary token inheritance — see
+		// findElevationBoundary for why one hop isn't enough.
+		found, chainReadable := findElevationBoundary(parentPID, func(p uint32) (uint32, uint32, bool) {
+			t, ok, _, _ := getTokenElevationType(p)
+			if !ok {
+				return 0, 0, false
+			}
+			pp, ok2 := getParentPID(p)
+			return t, pp, ok2
+		})
+		counted = found || !chainReadable // unreadable chain: favor counting
+	}
+
 	return elevationEvaluation{
 		procKnown: procKnown, parentKnown: parentKnown,
 		procType: procType, parentType: parentType,
