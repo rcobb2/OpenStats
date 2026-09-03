@@ -40,6 +40,19 @@ func fakeProcTree(procs map[uint32][2]uint32) procAncestorLookup {
 	}
 }
 
+func TestIsIncidentalSetuidTool(t *testing.T) {
+	for _, exe := range []string{"ps", "top", "traceroute", "traceroute6", "crontab"} {
+		if !isIncidentalSetuidTool(exe) {
+			t.Errorf("isIncidentalSetuidTool(%q) = false, want true", exe)
+		}
+	}
+	for _, exe := range []string{"sudo", "su", "login", "softwareupdate", "installer", ""} {
+		if isIncidentalSetuidTool(exe) {
+			t.Errorf("isIncidentalSetuidTool(%q) = true, want false — this should still count as a deliberate elevation", exe)
+		}
+	}
+}
+
 func TestFindEscalatingAncestor(t *testing.T) {
 	tests := []struct {
 		name      string

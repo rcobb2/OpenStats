@@ -19,6 +19,10 @@ const fakeElevatedChildPID = uint32(987654321)
 // Every other PID still resolves through the real libproc calls, so the rest
 // of the snapshot behaves exactly as it does in production.
 func withFakeElevatedChild(t *testing.T, ppid uint32) {
+	withFakeElevatedChildNamed(t, ppid, "sleep")
+}
+
+func withFakeElevatedChildNamed(t *testing.T, ppid uint32, exeName string) {
 	t.Helper()
 	origList := listAllPIDsFn
 	origInfo := getProcBSDInfoFn
@@ -32,7 +36,7 @@ func withFakeElevatedChild(t *testing.T, ppid uint32) {
 	}
 	getProcBSDInfoFn = func(pid uint32) (procBSDInfo, bool) {
 		if pid == fakeElevatedChildPID {
-			return procBSDInfo{exeName: "sleep", ppid: ppid, uid: 0, startSec: 1}, true
+			return procBSDInfo{exeName: exeName, ppid: ppid, uid: 0, startSec: 1}, true
 		}
 		return origInfo(pid)
 	}
@@ -155,5 +159,37 @@ func TestPollWatcherRootParentIsNotAnElevation(t *testing.T) {
 
 	if len(got) != 0 {
 		t.Errorf("a root process forked by launchd (root) must not count as an elevation, got %v", got)
+	}
+}
+
+// TestPollWatcherIncidentalSetuidToolNotCounted verifies that a setuid-root
+// utility like `ps` — which runs as uid 0 on every invocation as an OS
+// implementation detail, not a deliberate elevation — is never counted, even
+// though its uid/parent shape (root child, live non-root parent) is
+// otherwise indistinguishable from a genuine sudo invocation. Found via a CI
+// diagnostic step's own `ps` call getting counted as a real elevation.
+func TestPollWatcherIncidentalSetuidToolNotCounted(t *testing.T) {
+	if me, err := user.Current(); err != nil || me.Uid == "0" {
+		t.Skip("need a determinable non-root test user")
+	}
+
+	withFakeElevatedChildNamed(t, uint32(os.Getpid()), "ps")
+
+	var got []string
+	w, err := NewPollWatcher(NewTracker(discardLogger()), discardLogger(), WMIWatcherConfig{
+		OnElevated: func(pid uint32, exeName, exePath, user string) {
+			got = append(got, user)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewPollWatcher: %v", err)
+	}
+
+	w.prevPIDs = w.currentSnapshot(false)
+	delete(w.elevatedSeen, fakeElevatedChildPID)
+	w.currentSnapshot(true)
+
+	if len(got) != 0 {
+		t.Errorf("ps must never count as an elevation regardless of parent, got %v", got)
 	}
 }

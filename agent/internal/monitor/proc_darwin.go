@@ -303,7 +303,7 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 		// an excluded-path process is never in prevPIDs at all, which would
 		// otherwise make it look "new" on every single poll for its entire
 		// lifetime.
-		if detectElevations && w.onElevated != nil && isNewRoot {
+		if detectElevations && w.onElevated != nil && isNewRoot && !isIncidentalSetuidTool(exeName) {
 			invokingUser, ok := rootEscalationInvoker(info.uid, info.ppid)
 			w.logger.Debug("evaluated possible elevation", "pid", pid, "exe", exeName, "ppid", info.ppid, "counted", ok, "invokingUser", invokingUser)
 			if ok {

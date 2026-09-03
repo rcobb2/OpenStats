@@ -77,3 +77,36 @@ func findEscalatingAncestor(startPID uint32, lookup procAncestorLookup) (invokin
 	}
 	return 0, false
 }
+
+// incidentalSetuidTools are macOS binaries that ship setuid-root purely as an
+// implementation detail (reading other users' process/network/scheduling
+// state) and run that way on *every* invocation regardless of what they're
+// asked to do — unlike sudo/su/login, running one isn't a deliberate request
+// for elevated access in any sense a lab admin cares about. Found the hard
+// way: a CI diagnostic step's own `ps -eo ...` call got counted as a real
+// elevation, attributed to the account that happened to run it.
+//
+// This list is deliberately narrow (confirmed setuid-root on macOS) rather
+// than reusing the general exclude-patterns mechanism, which exists for a
+// different purpose (hiding noisy apps from usage tracking) and is
+// per-deployment configurable — this is about a fixed OS-level fact, not a
+// site's preference.
+var incidentalSetuidTools = map[string]bool{
+	"ps":          true,
+	"top":         true,
+	"traceroute":  true,
+	"traceroute6": true,
+	"at":          true,
+	"atq":         true,
+	"atrm":        true,
+	"batch":       true,
+	"crontab":     true,
+	"quota":       true,
+	"newgrp":      true,
+}
+
+// isIncidentalSetuidTool reports whether exeName is a known always-setuid
+// utility that should never itself be counted as an elevation.
+func isIncidentalSetuidTool(exeName string) bool {
+	return incidentalSetuidTools[exeName]
+}

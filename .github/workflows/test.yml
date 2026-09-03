@@ -181,11 +181,16 @@ jobs:
           # anyone can observe who actually invoked it — a CI-script
           # artifact, not how a real interactive Terminal.app session
           # behaves (its shell stays alive, synchronously, for the whole
-          # duration of a foreground sudo command). The inner bash -c is
-          # what plays that role here: it stays alive as a genuine
-          # non-root process for sleep's entire lifetime, exactly like a
-          # real shell would.
-          bash -c 'sudo sleep 6' &
+          # duration of a foreground sudo command). The trailing `; :` is
+          # not decoration — bash optimizes a single simple command in -c
+          # mode by exec'ing it in place with no fork at all, so a bare
+          # `bash -c 'sudo sleep 6'` becomes indistinguishable from running
+          # sudo directly (confirmed: it still showed up as sudo with
+          # ppid=launchd). Giving bash something to run *after* the command
+          # forces a real fork, so this inner shell genuinely stays alive as
+          # a non-root process for sleep's entire lifetime, matching a real
+          # shell.
+          bash -c 'sudo sleep 6; :' &
           echo $! > /tmp/agent-smoke/sudo.pid
 
       - name: Ground truth - actual process tree above the sleep child
@@ -238,7 +243,7 @@ jobs:
           # process". Start a deliberately longer one and wait for it to be
           # counted before touching the agent.
           before=$(get_elevation_count)
-          bash -c 'sudo sleep 60' &
+          bash -c 'sudo sleep 60; :' &
           echo $! > /tmp/agent-smoke/sudo2.pid
           for i in $(seq 1 15); do
             now=$(get_elevation_count)

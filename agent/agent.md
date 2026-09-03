@@ -86,6 +86,26 @@ exclude/system-path filtering, because the most common escalation targets
 (`sudo softwareupdate`, `sudo launchctl`, `/usr/sbin/*`, `/usr/bin/*`) are
 exactly the paths that filtering treats as noise for usage tracking.
 
+**Incidental setuid tools never count**, even though their uid/parent shape
+is otherwise indistinguishable from a genuine escalation: `ps`, `top`,
+`traceroute(6)`, `at`/`atq`/`atrm`/`batch`, `crontab`, `quota`, `newgrp` ship
+setuid-root on macOS purely as an implementation detail and run that way on
+*every* invocation regardless of intent — unlike `sudo`/`su`/`login`, running
+one isn't a deliberate request for elevated access. Found via a CI
+diagnostic step's own `ps -eo ...` call getting counted as a real elevation,
+attributed to whoever happened to run it. See `isIncidentalSetuidTool` in
+`elevation.go`; the list is deliberately hardcoded rather than reusing the
+per-deployment exclude-patterns config, since it's a fixed OS-level fact, not
+a site preference.
+
+"is this new?" for elevation purposes is tracked in a separate map
+(`elevatedSeen`), not `prevPIDs`: an escalation target living under an
+excluded path (`/bin/sleep`, say) is never present in `prevPIDs` at all,
+which would make it look "new" on every single poll for its entire
+lifetime — re-firing `OnElevated` once per second instead of once at genuine
+start. This was a real bug, caught by
+`TestPollWatcherCountsElevationOnceAcrossMultiplePolls`.
+
 **macOS requires the agent to run as root.** `proc_pidinfo(PROC_PIDTBSDINFO)` —
 what `getProcBSDInfo` calls — only succeeds for a process the caller owns or
 when the caller is root; an unprivileged caller gets `ok=false` for *any*
