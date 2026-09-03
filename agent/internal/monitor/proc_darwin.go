@@ -252,6 +252,15 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 			exePath = exeName
 		}
 
+		// Diagnostic only: confirms this unprivileged agent can actually see
+		// root-owned processes via proc_pidinfo at all. Unconditional (not
+		// gated by detectElevations) so it also fires during the startup
+		// seed, and cheap since uid-0 processes are a small fraction of the
+		// process table.
+		if info.uid == 0 {
+			w.logger.Debug("observed root-owned process", "pid", pid, "exe", exeName, "ppid", info.ppid, "pathUnreadable", pathUnreadable)
+		}
+
 		// Elevation detection runs before the exclude/system-path filtering
 		// below, and before the "unreadable root path → system daemon" skip.
 		// The most common escalation targets — sudo'd /usr/sbin, /usr/bin
@@ -261,8 +270,10 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 		if detectElevations && w.onElevated != nil {
 			prev, seen := w.prevPIDs[pid]
 			isNew := !seen || info.startSec != prev.startSec
-			if isNew {
-				if invokingUser, ok := rootEscalationInvoker(info.uid, info.ppid); ok {
+			if isNew && info.uid == 0 {
+				invokingUser, ok := rootEscalationInvoker(info.uid, info.ppid)
+				w.logger.Debug("evaluated possible elevation", "pid", pid, "exe", exeName, "ppid", info.ppid, "counted", ok, "invokingUser", invokingUser)
+				if ok {
 					w.onElevated(pid, exeName, exePath, invokingUser)
 				}
 			}
