@@ -109,23 +109,63 @@ jobs:
             filePath: /tmp/agent-smoke/logs/agent.log
           EOF
 
+      - name: Write test helpers
+        run: |
+          cat > /tmp/agent-smoke/lib.sh <<'EOF'
+          # Sums privilege_elevations_total for exe="sleep" specifically (not
+          # just any matching line) so unrelated root activity elsewhere on a
+          # shared CI runner — a different exe — can't cross-contaminate this
+          # test's counter, and sums defensively in case more than one label
+          # combination (e.g. differing category) still matches.
+          get_elevation_count() {
+            curl -s localhost:19183/metrics \
+              | grep 'privilege_elevations_total{' \
+              | grep 'exe="sleep"' \
+              | awk '{sum+=$NF} END {print sum+0}'
+          }
+
+          # kill "$(cat pid)" only killed sudo's own wrapper process in an
+          # earlier version of this test — sudo forks a child for the actual
+          # command rather than exec'ing in place, so the real (root-owned)
+          # agent process kept running, unnoticed, through a supposed
+          # "restart". Kill by matching the actual command line instead, and
+          # confirm the port is actually free before starting a new instance
+          # — otherwise a still-alive old agent silently keeps answering
+          # curl and every subsequent assertion is checking the wrong process.
+          kill_agent_and_wait() {
+            sudo pkill -f '/tmp/openlabstats-agent --config' 2>/dev/null || true
+            for i in $(seq 1 20); do
+              curl -sf localhost:19183/health >/dev/null 2>&1 || return 0
+              sleep 0.5
+            done
+            echo "agent port still answering after kill — it was not actually terminated"
+            return 1
+          }
+
+          launch_agent() {
+            sudo nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
+              >> /tmp/agent-smoke/console.log 2>&1 &
+            for i in $(seq 1 20); do
+              curl -sf localhost:19183/health >/dev/null 2>&1 && return 0
+              sleep 0.5
+            done
+            echo "agent never became healthy"
+            cat /tmp/agent-smoke/console.log
+            return 1
+          }
+          EOF
+
       - name: Launch agent as root
         run: |
-          sudo nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
-            > /tmp/agent-smoke/console.log 2>&1 &
-          echo $! > /tmp/agent-smoke/agent.pid
-          for i in $(seq 1 20); do
-            curl -sf localhost:19183/health && exit 0
-            sleep 0.5
-          done
-          echo "agent never became healthy"
-          cat /tmp/agent-smoke/console.log
-          exit 1
+          source /tmp/agent-smoke/lib.sh
+          launch_agent
 
       - name: Confirm clean baseline (no elevations yet)
         run: |
-          if curl -s localhost:19183/metrics | grep -q privilege_elevations_total; then
-            echo "unexpected elevation series present before any sudo command ran"
+          source /tmp/agent-smoke/lib.sh
+          count=$(get_elevation_count)
+          if [ "$count" != "0" ]; then
+            echo "unexpected elevation count $count present before any sudo command ran"
             curl -s localhost:19183/metrics | grep privilege_elevations_total
             exit 1
           fi
@@ -140,10 +180,11 @@ jobs:
 
       - name: Wait for the elevation to be observed
         run: |
+          source /tmp/agent-smoke/lib.sh
           for i in $(seq 1 15); do
-            out=$(curl -s localhost:19183/metrics | grep privilege_elevations_total || true)
-            if [ -n "$out" ]; then
-              echo "$out"
+            count=$(get_elevation_count)
+            if [ "$count" != "0" ]; then
+              echo "elevation count: $count"
               exit 0
             fi
             sleep 1
@@ -157,61 +198,54 @@ jobs:
 
       - name: Verify attribution and count
         run: |
-          metric=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{')
+          metric=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | grep 'exe="sleep"')
           echo "$metric"
           echo "$metric" | grep -q 'user="runner"' || { echo "expected attribution to the runner user"; exit 1; }
-          value=$(echo "$metric" | awk '{print $NF}')
-          awk -v v="$value" 'BEGIN { exit !(v >= 1) }' || { echo "expected count >= 1, got $value"; exit 1; }
 
       - name: Start a long-lived elevation to restart against
         run: |
+          source /tmp/agent-smoke/lib.sh
           # The sudo sleep 6 from the earlier step may well have already
           # exited by now (several polling/verification steps ran since it
           # started) — restarting against it would only prove SQLite
           # persistence, not "don't recount a still-running elevated
           # process". Start a deliberately longer one and wait for it to be
           # counted before touching the agent.
-          before=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
+          before=$(get_elevation_count)
           sudo sleep 60 &
           echo $! > /tmp/agent-smoke/sudo2.pid
           for i in $(seq 1 15); do
-            now=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
-            awk -v n="$now" -v b="$before" 'BEGIN { exit !(n > b) }' && break
+            now=$(get_elevation_count)
+            [ "$now" -gt "$before" ] && break
             sleep 1
           done
-          now=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
+          now=$(get_elevation_count)
           echo "before=$before after-second-elevation=$now"
-          awk -v n="$now" -v b="$before" 'BEGIN { exit !(n > b) }' || {
+          if [ "$now" -le "$before" ]; then
             echo "second elevation was never counted"
             exit 1
-          }
+          fi
           echo "$now" > /tmp/agent-smoke/count-before-restart.txt
 
       - name: Verify a restart does not double-count the still-elevated process
         run: |
+          source /tmp/agent-smoke/lib.sh
           # sudo sleep 60 (previous step) is still alive here. Restart the
           # agent and confirm the counter comes back at the same value —
           # ScanExistingProcesses / the startup snapshot must adopt it, not
           # recount it (see the "adopt, don't count" fix in this branch).
           before=$(cat /tmp/agent-smoke/count-before-restart.txt)
-          sudo kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
-          sleep 1
-          sudo nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
-            >> /tmp/agent-smoke/console.log 2>&1 &
-          echo $! > /tmp/agent-smoke/agent.pid
-          for i in $(seq 1 20); do
-            curl -sf localhost:19183/health >/dev/null 2>&1 && break
-            sleep 0.5
-          done
+          kill_agent_and_wait
+          launch_agent
           sleep 3
-          after=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
+          after=$(get_elevation_count)
           echo "before restart: $before, after restart: $after"
           # sudo sleep 60 is still running (only ~10-20s elapsed) and must be
           # adopted, not recounted — restored from SQLite, so exactly equal.
-          awk -v b="$before" -v a="$after" 'BEGIN { exit !(a == b) }' || {
+          if [ "$after" != "$before" ]; then
             echo "restart must not have re-counted the already-elevated process"
             exit 1
-          }
+          fi
 
       - name: Dump logs on failure
         if: failure()
@@ -222,6 +256,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          sudo kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
+          sudo pkill -f '/tmp/openlabstats-agent --config' 2>/dev/null || true
           sudo kill "$(cat /tmp/agent-smoke/sudo.pid)" 2>/dev/null || true
           sudo kill "$(cat /tmp/agent-smoke/sudo2.pid)" 2>/dev/null || true
