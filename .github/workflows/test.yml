@@ -75,6 +75,14 @@ jobs:
         working-directory: agent
         run: go build -o /tmp/openlabstats-agent ./cmd/agent/
 
+      - name: Diagnose proc_pidinfo cross-user visibility (unprivileged vs root)
+        working-directory: agent
+        run: |
+          echo "--- unprivileged (matches how this smoke test runs the agent) ---"
+          go test ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
+          echo "--- as root (matches how the real installed agent runs, per agent.md's LaunchDaemon) ---"
+          sudo "$(go env GOROOT)/bin/go" test ./internal/monitor/... -run TestDiagnosticRootProcessVisibility -v
+
       - name: Write local-only test config
         run: |
           mkdir -p /tmp/agent-smoke/data /tmp/agent-smoke/logs
