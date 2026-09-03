@@ -173,9 +173,19 @@ jobs:
       - name: Trigger a real sudo elevation
         run: |
           # GitHub-hosted macOS runners grant the runner user passwordless
-          # sudo, so this is a genuine elevation with no password handling —
-          # backgrounded so it's still alive across at least one 1s poll tick.
-          sudo sleep 6 &
+          # sudo, so this is a genuine elevation with no password handling.
+          #
+          # Wrapped in its own `bash -c` rather than backgrounded directly:
+          # this step's own script process exits the instant it backgrounds
+          # a job, which orphans the child straight to launchd before
+          # anyone can observe who actually invoked it — a CI-script
+          # artifact, not how a real interactive Terminal.app session
+          # behaves (its shell stays alive, synchronously, for the whole
+          # duration of a foreground sudo command). The inner bash -c is
+          # what plays that role here: it stays alive as a genuine
+          # non-root process for sleep's entire lifetime, exactly like a
+          # real shell would.
+          bash -c 'sudo sleep 6' &
           echo $! > /tmp/agent-smoke/sudo.pid
 
       - name: Ground truth - actual process tree above the sleep child
@@ -228,7 +238,7 @@ jobs:
           # process". Start a deliberately longer one and wait for it to be
           # counted before touching the agent.
           before=$(get_elevation_count)
-          sudo sleep 60 &
+          bash -c 'sudo sleep 60' &
           echo $! > /tmp/agent-smoke/sudo2.pid
           for i in $(seq 1 15); do
             now=$(get_elevation_count)
