@@ -633,7 +633,7 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
           // includeZero=true adds known apps with no launches in the window — the
           // truly underutilized. Kept ascending so those 0-launch apps lead the list.
           title: 'All Underutilized Apps by Launch Count', valueLabel: 'launches', roundValues: true,
-          fetcher: () => getBottomAppsByLaunches(range, VIEW_ALL_LIMIT, filters, true).then(r => applyAppFilter(parsePromVector(r, 'app', true), appFilter)),
+          fetcher: () => getBottomAppsByLaunches(range, VIEW_ALL_LIMIT, filters, true).then(r => applyAppFilter(parsePromVector(r, 'app', true, true), appFilter)),
         })}
       >
         <HBarChart data={applyAppFilter(bottomLaunches, appFilter)} valueLabel="launches" roundValues height={300} onIgnore={onIgnore} />
