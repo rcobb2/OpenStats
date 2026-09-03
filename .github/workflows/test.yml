@@ -5,6 +5,11 @@ on:
     branches: [master]
   pull_request:
 
+# Least-privilege default: none of these jobs write to the repo, upload
+# releases, or need anything beyond reading code to build/test/smoke-test it.
+permissions:
+  contents: read
+
 jobs:
   test-agent-darwin:
     name: Agent tests (macOS)
