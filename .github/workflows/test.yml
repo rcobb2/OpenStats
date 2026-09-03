@@ -1,0 +1,220 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test-agent-darwin:
+    name: Agent tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: go vet
+        working-directory: agent
+        run: go vet ./...
+      - name: go test
+        working-directory: agent
+        run: go test ./...
+
+  test-agent-windows:
+    name: Agent tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: go vet
+        working-directory: agent
+        run: go vet ./...
+      - name: go test
+        working-directory: agent
+        run: go test ./...
+
+  test-server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: go vet
+        working-directory: server
+        run: go vet ./...
+      - name: go test
+        working-directory: server
+        run: go test ./...
+
+  # macOS-hosted runners give the `runner` user passwordless sudo, which is
+  # exactly what real elevation detection needs to exercise and that a human
+  # developer's laptop can't safely automate (see agent/agent.md — attribution
+  # requires reading the parent process's real owner via a genuinely live
+  # sudo invocation, not a mock). This is a black-box smoke test: it builds
+  # the real binary, runs the real poller against the real process table, and
+  # asserts against the real /metrics HTTP response.
+  macos-elevation-smoke:
+    name: macOS elevation smoke test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      - name: Build agent
+        working-directory: agent
+        run: go build -o /tmp/openlabstats-agent ./cmd/agent/
+
+      - name: Write local-only test config
+        run: |
+          mkdir -p /tmp/agent-smoke/data /tmp/agent-smoke/logs
+          cat > /tmp/agent-smoke/agent.yaml <<EOF
+          server:
+            port: 19183
+            metricsPath: /metrics
+            reportURL: ""
+          monitor:
+            reconcileInterval: 10s
+            minLifetime: 1s
+            building: ""
+            room: ""
+            excludePatterns: []
+          normalizer:
+            mappingFile: ${{ github.workspace }}/agent/configs/software-map.json
+            mappingUpdateURL: ""
+            mappingRefreshInterval: 1h
+          inventory:
+            scanInterval: 1h
+          store:
+            dbPath: /tmp/agent-smoke/data/openlabstats.db
+          logging:
+            level: debug
+            filePath: /tmp/agent-smoke/logs/agent.log
+          EOF
+
+      - name: Launch agent
+        run: |
+          nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
+            > /tmp/agent-smoke/console.log 2>&1 &
+          echo $! > /tmp/agent-smoke/agent.pid
+          for i in $(seq 1 20); do
+            curl -sf localhost:19183/health && exit 0
+            sleep 0.5
+          done
+          echo "agent never became healthy"
+          cat /tmp/agent-smoke/console.log
+          exit 1
+
+      - name: Confirm clean baseline (no elevations yet)
+        run: |
+          if curl -s localhost:19183/metrics | grep -q privilege_elevations_total; then
+            echo "unexpected elevation series present before any sudo command ran"
+            curl -s localhost:19183/metrics | grep privilege_elevations_total
+            exit 1
+          fi
+
+      - name: Trigger a real sudo elevation
+        run: |
+          # GitHub-hosted macOS runners grant the runner user passwordless
+          # sudo, so this is a genuine elevation with no password handling —
+          # backgrounded so it's still alive across at least one 1s poll tick.
+          sudo sleep 6 &
+          echo $! > /tmp/agent-smoke/sudo.pid
+
+      - name: Wait for the elevation to be observed
+        run: |
+          for i in $(seq 1 15); do
+            out=$(curl -s localhost:19183/metrics | grep privilege_elevations_total || true)
+            if [ -n "$out" ]; then
+              echo "$out"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "elevation was never recorded within 15s"
+          echo "--- console log ---"
+          cat /tmp/agent-smoke/console.log
+          echo "--- metrics ---"
+          curl -s localhost:19183/metrics | grep -i privilege || true
+          exit 1
+
+      - name: Verify attribution and count
+        run: |
+          metric=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{')
+          echo "$metric"
+          echo "$metric" | grep -q 'user="runner"' || { echo "expected attribution to the runner user"; exit 1; }
+          value=$(echo "$metric" | awk '{print $NF}')
+          awk -v v="$value" 'BEGIN { exit !(v >= 1) }' || { echo "expected count >= 1, got $value"; exit 1; }
+
+      - name: Start a long-lived elevation to restart against
+        run: |
+          # The sudo sleep 6 from the earlier step may well have already
+          # exited by now (several polling/verification steps ran since it
+          # started) — restarting against it would only prove SQLite
+          # persistence, not "don't recount a still-running elevated
+          # process". Start a deliberately longer one and wait for it to be
+          # counted before touching the agent.
+          before=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
+          sudo sleep 60 &
+          echo $! > /tmp/agent-smoke/sudo2.pid
+          for i in $(seq 1 15); do
+            now=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
+            awk -v n="$now" -v b="$before" 'BEGIN { exit !(n > b) }' && break
+            sleep 1
+          done
+          now=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
+          echo "before=$before after-second-elevation=$now"
+          awk -v n="$now" -v b="$before" 'BEGIN { exit !(n > b) }' || {
+            echo "second elevation was never counted"
+            exit 1
+          }
+          echo "$now" > /tmp/agent-smoke/count-before-restart.txt
+
+      - name: Verify a restart does not double-count the still-elevated process
+        run: |
+          # sudo sleep 60 (previous step) is still alive here. Restart the
+          # agent and confirm the counter comes back at the same value —
+          # ScanExistingProcesses / the startup snapshot must adopt it, not
+          # recount it (see the "adopt, don't count" fix in this branch).
+          before=$(cat /tmp/agent-smoke/count-before-restart.txt)
+          kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
+          sleep 1
+          nohup /tmp/openlabstats-agent --config /tmp/agent-smoke/agent.yaml \
+            >> /tmp/agent-smoke/console.log 2>&1 &
+          echo $! > /tmp/agent-smoke/agent.pid
+          for i in $(seq 1 20); do
+            curl -sf localhost:19183/health >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          sleep 3
+          after=$(curl -s localhost:19183/metrics | grep 'privilege_elevations_total{' | awk '{print $NF}')
+          echo "before restart: $before, after restart: $after"
+          # sudo sleep 60 is still running (only ~10-20s elapsed) and must be
+          # adopted, not recounted — restored from SQLite, so exactly equal.
+          awk -v b="$before" -v a="$after" 'BEGIN { exit !(a == b) }' || {
+            echo "restart must not have re-counted the already-elevated process"
+            exit 1
+          }
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "--- console log ---"
+          cat /tmp/agent-smoke/console.log || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kill "$(cat /tmp/agent-smoke/agent.pid)" 2>/dev/null || true
+          sudo kill "$(cat /tmp/agent-smoke/sudo.pid)" 2>/dev/null || true
+          sudo kill "$(cat /tmp/agent-smoke/sudo2.pid)" 2>/dev/null || true
