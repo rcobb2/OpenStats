@@ -193,15 +193,35 @@ OS logon session tracking — the source of truth for the four `user_session_*`
 metrics:
 
 - `Enumerator` is platform-specific: `WTSEnumerateSessions` on Windows (console,
-  RDP, and disconnected sessions), `utmpx` login records on macOS (console plus
-  SSH). `enum_other.go` is a no-op stub so the package builds and its tests run
-  on any OS.
+  RDP, and disconnected sessions — Fast User Switching included, since Windows
+  keeps a distinct WTS session ID per switched-in user and only flips its
+  connect-state on switch, never tearing the session down). `enum_other.go` is
+  a no-op stub so the package builds and its tests run on any OS.
+- macOS enumeration (`enum_darwin.go`) has two disjoint sources: one session
+  per running `loginwindow` process (one per Fast-User-Switched-in GUI user —
+  macOS keeps every FUS'd-in user's session alive simultaneously, each with
+  its own `loginwindow` instance, which is the only signal that still sees a
+  user switched into the background) plus `utmpx` records for anything other
+  than the console line (SSH — `loginwindow` has no equivalent for a remote
+  shell). `utmpx`'s own console line is deliberately skipped: it is
+  effectively single-console and in practice only ever reflects whichever
+  user is currently frontmost, so it can't represent FUS on its own.
 - `Tracker` diffs each poll against the last and drives the metrics. It counts a
   logon only after the first poll has seeded state: sessions already open when
   the agent starts are **adopted**, not counted. `LoginTime` comes from the OS, so
   session duration survives an agent restart.
 - Time accrues once per canonical user even when they hold several OS sessions
   (console + SSH is one occupant).
+- `Tracker` never trusts an OS-reported `LoginTime` further back than
+  `maxPlausibleSessionAge` (400 days) — found via two real, unrelated OS bugs:
+  a Mac with a dying RTC/CMOS battery wrote a `utmpx` record under the wrong
+  wall-clock year, and `loginwindow` — which launches before the clock syncs
+  to NTP/RTC at boot — permanently freezes its libproc-reported start time to
+  that pre-sync reading for its entire lifetime, even after the kernel's own
+  boot-time estimate is later corrected (observed on real hardware as a
+  literal start time of 1976). Either failure mode would otherwise inflate
+  `user_session_duration_seconds` by months or years; an implausible value is
+  substituted with "now" instead, same as the existing zero/future-time guard.
 
 This replaced a refcount proxy that inferred a logon from the first tracked
 process and a logoff from the last one exiting. On machines that are never signed

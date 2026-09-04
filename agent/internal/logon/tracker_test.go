@@ -209,6 +209,49 @@ func TestStateChangeIsNotANewLogon(t *testing.T) {
 	}
 }
 
+// TestImplausibleLoginTimeIsClamped guards against two real OS bugs feeding
+// this package a corrupted LoginTime: a Mac with a dying RTC/CMOS battery
+// stamping a utmpx record with the wrong year, and loginwindow permanently
+// freezing its libproc start time to a pre-NTP-sync clock reading from boot
+// (observed on real hardware as a literal year of 1976). Either would have
+// inflated UserSessionDuration by years if left unclamped.
+func TestImplausibleLoginTimeIsClamped(t *testing.T) {
+	tr, m := newTestTracker(t)
+	t0 := time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
+	corrupted := t0.AddDate(-1, -6, 0) // ~18 months in the past
+
+	tr.apply(sessionSet(
+		Session{ID: "loginwindow-602", RawUser: "jdoe", State: StateActive, LoginTime: corrupted},
+	), t0)
+
+	if got := gauge(t, m.UserSessionDuration, "jdoe", host); got != 0 {
+		t.Errorf("duration for a session with an implausible LoginTime = %v seconds, want 0 (clamped to now)", got)
+	}
+	// The session itself must still be tracked — clamping the timestamp must
+	// not drop the session entirely.
+	if got := gauge(t, m.UserSessionActive, "jdoe", host); got != 1 {
+		t.Errorf("active gauge = %v, want 1 (session still recognized despite bad timestamp)", got)
+	}
+}
+
+// TestPlausibleLongSessionIsNotClamped guards the other direction: a genuine
+// long-running kiosk/service-account session must not be truncated by the
+// same guard that catches corrupted timestamps.
+func TestPlausibleLongSessionIsNotClamped(t *testing.T) {
+	tr, m := newTestTracker(t)
+	t0 := time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
+	genuinelyOld := t0.AddDate(0, 0, -149) // longest real session observed in the fleet
+
+	tr.apply(sessionSet(
+		Session{ID: "loginwindow-602", RawUser: "kiosk", State: StateActive, LoginTime: genuinelyOld},
+	), t0)
+
+	want := 149 * 24 * float64(time.Hour/time.Second)
+	if got := gauge(t, m.UserSessionDuration, "kiosk", host); got != want {
+		t.Errorf("duration for a genuinely long-running session = %v, want %v (should not be clamped)", got, want)
+	}
+}
+
 func TestDiffAndIndex(t *testing.T) {
 	a := Session{ID: "1", RawUser: "alice", State: StateActive}
 	b := Session{ID: "2", RawUser: "bob", State: StateActive}
