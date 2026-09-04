@@ -9,6 +9,22 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/metrics"
 )
 
+// maxPlausibleSessionAge bounds how far in the past an OS-reported login time
+// may be before the tracker distrusts it and substitutes "now" instead — the
+// same fallback already used for a zero or future timestamp. Found via two
+// real, unrelated OS bugs feeding this package garbage: a Mac with a dying
+// RTC/CMOS battery wrote a utmpx login record under the wrong wall-clock year
+// (implied login date a full year before this project existed), and
+// loginwindow — which launches before the clock has synced to NTP/RTC at
+// boot — permanently freezes its libproc-reported start time to that
+// pre-sync clock reading even after kern.boottime itself is later corrected
+// (observed as literally 1976 on an otherwise normal Mac). Both are decades
+// or, at minimum, a year-plus off; the longest legitimately observed
+// kiosk/service-account session in this fleet was under 150 days. 400 days
+// clears every real case with margin while catching either bug by a wide
+// margin.
+const maxPlausibleSessionAge = 400 * 24 * time.Hour
+
 // ResolveFunc canonicalizes a raw OS username and reports whether it should be
 // tracked at all. It is supplied by the caller so that logon sessions go through
 // the same ignore/correlation policy as every other username the agent handles.
@@ -126,7 +142,7 @@ func (t *Tracker) apply(current map[SessionKey]Session, now time.Time) {
 			continue
 		}
 		loginTime := s.LoginTime
-		if loginTime.IsZero() || loginTime.After(now) {
+		if loginTime.IsZero() || loginTime.After(now) || now.Sub(loginTime) > maxPlausibleSessionAge {
 			loginTime = now
 		}
 

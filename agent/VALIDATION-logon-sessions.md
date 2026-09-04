@@ -297,15 +297,32 @@ decides whether this matters in production at all.
 the SDK headers. These fail at *compile* time, so Part 2 catches them — a build
 error mentioning `utmpx` is this, not a mystery.
 
-**4. The macOS console line name** (`darwinState`)
+**4. macOS GUI sessions come from `loginwindow`, not `utmpx`, now**
 
-State is assigned by prefix-matching the tty on `"console"`. If the GUI session
-reports something else, the console session is labeled `disconnected`.
+The console GUI session (and any Fast-User-Switched-in one) is detected by
+enumerating running `loginwindow` processes, one per signed-in GUI user —
+`utmpx`'s console line is deliberately skipped as unreliable for anything
+beyond a single foreground user. `utmpx` is still consulted, but only for
+non-console lines (SSH).
 
-*Symptom:* scenario 1 passes but the session looks detached. Check with
-`who -u` — the console line should literally read `console`. This one is
-cosmetic: `State` doesn't currently affect any metric, only future reporting.
-Note it, don't panic.
+*Symptom:* a GUI session doesn't show up. Check `ps -axo user,comm | grep
+loginwindow` — every signed-in GUI user (including ones switched into the
+background via Fast User Switching) should have their own entry, owned by
+them. If `ps` shows a real user's `loginwindow` process, and the tracker still
+never counts a session, the bug is downstream (username resolution/policy),
+not enumeration.
+
+**5. `loginwindow`'s reported start time can be wildly wrong**
+
+`loginwindow` launches before the clock has synced to NTP/RTC at boot, and
+its libproc-reported start time (`pbi_start_tvsec`) freezes to that pre-sync
+reading for its entire lifetime — even after `kern.boottime` itself is later
+corrected. Observed on real hardware as a literal start time of 1976 on an
+otherwise healthy Mac. `Tracker`'s `maxPlausibleSessionAge` guard catches this
+(and the equivalent `utmpx`/RTC-battery failure mode) by substituting "now"
+for anything more than 400 days in the past — this is expected, not a bug, if
+you see it in the logs as `adopted existing user session ... since <now>`
+right after a fresh boot.
 
 **5. Session ID stability across polls**
 
