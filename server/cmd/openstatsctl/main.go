@@ -562,7 +562,7 @@ var reports = map[string]reportDef{
 	"top-apps-by-foreground":    {"/reports/top-apps-by-foreground", "hours", ""},
 	"bottom-apps-by-launches":   {"/reports/bottom-apps-by-launches", "launches", ""},
 	"bottom-apps-by-foreground": {"/reports/bottom-apps-by-foreground", "hours", ""},
-	"usage-by-lab":              {"/reports/usage-by-lab", "seconds", ""},
+	"usage-by-lab":              {"/reports/usage-by-lab", "seconds", "foreground (active) time, not process uptime; divide by 3600 for hours"},
 	"active-users":              {"/reports/active-users", "active", ""},
 	"top-devices-by-sessions":   {"/reports/top-devices-by-sessions", "logins", "logins are sparse; try --range 30d"},
 	"top-users-by-logins":       {"/reports/top-users-by-logins", "logins", "logins are sparse; try --range 30d"},

@@ -94,6 +94,35 @@ func TestHostnameMatchesLab(t *testing.T) {
 	}
 }
 
+// "Usage Hours by Lab" reported 2,227 hours across a 9-machine lab in a 24h
+// window — a window that can hold at most 216. The cause was
+// app_usage_seconds_total, which is process uptime: every app left open accrues
+// a second per second, so summing across a machine's dozen background apps
+// multiplies wall-clock time. Only app_foreground_seconds_total is attributed to
+// one app at a time and therefore bounded by wall-clock, so the per-lab total
+// stays physically possible.
+func TestUsageByLabQueryUsesForegroundSeconds(t *testing.T) {
+	got := usageByLabQuery(`{user!=""}`, "24h")
+
+	if strings.Contains(got, "openlabstats_app_usage_seconds_total") {
+		t.Errorf("query must not use process-uptime seconds (unbounded per machine): %s", got)
+	}
+	if !strings.Contains(got, "openlabstats_app_foreground_seconds_total") {
+		t.Errorf("query must use foreground seconds, got: %s", got)
+	}
+	// The app dimension backs the report's App filter and the lab+app CSV export.
+	if !strings.Contains(got, "sum by (hostname, app)") {
+		t.Errorf("query must keep the hostname and app dimensions, got: %s", got)
+	}
+	// Values stay in seconds — the frontend and openstatsctl divide by 3600.
+	if strings.Contains(got, "3600") {
+		t.Errorf("query must return seconds, not hours: %s", got)
+	}
+	if !strings.Contains(got, `{user!=""}`) || !strings.Contains(got, "[24h]") {
+		t.Errorf("query must apply the label filters and time range, got: %s", got)
+	}
+}
+
 // This is the regression the per-lab selector was silently missing: session
 // and login metrics have no lab label in Prometheus, so filtering must happen
 // in Go against the DB-based hostname->lab map *before* the per-user merge —

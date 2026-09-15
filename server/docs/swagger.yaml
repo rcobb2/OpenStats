@@ -1198,8 +1198,8 @@ paths:
       - reports
   /api/v1/reports/usage-by-lab:
     get:
-      description: Returns total app usage hours grouped by lab over the given time
-        range.
+      description: Returns total foreground (active) app seconds grouped by lab over
+        the given time range.
       parameters:
       - default: 24h
         description: Time range (e.g. 24h, 7d)

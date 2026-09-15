@@ -131,6 +131,15 @@ the elevated process itself always runs as root.
 machines accrues 40 hours per hour. Numbers in the hundreds or thousands of hours
 over 30 days are expected for accounts like `pubref`, not a data error.
 
+**`top-apps` hours are process uptime, `usage-by-lab` hours are not.**
+`top-apps` reports `app_usage_seconds_total` — how long each app was *running*,
+so apps left open in the background accrue time and a single machine can produce
+many app-hours per wall-clock hour. Don't sum it and compare against machine
+count × window. `usage-by-lab` and the `*-by-foreground` reports use
+`app_foreground_seconds_total` — time the app was actually in front of the user,
+attributed to one app at a time — so those totals do stay under
+machines × hours and are the ones to use for "how busy is this lab".
+
 **Ignored ≠ absent from history.** Ignore rules filter at query time as well as
 at collection time, so an ignored account disappears from reports immediately,
 including from data collected before the rule existed. `users list` still shows

@@ -30,9 +30,32 @@ type promQueryInstantResult struct {
 	} `json:"data"`
 }
 
+// usageByLabQuery builds the PromQL behind "Usage Hours by Lab".
+//
+// It must use app_foreground_seconds_total, not app_usage_seconds_total.
+// app_usage_seconds_total is *process runtime*: every app a user leaves open
+// accrues a second per second, so one machine with a dozen idle background
+// apps reports a dozen hours per wall-clock hour. Summed over a lab that
+// produces hour totals many times larger than the lab could physically
+// deliver — a 9-machine lab reported 2,227 hours in a 24h window (max 216),
+// which is what surfaced this. app_foreground_seconds_total counts only the
+// app the user is actually in front of, and the agent attributes foreground
+// time to one process group at a time, so a machine cannot accrue more than
+// a second per second and the per-lab total stays inside wall-clock reality.
+//
+// The `app` dimension survives so the report's App filter and the lab+app CSV
+// export keep working. Values stay in seconds: the frontend and openstatsctl
+// both divide by 3600 themselves.
+func usageByLabQuery(labelFilters, timeRange string) string {
+	return fmt.Sprintf(
+		`sum by (hostname, app) (increase(openlabstats_app_foreground_seconds_total%s[%s])) > 0`,
+		labelFilters, timeRange,
+	)
+}
+
 // ReportUsageByLab godoc
 // @Summary      Usage breakdown by lab
-// @Description  Returns total app usage hours grouped by lab over the given time range.
+// @Description  Returns total foreground (active) app seconds grouped by lab over the given time range.
 // @Tags         reports
 // @Produce      json
 // @Param        range    query  string  false  "Time range (e.g. 24h, 7d)"  default(24h)
@@ -65,10 +88,7 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 
 	// Query by hostname — ignore the Prometheus lab label entirely.
 	hf := s.buildLabelFilters(r.Context(), q.Get("hostname"), "")
-	query := fmt.Sprintf(
-		`sum by (hostname, app) (increase(openlabstats_app_usage_seconds_total%s[%s])) > 0`,
-		hf, timeRange,
-	)
+	query := usageByLabQuery(hf, timeRange)
 
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
 	if atTime > 0 {

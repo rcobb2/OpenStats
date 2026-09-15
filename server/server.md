@@ -42,7 +42,7 @@ Main HTTP router using chi:
 | `/api/v1/users/mappings/{id}` | DELETE | Delete a user rule |
 | `/api/v1/users/mappings/{id}/ignore` | PATCH | Toggle a rule's ignored flag |
 | `/api/v1/reports/top-apps` | GET | Top applications by usage |
-| `/api/v1/reports/usage-by-lab` | GET | Usage grouped by lab |
+| `/api/v1/reports/usage-by-lab` | GET | Foreground (active) seconds grouped by lab + app |
 | `/api/v1/reports/active-users` | GET | Currently active users |
 | `/api/v1/reports/summary` | GET | Overview statistics |
 | `/api/v1/reports/top-apps-by-elevations` | GET | Top apps by privilege-elevation launch count (UAC on Windows, sudo/admin authorization on macOS) |

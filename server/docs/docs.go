@@ -1328,7 +1328,7 @@ const docTemplate = `{
         },
         "/api/v1/reports/usage-by-lab": {
             "get": {
-                "description": "Returns total app usage hours grouped by lab over the given time range.",
+                "description": "Returns total foreground (active) app seconds grouped by lab over the given time range.",
                 "produces": [
                     "application/json"
                 ],

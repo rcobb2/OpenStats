@@ -526,31 +526,38 @@ function UtilizationChart({ range, filters }) {
 }
 
 function LabUsageReport({ range, filters, appFilter }) {
-  const [data, setData] = useState(null);
+  // Keep the per-app rows the endpoint returns instead of collapsing to labs
+  // immediately — the App filter has to narrow by app name, and once the rows
+  // are summed into labs the only names left are lab names, so filtering there
+  // matched labs (and usually nothing at all) rather than apps.
+  const [rows, setRows] = useState(null);
 
   useEffect(() => {
-    setData(null);
-    getUsageByLab(range, filters).then(res => {
-      const raw = parsePromVector(res);
-      const byLab = {};
-      raw.forEach(r => {
-        const lab = r.lab || 'Unassigned';
-        byLab[lab] = (byLab[lab] || 0) + r.value;
-      });
-      const labData = Object.entries(byLab)
-        .map(([lab, val]) => ({ name: lab, value: Math.round(val / 3600 * 10) / 10 }))
-        .sort((a, b) => b.value - a.value);
-      setData(labData);
-    }).catch(() => setData(false));
+    setRows(null);
+    getUsageByLab(range, filters)
+      .then(res => setRows(parsePromVector(res)))
+      .catch(() => setRows(false));
   }, [range, filters]);
+
+  const data = useMemo(() => {
+    if (!Array.isArray(rows)) return rows;
+    const byLab = {};
+    applyAppFilter(rows, appFilter).forEach(r => {
+      const lab = r.lab || 'Unassigned';
+      byLab[lab] = (byLab[lab] || 0) + r.value;
+    });
+    return Object.entries(byLab)
+      .map(([lab, val]) => ({ name: lab, value: Math.round(val / 3600 * 10) / 10 }))
+      .sort((a, b) => b.value - a.value);
+  }, [rows, appFilter]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <ChartCard title="Usage Hours by Lab">
+      <ChartCard title="Usage Hours by Lab" subtitle="Foreground (active) hours — time in front of an app, not process uptime">
         <HBarChart
-          data={applyAppFilter(data, appFilter)}
+          data={data}
           valueLabel="hours"
-          height={Math.max(240, (data?.length ?? 5) * 36)}
+          height={Math.max(240, (Array.isArray(data) ? data.length : 5) * 36)}
         />
       </ChartCard>
       <ChartCard title="Machine Utilization Over Time" subtitle="% of machines with an active session">

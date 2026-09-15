@@ -38,9 +38,15 @@ groups:
       - record: openlabstats:app_launches_24h:sum
         expr: sum by (app, category) (increase(openlabstats_app_launches_total{user!=""}[24h]))
 
-      # Total app usage per lab over the last 24 hours (human users only).
+      # Foreground (active) app seconds per lab over the last 24 hours (human
+      # users only). Deliberately NOT app_usage_seconds_total: that metric is
+      # process uptime, so every app a user leaves open accrues a second per
+      # second and a lab's total runs many times past machines x hours. Only
+      # foreground time is attributed to one app at a time, so per-lab totals
+      # stay inside wall-clock reality. Same reasoning as usageByLabQuery in
+      # server/internal/api/reports.go.
       - record: openlabstats:lab_usage_24h:sum
-        expr: sum by (lab, app) (increase(openlabstats_app_usage_seconds_total{user!=""}[24h]))
+        expr: sum by (lab, app) (increase(openlabstats_app_foreground_seconds_total{user!=""}[24h]))
 
       # Active device count.
       - record: openlabstats:active_devices:count
