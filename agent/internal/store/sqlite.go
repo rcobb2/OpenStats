@@ -104,34 +104,23 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// RecordSession stores a completed process session.
+// RecordSession folds a completed process session into the running
+// exe/user/host totals that restoreMetrics reads back on agent startup.
+//
+// This used to also insert a per-session row into process_sessions, but
+// nothing ever read that table back — not restoreMetrics (which only queries
+// app_usage_totals), not any report, not any CLI command. Every process exit
+// on every agent was a permanent, never-pruned row, so a lab machine running
+// for months accumulated an unbounded local database for no benefit. Removed
+// the insert; the table/indexes stay in migrate() so existing databases that
+// already have rows in it don't need special handling.
 func (s *Store) RecordSession(
 	pid uint32, exeName, exePath, displayName, category, publisher, user, hostname string,
 	startTime, stopTime time.Time, foregroundSeconds float64,
 ) error {
-	startTime = startTime.UTC()
-	stopTime = stopTime.UTC()
-	duration := stopTime.Sub(startTime).Seconds()
+	duration := stopTime.UTC().Sub(startTime.UTC()).Seconds()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Insert the session record.
-	_, err = tx.Exec(`
-		INSERT INTO process_sessions 
-			(pid, exe_name, exe_path, display_name, category, publisher, user, hostname, start_time, stop_time, duration_seconds, foreground_seconds)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		pid, exeName, exePath, displayName, category, publisher, user, hostname, startTime, stopTime, duration, foregroundSeconds,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert session: %w", err)
-	}
-
-	// Update the running totals.
-	_, err = tx.Exec(`
+	_, err := s.db.Exec(`
 		INSERT INTO app_usage_totals (exe_name, display_name, category, user, hostname, total_seconds, total_foreground_seconds, total_launches, last_updated)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
 		ON CONFLICT(exe_name, user, hostname) DO UPDATE SET
@@ -147,8 +136,7 @@ func (s *Store) RecordSession(
 	if err != nil {
 		return fmt.Errorf("failed to update totals: %w", err)
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // RecordElevation bumps the elevation total for an exe/user/host. Elevations
