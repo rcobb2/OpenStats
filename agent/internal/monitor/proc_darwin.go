@@ -254,7 +254,7 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 	// Rebuilt wholesale each pass (mirrors how prevPIDs itself gets replaced
 	// in poll()) so pids that disappeared are pruned automatically — see the
 	// elevatedSeen field doc for why this can't just reuse prevPIDs.
-	newElevatedSeen := make(map[uint32]uint64, root0Seen)
+	newElevatedSeen := make(map[uint32]uint64, len(pids))
 
 	for _, pid := range pids {
 		if pid == 0 {

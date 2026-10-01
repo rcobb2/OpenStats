@@ -355,6 +355,9 @@ func ScanExistingProcesses(logger *slog.Logger, familyResolver func(string, stri
 			continue
 		}
 		item := itemRaw.ToIDispatch()
+		if item == nil {
+			continue
+		}
 
 		pid := uint32(getUint32Prop(item, "ProcessId"))
 		parentPID := uint32(getUint32Prop(item, "ParentProcessId"))
