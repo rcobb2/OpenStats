@@ -39,7 +39,7 @@ type Tracker struct {
 	mu           sync.RWMutex
 	groups       map[uint32]*processGroup // rootPID -> group
 	pidToGroup   map[uint32]uint32        // any member PID -> rootPID
-	familyGroups map[string]uint32        // familyKey -> rootPID (for normalizer fallback)
+	familyGroups map[string]uint32        // "user\x00familyKey" -> rootPID (for normalizer fallback)
 	logger       *slog.Logger
 }
 
@@ -77,9 +77,18 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 		}
 	}
 
-	// Strategy 2: Check if family key matches an existing active group.
+	// Strategy 2: Check if family key matches an existing active group for
+	// this same user. Unlike Strategy 1 (parent PID), a family-key match has
+	// no process-tree relationship to the existing group — it's purely a
+	// name-based guess — so familyGroups is keyed per-user: without that,
+	// two different OS users concurrently running the same app (fast user
+	// switching, a shared lab machine) would merge the second user's launch
+	// into the first user's group, silently accruing all of their usage to
+	// the other user.
+	familyGroupKey := familyKey
 	if familyKey != "" {
-		if rootPID, ok := t.familyGroups[familyKey]; ok {
+		familyGroupKey = user + "\x00" + familyKey
+		if rootPID, ok := t.familyGroups[familyGroupKey]; ok {
 			if group, exists := t.groups[rootPID]; exists {
 				group.MemberPIDs[pid] = true
 				t.pidToGroup[pid] = rootPID
@@ -88,7 +97,7 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 				return false
 			}
 			// Stale entry — clean it up and fall through to create new group.
-			delete(t.familyGroups, familyKey)
+			delete(t.familyGroups, familyGroupKey)
 		}
 	}
 
@@ -107,7 +116,7 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 	t.groups[pid] = group
 	t.pidToGroup[pid] = pid
 	if familyKey != "" {
-		t.familyGroups[familyKey] = pid
+		t.familyGroups[familyGroupKey] = pid
 	}
 
 	t.logger.Debug("new process group created",
@@ -134,8 +143,10 @@ func (t *Tracker) RegisterExistingProcess(pid, parentPID uint32, exeName, exePat
 		}
 	}
 
+	familyGroupKey := familyKey
 	if familyKey != "" {
-		if rootPID, ok := t.familyGroups[familyKey]; ok {
+		familyGroupKey = user + "\x00" + familyKey
+		if rootPID, ok := t.familyGroups[familyGroupKey]; ok {
 			if group, exists := t.groups[rootPID]; exists {
 				group.MemberPIDs[pid] = true
 				t.pidToGroup[pid] = rootPID
@@ -143,7 +154,7 @@ func (t *Tracker) RegisterExistingProcess(pid, parentPID uint32, exeName, exePat
 					"pid", pid, "exe", exeName, "family", familyKey, "rootPID", rootPID)
 				return
 			}
-			delete(t.familyGroups, familyKey)
+			delete(t.familyGroups, familyGroupKey)
 		}
 	}
 
@@ -161,7 +172,7 @@ func (t *Tracker) RegisterExistingProcess(pid, parentPID uint32, exeName, exePat
 	t.groups[pid] = group
 	t.pidToGroup[pid] = pid
 	if familyKey != "" {
-		t.familyGroups[familyKey] = pid
+		t.familyGroups[familyGroupKey] = pid
 	}
 
 	t.logger.Debug("existing process group created",

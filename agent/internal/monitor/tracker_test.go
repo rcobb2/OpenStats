@@ -44,6 +44,38 @@ func TestTrackerChildJoinsFamily(t *testing.T) {
 	}
 }
 
+// TestTrackerFamilyKeyDoesNotCrossUsers verifies that a family-key match does
+// NOT absorb a process into another user's group. On a shared lab machine
+// with fast user switching, two different users can concurrently run the same
+// app (same family key); without a per-user guard, the second user's launch
+// would silently join the first user's group and misattribute their usage.
+func TestTrackerFamilyKeyDoesNotCrossUsers(t *testing.T) {
+	tr := NewTracker(discardLogger())
+
+	tr.OnProcessStart(100, 0, "word.exe", "/apps/word.exe", "alice", "microsoft-word")
+	isNew := tr.OnProcessStart(102, 0, "word.exe", "/apps/word.exe", "bob", "microsoft-word")
+
+	if !isNew {
+		t.Fatal("expected a different user's launch of the same family to create a new group, not join alice's")
+	}
+	if tr.ActiveCount() != 2 {
+		t.Fatalf("expected 2 separate groups (one per user), got %d", tr.ActiveCount())
+	}
+	if got := tr.GetProcessUser(102); got != "bob" {
+		t.Errorf("GetProcessUser(102) = %q, want %q", got, "bob")
+	}
+
+	// alice's group must still be independently joinable by her own subsequent
+	// launch of the same family — bob's group must not have displaced it.
+	isNewAliceChild := tr.OnProcessStart(101, 0, "word-helper.exe", "/apps/word-helper.exe", "alice", "microsoft-word")
+	if isNewAliceChild {
+		t.Fatal("expected alice's second process to join her own existing family group")
+	}
+	if tr.ActiveCount() != 2 {
+		t.Fatalf("expected still 2 groups after alice's child joined, got %d", tr.ActiveCount())
+	}
+}
+
 // TestTrackerChildJoinsViaParentPID verifies that a child process is absorbed
 // into the parent's group when the parent has a family key.
 func TestTrackerChildJoinsViaParentPID(t *testing.T) {
