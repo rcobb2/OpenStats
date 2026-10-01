@@ -76,10 +76,14 @@ func (n *Normalizer) Resolve(exeName, exePath string) *AppInfo {
 	return info
 }
 
-// cleanExeName strips the .exe extension and title-cases the name.
+// cleanExeName strips the .exe extension and title-cases the name. NTFS
+// preserves whatever case an installer wrote, so the trim must be
+// case-insensitive (e.g. "Launcher.Exe") — matching every other exe-name
+// comparison in this codebase (mapping file lookup, server-side matching).
 func cleanExeName(name string) string {
-	name = strings.TrimSuffix(name, ".exe")
-	name = strings.TrimSuffix(name, ".EXE")
+	if strings.HasSuffix(strings.ToLower(name), ".exe") {
+		name = name[:len(name)-len(".exe")]
+	}
 	if len(name) > 0 {
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
