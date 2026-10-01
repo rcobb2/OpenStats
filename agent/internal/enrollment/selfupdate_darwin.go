@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -27,12 +26,18 @@ func (c *Client) executeSelfUpdate(url string) {
 
 	c.logger.Info("downloading macOS update", "url", url)
 
-	tempFile := filepath.Join(os.TempDir(), "openlabstats-update.pkg")
-	out, err := os.Create(tempFile)
+	// A randomized name (not a fixed "openlabstats-update.pkg") so a second
+	// download triggered before this install finishes can't overwrite the
+	// file this instance is about to execute — defense in depth alongside
+	// the cmd.Wait() below, which is what actually keeps a second download
+	// from being triggered in the first place.
+	out, err := os.CreateTemp(os.TempDir(), "openlabstats-update-*.pkg")
 	if err != nil {
 		c.logger.Error("failed to create temp file for update", "error", err)
 		return
 	}
+	tempFile := out.Name()
+	defer os.Remove(tempFile)
 	defer out.Close() // covers error-path early returns
 
 	resp, err := c.client.Get(url)
@@ -64,5 +69,17 @@ func (c *Client) executeSelfUpdate(url string) {
 		return
 	}
 
-	c.logger.Info("installer launched, launchd will restart agent after update")
+	// Block until the install actually finishes (or this process is killed by
+	// its postinstall script restarting the daemon — in that case we never
+	// get here, which is fine). updateInProgress must stay held for the
+	// install's real duration: releasing it right after Start() let a
+	// heartbeat mid-install see the same stale AgentVersion, fetch the same
+	// update URL again, and launch a second concurrent installer against this
+	// agent's own temp download.
+	if err := cmd.Wait(); err != nil {
+		c.logger.Error("installer exited with error", "error", err)
+		return
+	}
+
+	c.logger.Info("installer completed, launchd will restart agent after update")
 }
