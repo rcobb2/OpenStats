@@ -306,12 +306,30 @@ func cmdUsers(c *client, args []string) error {
 		if len(args) < 3 {
 			return fmt.Errorf("usage: openstatsctl users alias <pattern> <canonical-user>")
 		}
-		if err := c.send("PUT", "/users/mappings", map[string]interface{}{
+		// PUT /users/mappings is a full-row upsert keyed on pattern (ON
+		// CONFLICT DO UPDATE SET every column), not a partial patch — merge
+		// onto any existing rule for this pattern so re-aliasing doesn't
+		// silently clear its displayName/notes or un-ignore it.
+		payload := map[string]interface{}{
 			"pattern":       args[1],
 			"canonicalUser": args[2],
+			"displayName":   "",
 			"notes":         "Alias added via openstatsctl",
 			"ignored":       false,
-		}); err != nil {
+		}
+		rules, err := fetchUserRules(c)
+		if err != nil {
+			return err
+		}
+		for _, r := range rules {
+			if strings.EqualFold(r.Pattern, args[1]) {
+				payload["displayName"] = r.DisplayName
+				payload["notes"] = r.Notes
+				payload["ignored"] = r.Ignored
+				break
+			}
+		}
+		if err := c.send("PUT", "/users/mappings", payload); err != nil {
 			return err
 		}
 		fmt.Printf("aliased %q -> %q on %s\n", args[1], args[2], c.baseURL)
@@ -488,24 +506,58 @@ func mappingsList(c *client, args []string) error {
 	return nil
 }
 
+// mappingsSet creates or updates a mapping. The server's PUT /mappings is a
+// full-row upsert (ON CONFLICT DO UPDATE SET every column), not a partial
+// patch — so this merges onto whatever already exists for the exe name,
+// keeping any field not passed on the command line, instead of silently
+// blanking category/publisher/family or un-ignoring an ignored mapping.
 func mappingsSet(c *client, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: openstatsctl mappings set <exe-name> --name <display> " +
+		return fmt.Errorf("usage: openstatsctl mappings set <exe-name> [--name <display>] " +
 			"[--category X] [--publisher Y] [--family Z]")
 	}
 	exe := args[0]
-	display := flagValue(args, "--name")
-	if display == "" {
-		return fmt.Errorf("--name <display-name> is required")
+
+	existing, err := fetchMappings(c)
+	if err != nil {
+		return err
 	}
 	payload := map[string]interface{}{
 		"exeName":     exe,
-		"displayName": display,
-		"category":    flagValue(args, "--category"),
-		"publisher":   flagValue(args, "--publisher"),
-		"family":      flagValue(args, "--family"),
+		"displayName": "",
+		"category":    "",
+		"publisher":   "",
+		"family":      "",
 		"ignored":     false,
 	}
+	for _, m := range existing {
+		if strings.EqualFold(m.ExeName, exe) {
+			payload["displayName"] = m.DisplayName
+			payload["category"] = m.Category
+			payload["publisher"] = m.Publisher
+			payload["family"] = m.Family
+			payload["ignored"] = m.Ignored
+			break
+		}
+	}
+
+	if v := flagValue(args, "--name"); v != "" {
+		payload["displayName"] = v
+	}
+	if v := flagValue(args, "--category"); v != "" {
+		payload["category"] = v
+	}
+	if v := flagValue(args, "--publisher"); v != "" {
+		payload["publisher"] = v
+	}
+	if v := flagValue(args, "--family"); v != "" {
+		payload["family"] = v
+	}
+	display := payload["displayName"].(string)
+	if display == "" {
+		return fmt.Errorf("--name <display-name> is required (no existing mapping for %q to default it from)", exe)
+	}
+
 	if err := c.send("PUT", "/mappings", payload); err != nil {
 		return err
 	}
