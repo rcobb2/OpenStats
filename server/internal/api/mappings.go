@@ -132,6 +132,21 @@ func (s *Server) CreateMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// exe names are matched case-insensitively everywhere a mapping is applied
+	// (GetMappingsMap lowercases its keys), but the DB's uniqueness constraint
+	// on exe_name is case-sensitive. Without this check, adding "excel.exe"
+	// alongside an auto-discovered "EXCEL.EXE" creates two rows that silently
+	// collide at match time, with whichever sorts last in exe_name order
+	// winning unpredictably and the other's edits having no visible effect.
+	if existing, err := s.store.GetMappingsMap(r.Context()); err == nil {
+		if m, found := existing[strings.ToLower(req.ExeName)]; found && m.ExeName != req.ExeName {
+			writeError(w, http.StatusConflict, fmt.Sprintf(
+				"a mapping for %q already exists as %q (exe names are matched case-insensitively) — edit that entry instead",
+				req.ExeName, m.ExeName))
+			return
+		}
+	}
+
 	m := &store.SoftwareMapping{
 		ExeName:     req.ExeName,
 		DisplayName: req.DisplayName,

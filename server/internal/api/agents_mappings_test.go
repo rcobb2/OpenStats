@@ -18,9 +18,11 @@ func TestApplyServerMappingsSeedsHintFromAgentLabels(t *testing.T) {
 
 	_, unknown := applyServerMappings(body, map[string]*store.SoftwareMapping{})
 
-	got, ok := unknown["POWERPNT.EXE"]
+	// unknown is keyed case-insensitively (lowercase) so that an exe reported
+	// in different cases across pushes/hosts still auto-inserts as one row.
+	got, ok := unknown["powerpnt.exe"]
 	if !ok {
-		t.Fatal("expected POWERPNT.EXE to be reported as unknown")
+		t.Fatal("expected powerpnt.exe to be reported as unknown")
 	}
 	if got.DisplayName != "Microsoft PowerPoint" {
 		t.Errorf("DisplayName = %q, want %q", got.DisplayName, "Microsoft PowerPoint")
@@ -59,8 +61,29 @@ func TestApplyServerMappingsKeepsFirstHintSeenForRepeatedExe(t *testing.T) {
 	if len(unknown) != 1 {
 		t.Fatalf("expected exactly one unknown entry, got %d", len(unknown))
 	}
-	if unknown["Rhinoceros"].DisplayName != "Rhinoceros" {
-		t.Errorf("DisplayName = %q, want %q", unknown["Rhinoceros"].DisplayName, "Rhinoceros")
+	if unknown["rhinoceros"].DisplayName != "Rhinoceros" {
+		t.Errorf("DisplayName = %q, want %q", unknown["rhinoceros"].DisplayName, "Rhinoceros")
+	}
+}
+
+// The same exe reported in different cases (different hosts/OSes disagreeing
+// on casing, or an admin-entered row sitting alongside an auto-discovered one)
+// must collapse into a single auto-insert candidate, not two rows that the
+// case-sensitive DB unique constraint would happily keep apart while
+// GetMappingsMap's case-insensitive lookup later picks one arbitrarily.
+func TestApplyServerMappingsDedupesCaseVariantsWithinBatch(t *testing.T) {
+	body := []byte(strings.Join([]string{
+		`m{app="Microsoft Excel",exe="EXCEL.EXE",category="Business",user="a",hostname="h"} 1`,
+		`m{app="Microsoft Excel",exe="excel.exe",category="Business",user="a",hostname="h"} 1`,
+	}, "\n"))
+
+	_, unknown := applyServerMappings(body, map[string]*store.SoftwareMapping{})
+
+	if len(unknown) != 1 {
+		t.Fatalf("expected exactly one unknown entry for case variants of the same exe, got %d: %v", len(unknown), unknown)
+	}
+	if _, ok := unknown["excel.exe"]; !ok {
+		t.Errorf("expected the unknown entry to be keyed by the lowercased exe name, got %v", unknown)
 	}
 }
 

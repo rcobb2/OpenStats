@@ -484,10 +484,16 @@ func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping
 			continue
 		}
 
-		m, found := mappings[strings.ToLower(exeName)]
+		key := strings.ToLower(exeName)
+		m, found := mappings[key]
 		if !found {
-			if _, seen := unknown[exeName]; !seen {
-				unknown[exeName] = store.DiscoveredApp{
+			// Keyed case-insensitively, matching the lookup above and
+			// GetMappingsMap: two case variants of the same exe reported in
+			// one push (or across pushes before either is catalogued) must
+			// resolve to one auto-insert, not two rows that silently collide
+			// later at case-insensitive match time.
+			if _, seen := unknown[key]; !seen {
+				unknown[key] = store.DiscoveredApp{
 					DisplayName: extractPromLabelValue(labelSet, "app"),
 					Category:    extractPromLabelValue(labelSet, "category"),
 				}

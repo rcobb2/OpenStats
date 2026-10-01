@@ -2,9 +2,15 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 
 	"github.com/rcobb/openlabstats-server/internal/store"
 )
+
+// minAgentVersionPattern matches isVersionBelow's expected dotted-numeric
+// shape (e.g. "0.1.10"). Anything else parses as all-zero segments there and
+// silently never flags any agent as out of date.
+var minAgentVersionPattern = regexp.MustCompile(`^\d+(\.\d+)*$`)
 
 // GetSettings godoc
 // @Summary      Get system settings
@@ -55,6 +61,14 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if settings.RolloutGraceSeconds != 0 && settings.RolloutGraceSeconds < 60 {
 		writeError(w, http.StatusBadRequest, "rolloutGraceSeconds must be >= 60")
+		return
+	}
+	if settings.UpdateIntervalSeconds != 0 && settings.UpdateIntervalSeconds < 60 {
+		writeError(w, http.StatusBadRequest, "updateIntervalSeconds must be >= 60")
+		return
+	}
+	if settings.MinAgentVersion != "" && !minAgentVersionPattern.MatchString(settings.MinAgentVersion) {
+		writeError(w, http.StatusBadRequest, `minAgentVersion must look like "0.1.10" (dotted numeric segments)`)
 		return
 	}
 
