@@ -55,8 +55,8 @@ export default function Mappings() {
       setForm(EMPTY_FORM);
       setShowAddForm(false);
       load();
-    } catch {
-      setError('Failed to create mapping.');
+    } catch (err) {
+      setError(err.message || 'Failed to create mapping.');
     } finally { setSaving(false); }
   };
 
@@ -78,8 +78,8 @@ export default function Mappings() {
       await updateMapping({ ...editForm, ignored: m.ignored });
       setEditId(null);
       load();
-    } catch {
-      setError('Failed to update mapping.');
+    } catch (err) {
+      setError(err.message || 'Failed to update mapping.');
     } finally { setSaving(false); }
   };
 

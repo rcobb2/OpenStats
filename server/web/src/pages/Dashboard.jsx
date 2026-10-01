@@ -66,17 +66,29 @@ function TopAppsChart({ range }) {
   );
 }
 
+// Stats refresh on a timer since this page is often left open on a wall
+// display or a browser tab — without it, "Online Agents" etc. silently go
+// stale with no visual cue, unlike the chart below which refetches on every
+// range change.
+const STATS_REFRESH_MS = 60_000;
+
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [summaryError, setSummaryError] = useState(null);
   const [activeUsers, setActiveUsers] = useState(null);
+  const [activeUsersError, setActiveUsersError] = useState(false);
   const [range, setRange] = useState('24h');
 
   useEffect(() => {
-    getSummary().then(setSummary).catch(e => setSummaryError(e.message));
-    getActiveUsers()
-      .then(res => setActiveUsers(res?.data?.result?.length ?? 0))
-      .catch(() => setActiveUsers('—'));
+    const load = () => {
+      getSummary().then(res => { setSummary(res); setSummaryError(null); }).catch(e => setSummaryError(e.message));
+      getActiveUsers()
+        .then(res => { setActiveUsers(res?.data?.result?.length ?? 0); setActiveUsersError(false); })
+        .catch(() => setActiveUsersError(true));
+    };
+    load();
+    const id = setInterval(load, STATS_REFRESH_MS);
+    return () => clearInterval(id);
   }, []);
 
   return (
@@ -84,6 +96,7 @@ export default function Dashboard() {
       <h2>Dashboard</h2>
 
       {summaryError && <div className="error">{summaryError}</div>}
+      {!summary && !summaryError && <div className="loading" style={{ padding: '1rem' }}>Loading…</div>}
       {summary && (
         <div className="stats-grid">
           <div className="stat-card">
@@ -103,10 +116,12 @@ export default function Dashboard() {
             <span className="stat-label">Mappings</span>
           </div>
           <div className="stat-card">
-            <span className="stat-value" style={{ color: 'var(--accent)' }}>
-              {activeUsers === null ? '…' : activeUsers}
+            <span className="stat-value" style={activeUsersError ? { color: 'var(--error, #e55353)' } : { color: 'var(--accent)' }}>
+              {activeUsersError ? '—' : activeUsers === null ? '…' : activeUsers}
             </span>
-            <span className="stat-label">Active Users</span>
+            <span className="stat-label">
+              Active Users{activeUsersError && <span title="Failed to load active users">⚠</span>}
+            </span>
           </div>
         </div>
       )}
