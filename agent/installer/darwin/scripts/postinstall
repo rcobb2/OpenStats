@@ -6,7 +6,9 @@ LABEL="com.openlabstats.agent"
 LOG_DIR="/var/log/openlabstats"
 INSTALL_DIR="/usr/local/openlabstats"
 CONFIG_PATH="$INSTALL_DIR/configs/agent.yaml"
-CONFIG_BACKUP="/tmp/openlabstats-agent-config.bak"
+# Must match preinstall's CONFIG_BACKUP — see its comment for why this lives
+# next to agent.yaml rather than in world-writable /tmp.
+CONFIG_BACKUP="${CONFIG_PATH}.bak"
 
 # Create log directory if not present.
 mkdir -p "$LOG_DIR"

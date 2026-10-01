@@ -4,7 +4,13 @@ set -e
 LABEL="com.openlabstats.agent"
 PLIST_PATH="/Library/LaunchDaemons/com.openlabstats.agent.plist"
 CONFIG_PATH="/usr/local/openlabstats/configs/agent.yaml"
-CONFIG_BACKUP="/tmp/openlabstats-agent-config.bak"
+# Alongside agent.yaml itself, not /tmp: world-writable /tmp at a fixed,
+# predictable name lets any local user pre-plant a symlink there, and root
+# (these scripts always run as root) would then write through it to an
+# arbitrary file. This directory only exists (and only has anything worth
+# backing up) on an upgrade, by which point it's already root-owned from the
+# prior install's payload — not world-writable.
+CONFIG_BACKUP="${CONFIG_PATH}.bak"
 
 # If the daemon is running, stop it gracefully before replacing the binary.
 if launchctl list "$LABEL" &>/dev/null; then
@@ -21,6 +27,10 @@ rm -f "$PLIST_PATH"
 # freshly-installed package's defaults win, so reportURL/mappingUpdateURL
 # stay current after an upgrade).
 if [[ -f "$CONFIG_PATH" ]]; then
+    # Remove any pre-existing path first (belt-and-suspenders against a
+    # symlink left over from a prior run) so cp always creates a fresh
+    # regular file rather than potentially following one.
+    rm -f "$CONFIG_BACKUP"
     cp "$CONFIG_PATH" "$CONFIG_BACKUP"
 fi
 
