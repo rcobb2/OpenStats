@@ -79,11 +79,16 @@ export default function Settings() {
           <h3>Updates & Scans</h3>
           <label>
             Update Check Interval (seconds)
-            <p className="hint">How often agents pull new software mappings and scan inventory (default 1h).</p>
-            <input 
-              type="number" 
-              value={settings.updateIntervalSeconds} 
-              onChange={e => setSettings({...settings, updateIntervalSeconds: parseInt(e.target.value) || 3600})} 
+            <p className="hint">
+              Not yet enforced by the agent — saving this has no effect. Each agent's
+              inventory scan cadence is set locally via <code>scanInterval</code> in its
+              own <code>agent.yaml</code> (default 1h).
+            </p>
+            <input
+              type="number"
+              value={settings.updateIntervalSeconds}
+              onChange={e => setSettings({...settings, updateIntervalSeconds: parseInt(e.target.value) || 3600})}
+              disabled
             />
           </label>
           <label>

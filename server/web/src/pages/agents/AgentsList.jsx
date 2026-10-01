@@ -46,7 +46,7 @@ export default function AgentsList() {
   };
 
   const handleForceUpdate = async (id) => {
-    if (!confirm(`Force update agent ${id}?\n\nThe agent will receive the update URL on its next heartbeat and install within its maintenance window.`)) return;
+    if (!confirm(`Force update agent ${id}?\n\nThis bypasses the maintenance window and rollout throttle — the agent will install immediately on its next heartbeat.`)) return;
     setUpdating(u => ({ ...u, [id]: true }));
     try {
       await forceAgentUpdate(id);

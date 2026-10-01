@@ -81,8 +81,6 @@ function buildReportParams(range, limit, filters = {}) {
 
 export const getTopAppsByLaunches = (range = '24h', limit = 10, filters = {}) =>
   request(`/reports/top-apps-by-launches?${buildReportParams(range, limit, filters)}`);
-export const getTopAppsByUsage = (range = '24h', limit = 10, filters = {}) =>
-  request(`/reports/top-apps?${buildReportParams(range, limit, filters)}`);
 export const getTopAppsByForeground = (range = '24h', limit = 10, filters = {}) =>
   request(`/reports/top-apps-by-foreground?${buildReportParams(range, limit, filters)}`);
 // includeZero adds known apps (non-ignored software mappings) with zero launches
@@ -173,7 +171,7 @@ export const exportTopAppsByLaunches = (range = '24h', filters = {}) =>
   downloadCSV(`/reports/top-apps-by-launches?${buildReportParams(range, null, filters)}&format=csv`, `top-apps-by-launches.csv`);
 
 export const exportTopAppsByForeground = (range = '24h', filters = {}) =>
-  downloadCSV(`/reports/top-apps?${buildReportParams(range, null, filters)}&format=csv`, `top-apps-by-active-time.csv`);
+  downloadCSV(`/reports/top-apps-by-foreground?${buildReportParams(range, null, filters)}&format=csv`, `top-apps-by-active-time.csv`);
 
 export const exportBottomAppsByLaunches = (range = '24h', filters = {}) =>
   downloadCSV(`/reports/bottom-apps-by-launches?${buildReportParams(range, null, filters)}&format=csv`, `bottom-apps-by-launches.csv`);

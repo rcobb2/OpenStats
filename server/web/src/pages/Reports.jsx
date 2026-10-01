@@ -5,7 +5,6 @@ import {
 } from 'recharts';
 import {
   getTopAppsByLaunches,
-  getTopAppsByUsage,
   getTopAppsByForeground,
   getBottomAppsByLaunches,
   getUsageByLab,
@@ -243,7 +242,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
     setUserSessionTime(null);
     setAvgSession(null);
 
-    getTopAppsByUsage(range, 10, filters)
+    getTopAppsByForeground(range, 10, filters)
       .then(r => setForeground(parsePromVector(r))).catch(() => setForeground(false));
     getTopAppsByLaunches(range, 10, filters)
       .then(r => setLaunches(parsePromVector(r))).catch(() => setLaunches(false));
@@ -282,7 +281,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
           subtitle={foregroundSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Apps by Active Time', valueLabel: 'hours',
-            fetcher: () => getTopAppsByUsage(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
+            fetcher: () => getTopAppsByForeground(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
           })}
         >
           <HBarChart data={applyAppFilter(foreground, appFilter)} valueLabel="hours" height={300} onIgnore={onIgnore} />
@@ -352,7 +351,7 @@ function UserBehaviorReport({ range, filters, appFilter, onIgnore }) {
 // security signal, not a usage-analytics one, and bundling them in made the
 // "who elevates and for what" question one panel among a dozen instead of
 // the whole point of a view.
-function ElevationReport({ range, filters }) {
+function ElevationReport({ range, filters, appFilter }) {
   const [elevatedApps, setElevatedApps] = useState(null);
   const [elevatingUsers, setElevatingUsers] = useState(null);
 
@@ -384,10 +383,10 @@ function ElevationReport({ range, filters }) {
           subtitle={elevatedAppsSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Apps by Elevation Count', valueLabel: 'elevations', roundValues: true,
-            fetcher: () => getTopAppsByElevations(range, VIEW_ALL_LIMIT, filters).then(r => parsePromVector(r)),
+            fetcher: () => getTopAppsByElevations(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
           })}
         >
-          <HBarChart data={elevatedApps} valueLabel="elevations" roundValues height={300} />
+          <HBarChart data={applyAppFilter(elevatedApps, appFilter)} valueLabel="elevations" roundValues height={300} />
         </ChartCard>
         <ChartCard
           title="Top Users by Elevations"
@@ -454,10 +453,17 @@ function UtilizationChart({ range, filters }) {
     return chartData;
   }, [chartData, labs, totals, mode]);
 
-  const rangeSecs = range ? (
-    range.endsWith('d') ? parseInt(range) * 86400 :
-    range.endsWith('h') ? parseInt(range) * 3600 : 86400
-  ) : 86400;
+  const rangeSecs = (() => {
+    if (!range) return 86400;
+    if (range.includes('~')) {
+      const [start, end] = range.split('~');
+      const secs = (new Date(end) - new Date(start)) / 1000;
+      return secs > 0 ? secs : 86400;
+    }
+    if (range.endsWith('d')) return parseInt(range) * 86400;
+    if (range.endsWith('h')) return parseInt(range) * 3600;
+    return 86400;
+  })();
 
   const fmtTime = (t) => {
     const d = new Date(t * 1000);
@@ -483,7 +489,12 @@ function UtilizationChart({ range, filters }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        {mode === 'count' && labs.length > 1 && (
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+            Shared axis — labs of different sizes aren't directly comparable in this mode
+          </span>
+        )}
         <button style={toggleStyle(mode === 'pct')} onClick={() => setMode('pct')}>%</button>
         <button style={toggleStyle(mode === 'count')} onClick={() => setMode('count')}>#</button>
       </div>
@@ -583,7 +594,7 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
     // omitted from the chart (a 0-length bar isn't meaningful) — they appear in
     // the View all list instead.
     getBottomAppsByLaunches(range, 10, filters).then(r => setBottomLaunches(parsePromVector(r, 'app', false))).catch(() => setBottomLaunches(false));
-    getTopAppsByUsage(range, 10, filters).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
+    getTopAppsByForeground(range, 10, filters).then(r => setTopForeground(parsePromVector(r))).catch(() => setTopForeground(false));
   }, [range, filters]);
 
   const [viewAllModal, openViewAll] = useViewAllModal();
@@ -627,7 +638,7 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
           subtitle={topForegroundSubtitle}
           onViewAll={() => openViewAll({
             title: 'All Apps by Active Time', valueLabel: 'hours',
-            fetcher: () => getTopAppsByUsage(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
+            fetcher: () => getTopAppsByForeground(range, VIEW_ALL_LIMIT, filters).then(r => applyAppFilter(parsePromVector(r), appFilter)),
           })}
         >
           <HBarChart data={applyAppFilter(topForeground, appFilter)} valueLabel="hours" height={300} onIgnore={onIgnore} />
@@ -831,7 +842,7 @@ export default function Reports() {
             />
           )}
           {reportType === 'elevations' && (
-            <ElevationReport key={chartKey} range={effectiveRange} filters={filters} />
+            <ElevationReport key={chartKey} range={effectiveRange} filters={filters} appFilter={appFilter} />
           )}
         </>
       )}

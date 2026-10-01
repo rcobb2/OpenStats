@@ -118,11 +118,15 @@ export default function Installer() {
                   and upload it to <code>/var/lib/openstats/installers/</code> on the server.
                 </p>
               )}
-              <h3>Install Command</h3>
-              <p>Run this on target machines (as Administrator):</p>
-              <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand}</code></pre>
-              <h3>Silent Deployment (SCCM / Intune / GPO)</h3>
-              <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand} /l*v C:\temp\openlabstats-install.log</code></pre>
+              {result.downloadUrl && (
+                <>
+                  <h3>Install Command</h3>
+                  <p>Run this on target machines (as Administrator):</p>
+                  <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand}</code></pre>
+                  <h3>Silent Deployment (SCCM / Intune / GPO)</h3>
+                  <pre style={{ whiteSpace: 'pre-wrap' }}><code>{result.installCommand} /l*v C:\temp\openlabstats-install.log</code></pre>
+                </>
+              )}
             </div>
           )}
         </div>

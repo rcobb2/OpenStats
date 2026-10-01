@@ -103,6 +103,7 @@ export default function Users() {
   };
 
   const handleIgnoreUser = (u) => {
+    if (!confirm(`Hide "${u.canonicalUser}" from all reports?\nYou can re-enable them from this page.`)) return;
     const target = u.rawUsers.length === 1 ? u.rawUsers[0] : u.canonicalUser;
     run(() => ignoreUser(target, 'Ignored from Users page'), 'Failed to ignore user.');
   };
