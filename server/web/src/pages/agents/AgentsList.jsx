@@ -49,7 +49,7 @@ export default function AgentsList() {
     if (!confirm(`Force update agent ${id}?\n\nThe agent will receive the update URL on its next heartbeat and install within its maintenance window.`)) return;
     setUpdating(u => ({ ...u, [id]: true }));
     try {
-      const res = await forceAgentUpdate(id);
+      await forceAgentUpdate(id);
       showToast(`✓ Update queued for ${id}. The agent will install on next heartbeat.`);
       load();
     } catch (err) {
@@ -107,6 +107,7 @@ export default function AgentsList() {
   );
 
   if (error) return <div className="error">{error}</div>;
+  if (loading) return <div className="loading">Loading agents…</div>;
 
   return (
     <div>

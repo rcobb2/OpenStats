@@ -84,6 +84,9 @@ export default function Labs() {
         </form>
       </div>
 
+      {loading ? (
+        <div className="loading">Loading labs…</div>
+      ) : (
       <ResizableTable>
         <thead>
           <tr><th>Name</th><th>Building</th><th>Room</th><th>Description</th><th style={{ width: '150px' }}>Actions</th></tr>
@@ -105,7 +108,8 @@ export default function Labs() {
           ))}
         </tbody>
       </ResizableTable>
-      {labs.length === 0 && <p className="empty">No labs configured yet.</p>}
+      )}
+      {!loading && labs.length === 0 && <p className="empty">No labs configured yet.</p>}
     </div>
   );
 }
