@@ -7,6 +7,30 @@ import ResizableTable from '../components/Table';
 
 const EMPTY_RULE = { pattern: '', canonicalUser: '', displayName: '', notes: '', ignored: false };
 
+// Mirrors server/internal/userid.MatchGlob: "*" matches any run of characters,
+// everything else must match literally. Both args are compared lowercased.
+function matchGlob(pattern, value) {
+  if (!pattern.includes('*')) return pattern === value;
+  const parts = pattern.split('*');
+  let v = value;
+  if (parts[0] !== '') {
+    if (!v.startsWith(parts[0])) return false;
+    v = v.slice(parts[0].length);
+  }
+  const last = parts[parts.length - 1];
+  if (last !== '') {
+    if (!v.endsWith(last)) return false;
+    v = v.slice(0, v.length - last.length);
+  }
+  for (const part of parts.slice(1, -1)) {
+    if (part === '') continue;
+    const idx = v.indexOf(part);
+    if (idx === -1) return false;
+    v = v.slice(idx + part.length);
+  }
+  return true;
+}
+
 export default function Users() {
   const [users, setUsers] = useState([]);
   const [rules, setRules] = useState([]);
@@ -86,8 +110,8 @@ export default function Users() {
   const handleUnignoreUser = (u) => {
     // Ignoring can come from a rule on any of the raw names or on the canonical
     // one; clear every matching ignore rule so the user really comes back.
-    const names = new Set([u.canonicalUser, ...u.rawUsers].map(n => n.toLowerCase()));
-    const toClear = rules.filter(r => r.ignored && names.has(r.pattern.toLowerCase()));
+    const names = [u.canonicalUser, ...u.rawUsers].map(n => n.toLowerCase());
+    const toClear = rules.filter(r => r.ignored && names.some(n => matchGlob(r.pattern.toLowerCase(), n)));
     if (toClear.length === 0) {
       setError(`${u.canonicalUser} is excluded by a built-in rule, not an editable one. Add a rule with a canonical name to track it.`);
       return;

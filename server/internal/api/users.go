@@ -359,7 +359,7 @@ func (s *Server) ListDiscoveredUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	ruleByPattern := make(map[string]store.UserMapping, len(mappings))
 	for _, m := range mappings {
-		ruleByPattern[m.Pattern] = m
+		ruleByPattern[strings.ToLower(m.Pattern)] = m
 		if !strings.Contains(m.Pattern, "*") {
 			rawUsers = append(rawUsers, m.Pattern)
 		}
