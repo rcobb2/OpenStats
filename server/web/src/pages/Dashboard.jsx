@@ -5,8 +5,8 @@ import {
 import { getSummary, getTopAppsByLaunches, getActiveUsers, parsePromVector } from '../api';
 
 const CHART_COLORS = [
-  '#4f8ff7','#43b581','#f0a030','#e55353','#a78bfa',
-  '#34d399','#fb923c','#60a5fa','#f472b6','#818cf8',
+  'var(--accent)', 'var(--success)', 'var(--warning)', 'var(--danger)', '#a78bfa',
+  '#34d399', '#fb923c', '#60a5fa', '#f472b6', '#818cf8',
 ];
 
 function TopAppsChart({ range }) {

@@ -164,12 +164,6 @@ export default function AgentsList() {
                     title="Force the agent to download and install the latest version"
                     onClick={() => handleForceUpdate(a.id)}
                     disabled={updating[a.id]}
-                    style={{
-                      background: 'linear-gradient(135deg, #f39c12, #e67e22)',
-                      color: '#fff', border: 'none', borderRadius: '6px',
-                      padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.82rem',
-                      opacity: updating[a.id] ? 0.6 : 1
-                    }}
                   >
                     {updating[a.id] ? '⏳ Queuing…' : '⬆ Force Update'}
                   </button>

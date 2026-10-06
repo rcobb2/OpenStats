@@ -26,8 +26,8 @@ import {
 } from '../api';
 
 const CHART_COLORS = [
-  '#4f8ff7','#43b581','#f0a030','#e55353','#a78bfa',
-  '#34d399','#fb923c','#60a5fa','#f472b6','#818cf8',
+  'var(--accent)', 'var(--success)', 'var(--warning)', 'var(--danger)', '#a78bfa',
+  '#34d399', '#fb923c', '#60a5fa', '#f472b6', '#818cf8',
 ];
 
 // "View all" fetches every row in one shot rather than paging — matches the
@@ -43,9 +43,9 @@ function defaultDatetime(offsetHours = 0) {
 }
 
 function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 300, onIgnore }) {
-  if (data === null) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
-  if (data === false) return <div style={{ padding: '1rem', color: 'var(--error, #e55353)' }}>Failed to load data.</div>;
-  if (data.length === 0) return <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>;
+  if (data === null) return <div className="loading">Loading…</div>;
+  if (data === false) return <div className="error">Failed to load data.</div>;
+  if (data.length === 0) return <div className="empty">No data for this period.</div>;
 
   const CustomTooltip = ({ active, payload }) => {
     if (!active || !payload?.[0]) return null;
@@ -60,7 +60,7 @@ function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 3
         {onIgnore && (
           <button
             onClick={e => { e.stopPropagation(); onIgnore(name); }}
-            style={{ marginTop: '0.4rem', fontSize: 11, color: 'var(--error, #e55353)', background: 'none', border: '1px solid var(--error, #e55353)', borderRadius: 3, cursor: 'pointer', padding: '1px 6px' }}
+            style={{ marginTop: '0.4rem', fontSize: 11, color: 'var(--danger)', background: 'none', border: '1px solid var(--danger)', borderRadius: 3, cursor: 'pointer', padding: '1px 6px' }}
           >
             Ignore this app
           </button>
@@ -163,10 +163,10 @@ function ViewAllModal({ title, valueLabel, roundValues, fetcher, onClose }) {
           <button className="btn-secondary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={onClose}>Close</button>
         </div>
         <div style={{ overflowY: 'auto', flex: 1 }}>
-          {rows === null && <div className="loading" style={{ padding: '1rem' }}>Loading…</div>}
-          {rows === false && <div style={{ padding: '1rem', color: 'var(--error, #e55353)' }}>Failed to load data.</div>}
+          {rows === null && <div className="loading">Loading…</div>}
+          {rows === false && <div className="error">Failed to load data.</div>}
           {Array.isArray(rows) && rows.length === 0 && (
-            <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>
+            <div className="empty">No data for this period.</div>
           )}
           {Array.isArray(rows) && rows.length > 0 && (
             <table>
@@ -372,7 +372,7 @@ function ElevationReport({ range, filters, appFilter }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div style={{ padding: '0.75rem 1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+      <div className="info-banner">
         Elevations are rare events — UAC prompts on Windows, <code>sudo</code>/admin
         authorization on macOS. Empty or sparse results on a short range are
         expected; try a longer range or Last 30 Days.
@@ -472,16 +472,10 @@ function UtilizationChart({ range, filters }) {
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
-  const toggleStyle = (active) => ({
-    padding: '2px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 4,
-    border: '1px solid var(--border,#444)',
-    background: active ? 'var(--accent,#1e90ff)' : 'transparent',
-    color: active ? '#fff' : undefined,
-  });
 
-  if (resp === null) return <div className="loading" style={{ padding: '1rem' }}>Loading…</div>;
-  if (resp === false) return <div style={{ padding: '1rem', color: 'var(--error,#e55353)' }}>Failed to load data.</div>;
-  if (!chartData.length) return <div style={{ padding: '1rem', color: 'var(--text-dim)' }}>No data for this period.</div>;
+  if (resp === null) return <div className="loading">Loading…</div>;
+  if (resp === false) return <div className="error">Failed to load data.</div>;
+  if (!chartData.length) return <div className="empty">No data for this period.</div>;
 
   const maxCount = mode === 'count'
     ? Math.max(...labs.map(l => totals[l] ?? 0))
@@ -495,8 +489,10 @@ function UtilizationChart({ range, filters }) {
             Shared axis — labs of different sizes aren't directly comparable in this mode
           </span>
         )}
-        <button style={toggleStyle(mode === 'pct')} onClick={() => setMode('pct')}>%</button>
-        <button style={toggleStyle(mode === 'count')} onClick={() => setMode('count')}>#</button>
+        <div className="tab-bar" style={{ marginBottom: 0 }}>
+          <button className={`tab ${mode === 'pct' ? 'active' : ''}`} onClick={() => setMode('pct')}>%</button>
+          <button className={`tab ${mode === 'count' ? 'active' : ''}`} onClick={() => setMode('count')}>#</button>
+        </div>
       </div>
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={displayData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
@@ -739,7 +735,7 @@ export default function Reports() {
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.25rem', padding: '0.75rem 1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
+      <div className="filter-bar">
         <div style={ctrlStyle}>
           <label style={labelStyle}>Report</label>
           <select value={reportType} onChange={e => setReportType(e.target.value)}>
@@ -817,7 +813,7 @@ export default function Reports() {
       </div>
 
       {range === 'custom' && !isCustomReady && (
-        <div style={{ padding: '0.75rem 1rem', marginBottom: '1rem', background: 'rgba(240,160,48,0.12)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+        <div className="warning-banner">
           Select a valid start and end time to load data.
         </div>
       )}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"text/template"
 )
@@ -70,7 +71,8 @@ func Install(exePath string) error {
 	}
 
 	// Determine config path relative to the executable.
-	configPath := exePath[:len(exePath)-len("/openlabstats-agent")] + "/configs/agent.yaml"
+	exeDir := filepath.Dir(exePath)
+	configPath := filepath.Join(exeDir, "configs", "agent.yaml")
 
 	tmpl, err := template.New("plist").Parse(plistTemplate)
 	if err != nil {
@@ -90,7 +92,7 @@ func Install(exePath string) error {
 	}{
 		ExePath:    exePath,
 		ConfigPath: configPath,
-		WorkDir:    exePath[:len(exePath)-len("/openlabstats-agent")],
+		WorkDir:    exeDir,
 	}
 
 	if err := tmpl.Execute(f, data); err != nil {

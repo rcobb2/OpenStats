@@ -62,9 +62,9 @@ export default function Labs() {
     <div>
       <h2>Labs & Rooms</h2>
 
-      {error && <div className="error-banner" style={{ color: 'var(--error, #e55353)', marginBottom: '1rem' }}>{error}</div>}
+      {error && <div className="error-banner">{error}</div>}
 
-      <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h3 style={{ marginTop: 0 }}>{editingId ? 'Edit Lab' : 'Add New Lab'}</h3>
         <form onSubmit={handleSubmit} className="form-inline">
           <input placeholder="Name (e.g. Library 101)" value={form.name}
@@ -77,7 +77,7 @@ export default function Labs() {
             onChange={e => setForm({ ...form, description: e.target.value })} />
           <button type="submit">{editingId ? 'Update' : 'Add'}</button>
           {editingId && (
-            <button type="button" className="btn-secondary" onClick={handleCancel} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)' }}>
+            <button type="button" className="btn-secondary" onClick={handleCancel}>
               Cancel
             </button>
           )}
@@ -93,7 +93,7 @@ export default function Labs() {
         </thead>
         <tbody>
           {labs.map(l => (
-            <tr key={l.id} style={editingId === l.id ? { background: 'rgba(79,143,247,0.1)' } : {}}>
+            <tr key={l.id} style={editingId === l.id ? { background: 'var(--accent-soft)' } : {}}>
               <td>{l.name}</td>
               <td>{l.building}</td>
               <td>{l.room}</td>

@@ -15,6 +15,12 @@
   --text: #eef0f5;
   --text-dim: #9499ad;
   --text-faint: #686d80;
+  /* Aliases some pages reference under older names (with a stale hardcoded
+     fallback) — kept as real tokens so those call sites pick up the actual
+     palette instead of silently falling back to a hex that predates this
+     redesign. */
+  --text-muted: var(--text-dim);
+  --surface2: var(--surface-2);
 
   /* Accent — a richer indigo-blue with a glow variant for focus rings and
      active states, instead of a single flat hex reused everywhere. */
@@ -225,6 +231,33 @@ body::before {
   font-size: 0.88rem;
   border: 1px solid rgba(61, 220, 151, 0.25);
 }
+.error-banner {
+  background: var(--danger-soft);
+  color: var(--danger);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+  border: 1px solid rgba(240, 85, 106, 0.25);
+}
+.info-banner {
+  background: var(--surface);
+  color: var(--text-dim);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+  border: 1px solid var(--border);
+}
+.warning-banner {
+  background: var(--warning-soft);
+  color: var(--text-dim);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+  border: 1px solid rgba(245, 168, 79, 0.25);
+}
 
 /* ============================================================
    Tables
@@ -345,6 +378,16 @@ button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 }
 .btn-danger:hover { background: var(--danger-soft); box-shadow: none; }
 
+.btn-warning {
+  background: linear-gradient(135deg, var(--warning), #e8903a);
+  color: #1a1206;
+  border: none;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  border-radius: var(--radius-sm);
+}
+.btn-warning:hover { box-shadow: 0 2px 8px rgba(245, 168, 79, 0.4); }
+
 .btn-primary {
   background: var(--accent);
   color: white;
@@ -398,6 +441,17 @@ button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
    Controls / utilities
    ============================================================ */
 .controls { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.filter-bar {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
 
 .error { color: var(--danger); padding: 0.9rem 1.1rem; background: var(--danger-soft); border-radius: var(--radius-sm); margin: 0.5rem 0; border: 1px solid rgba(240, 85, 106, 0.25); font-size: 0.88rem; }
 .loading { color: var(--text-dim); padding: 2rem; text-align: center; font-size: 0.88rem; }

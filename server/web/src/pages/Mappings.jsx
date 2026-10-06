@@ -135,22 +135,24 @@ export default function Mappings() {
         </form>
       )}
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        <TabButton active={tab === 'all'} onClick={() => setTab('all')}>
-          All <span className="badge">{mappings.length}</span>
-        </TabButton>
-        <TabButton active={tab === 'allowed'} onClick={() => setTab('allowed')}>
-          Allowed
-          {allowedCount > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{allowedCount}</span>}
-        </TabButton>
-        <TabButton active={tab === 'review'} onClick={() => setTab('review')}>
-          Needs Review
-          {reviewCount > 0 && <span className="badge" style={{ marginLeft: '0.4em', background: '#e67e22', color: '#fff' }}>{reviewCount}</span>}
-        </TabButton>
-        <TabButton active={tab === 'ignored'} onClick={() => setTab('ignored')}>
-          Ignored
-          {ignoredCount > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{ignoredCount}</span>}
-        </TabButton>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="tab-bar" style={{ marginBottom: 0 }}>
+          <TabButton active={tab === 'all'} onClick={() => setTab('all')}>
+            All <span className="badge">{mappings.length}</span>
+          </TabButton>
+          <TabButton active={tab === 'allowed'} onClick={() => setTab('allowed')}>
+            Allowed
+            {allowedCount > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{allowedCount}</span>}
+          </TabButton>
+          <TabButton active={tab === 'review'} onClick={() => setTab('review')}>
+            Needs Review
+            {reviewCount > 0 && <span className="badge outdated" style={{ marginLeft: '0.4em' }}>{reviewCount}</span>}
+          </TabButton>
+          <TabButton active={tab === 'ignored'} onClick={() => setTab('ignored')}>
+            Ignored
+            {ignoredCount > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{ignoredCount}</span>}
+          </TabButton>
+        </div>
         <input
           className="search"
           placeholder="Filter..."
@@ -161,7 +163,7 @@ export default function Mappings() {
       </div>
 
       {tab === 'review' && reviewCount > 0 && (
-        <div style={{ padding: '0.5rem 0.75rem', marginBottom: '0.75rem', borderRadius: '4px', background: 'var(--surface2, rgba(255,255,255,0.05))', fontSize: '0.875rem', color: 'var(--text-muted, #aaa)' }}>
+        <div style={{ padding: '0.5rem 0.75rem', marginBottom: '0.75rem', borderRadius: 'var(--radius-sm)', background: 'var(--surface-2)', fontSize: '0.875rem', color: 'var(--text-dim)' }}>
           {reviewCount} process{reviewCount !== 1 ? 'es' : ''} auto-discovered. Edit to set a friendly display name, or ignore junk processes to drop them from metrics.
         </div>
       )}
@@ -221,10 +223,7 @@ export default function Mappings() {
               <td>{m.category}</td>
               <td>{m.publisher}</td>
               <td>
-                <span
-                  className="badge"
-                  style={m.source === 'auto' ? { background: '#e67e22', color: '#fff' } : undefined}
-                >
+                <span className={`badge ${m.source === 'auto' ? 'outdated' : ''}`}>
                   {m.source}
                 </span>
               </td>
@@ -256,17 +255,7 @@ export default function Mappings() {
 
 function TabButton({ active, onClick, children }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '0.35rem 0.75rem',
-        border: '1px solid var(--border, #444)',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        background: active ? 'var(--accent, #1e90ff)' : 'transparent',
-        color: active ? '#fff' : undefined,
-      }}
-    >
+    <button className={`tab ${active ? 'active' : ''}`} onClick={onClick}>
       {children}
     </button>
   );

@@ -191,24 +191,26 @@ export default function Users() {
         </form>
       )}
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        <TabButton active={view === 'discovered'} onClick={() => setView('discovered')}>
-          All <span className="badge">{users.length}</span>
-        </TabButton>
-        <TabButton active={view === 'tracked'} onClick={() => setView('tracked')}>
-          Tracked <span className="badge" style={{ marginLeft: '0.4em' }}>{trackedUsers.length}</span>
-        </TabButton>
-        <TabButton active={view === 'ignored'} onClick={() => setView('ignored')}>
-          Ignored
-          {ignoredCount > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{ignoredCount}</span>}
-        </TabButton>
-        <TabButton active={view === 'merged'} onClick={() => setView('merged')}>
-          Merged
-          {mergedUsers.length > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{mergedUsers.length}</span>}
-        </TabButton>
-        <TabButton active={view === 'rules'} onClick={() => setView('rules')}>
-          Rules <span className="badge" style={{ marginLeft: '0.4em' }}>{rules.length}</span>
-        </TabButton>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="tab-bar" style={{ marginBottom: 0 }}>
+          <TabButton active={view === 'discovered'} onClick={() => setView('discovered')}>
+            All <span className="badge">{users.length}</span>
+          </TabButton>
+          <TabButton active={view === 'tracked'} onClick={() => setView('tracked')}>
+            Tracked <span className="badge" style={{ marginLeft: '0.4em' }}>{trackedUsers.length}</span>
+          </TabButton>
+          <TabButton active={view === 'ignored'} onClick={() => setView('ignored')}>
+            Ignored
+            {ignoredCount > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{ignoredCount}</span>}
+          </TabButton>
+          <TabButton active={view === 'merged'} onClick={() => setView('merged')}>
+            Merged
+            {mergedUsers.length > 0 && <span className="badge" style={{ marginLeft: '0.4em' }}>{mergedUsers.length}</span>}
+          </TabButton>
+          <TabButton active={view === 'rules'} onClick={() => setView('rules')}>
+            Rules <span className="badge" style={{ marginLeft: '0.4em' }}>{rules.length}</span>
+          </TabButton>
+        </div>
         <input
           className="search"
           placeholder="Filter..."
@@ -236,7 +238,7 @@ export default function Users() {
       )}
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted, #aaa)' }}>Loading…</div>
+        <div className="loading">Loading…</div>
       ) : view === 'rules' ? (
         <RulesTable
           rules={visibleRules}
@@ -288,7 +290,7 @@ function DiscoveredTable({ users, filter, saving, onIgnore, onUnignore, onMerge 
               {u.ignored ? (
                 <span className="badge">ignored</span>
               ) : u.activeNow ? (
-                <span className="badge" style={{ background: '#2ecc71', color: '#fff' }}>active</span>
+                <span className="badge online">active</span>
               ) : (
                 <span className="badge">tracked</span>
               )}
@@ -360,17 +362,7 @@ function RulesTable({ rules, filter, saving, onToggleIgnore, onDelete }) {
 
 function TabButton({ active, onClick, children }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '0.35rem 0.75rem',
-        border: '1px solid var(--border, #444)',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        background: active ? 'var(--accent, #1e90ff)' : 'transparent',
-        color: active ? '#fff' : undefined,
-      }}
-    >
+    <button className={`tab ${active ? 'active' : ''}`} onClick={onClick}>
       {children}
     </button>
   );
