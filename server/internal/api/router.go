@@ -37,12 +37,16 @@ type Server struct {
 // NewRouter creates the chi router with all API routes.
 func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logger *slog.Logger) http.Handler {
 	s := &Server{
-		store:         st,
-		cfg:           cfg,
-		discovery:     disc,
-		logger:        logger,
-		metricsStore:  newMetricsStore(),
-		promClient:    &http.Client{Timeout: 15 * time.Second},
+		store:        st,
+		cfg:          cfg,
+		discovery:    disc,
+		logger:       logger,
+		metricsStore: newMetricsStore(),
+		// 15s was too tight: increase() over a growing fleet's high-cardinality
+		// (hostname, app) series scales with range, and a 30d report routinely
+		// exceeded it (confirmed in production: 14d ~8s, 21d ~15s, 25d+ timed
+		// out) — surfaced as every report panel failing on the 30-day view.
+		promClient:    &http.Client{Timeout: 45 * time.Second},
 		checksumCache: make(map[string]installerChecksumEntry),
 	}
 

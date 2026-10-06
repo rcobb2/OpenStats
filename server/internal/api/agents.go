@@ -27,9 +27,9 @@ type RegisterAgentRequest struct {
 }
 
 type RegisterAgentResponse struct {
-	Agent           *store.Agent          `json:"agent"`
-	Settings        *store.SystemSettings `json:"settings"`
-	UpdateURL       string                `json:"updateUrl,omitempty"`
+	Agent     *store.Agent          `json:"agent"`
+	Settings  *store.SystemSettings `json:"settings"`
+	UpdateURL string                `json:"updateUrl,omitempty"`
 	// UpdateChecksum is the lowercase hex SHA-256 of the file UpdateURL points
 	// to, computed fresh from disk on every response (installerChecksumForURL
 	// caches by mtime/size). Empty when UpdateURL is empty, or when the
