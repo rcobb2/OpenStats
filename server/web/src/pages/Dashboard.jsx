@@ -126,7 +126,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', padding: '1.25rem', marginTop: '2rem' }}>
+      <div className="chart-card" style={{ marginTop: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h3 style={{ margin: 0 }}>Top Applications by Launch Count</h3>
           <select value={range} onChange={e => setRange(e.target.value)}>
