@@ -1,8 +1,12 @@
 package enrollment
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"log/slog"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -39,5 +43,45 @@ func TestTrustedUpdateHostWorksForSchemelessConfig(t *testing.T) {
 	}
 	if c.isTrustedUpdateHost("evil.example.com") {
 		t.Error("unrelated host must not be trusted")
+	}
+}
+
+func TestVerifyDownloadChecksumEmptyExpectedAlwaysPasses(t *testing.T) {
+	path := t.TempDir() + "/file.bin"
+	if err := os.WriteFile(path, []byte("anything"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyDownloadChecksum(path, ""); err != nil {
+		t.Errorf("expected nil error for empty expected checksum, got %v", err)
+	}
+}
+
+func TestVerifyDownloadChecksumMatches(t *testing.T) {
+	content := []byte("totally real msi bytes")
+	path := t.TempDir() + "/file.bin"
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	expected := hex.EncodeToString(sum[:])
+
+	if err := verifyDownloadChecksum(path, expected); err != nil {
+		t.Errorf("expected nil error for matching checksum, got %v", err)
+	}
+	// Case-insensitive comparison (server hex encoding should always be
+	// lowercase, but don't be brittle about it).
+	if err := verifyDownloadChecksum(path, strings.ToUpper(expected)); err != nil {
+		t.Errorf("expected case-insensitive match to pass, got %v", err)
+	}
+}
+
+func TestVerifyDownloadChecksumMismatchErrors(t *testing.T) {
+	path := t.TempDir() + "/file.bin"
+	if err := os.WriteFile(path, []byte("real content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := verifyDownloadChecksum(path, "0000000000000000000000000000000000000000000000000000000000000000")
+	if err == nil {
+		t.Fatal("expected an error for a checksum mismatch")
 	}
 }

@@ -3,6 +3,8 @@ package enrollment
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,7 +27,7 @@ import (
 // constant and passes -d Version=... to WiX, which Package.wxs consumes as
 // $(var.Version). No second edit is needed. (The file this comment used to name,
 // openlabstats.wxs, does not exist — the manifest is Package.wxs.)
-const AgentVersion = "0.5.0"
+const AgentVersion = "0.5.1"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
@@ -40,10 +42,15 @@ type RegisterRequest struct {
 }
 
 type RegisterAgentResponse struct {
-	Settings        *SystemSettings `json:"settings"`
-	UpdateURL       string          `json:"updateUrl,omitempty"`
-	IgnoredExeNames []string        `json:"ignoredExeNames,omitempty"`
-	UserPolicy      *UserPolicy     `json:"userPolicy,omitempty"`
+	Settings  *SystemSettings `json:"settings"`
+	UpdateURL string          `json:"updateUrl,omitempty"`
+	// UpdateChecksum is the server's lowercase hex SHA-256 of the file
+	// UpdateURL points to. May be empty (older server, or the server
+	// couldn't compute it) — executeSelfUpdate installs without verification
+	// in that case rather than refusing the update outright.
+	UpdateChecksum  string      `json:"updateChecksum,omitempty"`
+	IgnoredExeNames []string    `json:"ignoredExeNames,omitempty"`
+	UserPolicy      *UserPolicy `json:"userPolicy,omitempty"`
 }
 
 // UserPolicy is the server-managed user-tracking policy. Ignored accounts never
@@ -95,7 +102,7 @@ type Client struct {
 // update fails (e.g. a download error) the guard is released so a later window
 // can retry; on a successful install the service is torn down and restarted, so
 // the reset is moot.
-func (c *Client) launchSelfUpdate(url string) {
+func (c *Client) launchSelfUpdate(url, checksum string) {
 	if !c.updateInProgress.CompareAndSwap(false, true) {
 		c.logger.Debug("self-update already in progress, skipping duplicate trigger")
 		return
@@ -105,12 +112,39 @@ func (c *Client) launchSelfUpdate(url string) {
 		jitter := time.Duration(rand.Intn(selfUpdateJitterSeconds)) * time.Second
 		c.logger.Info("self-update scheduled", "jitter", jitter)
 		time.Sleep(jitter)
-		c.executeSelfUpdate(url)
+		c.executeSelfUpdate(url, checksum)
 	}()
 }
 
 // selfUpdateJitterSeconds bounds the random delay before a self-update download.
 const selfUpdateJitterSeconds = 30
+
+// verifyDownloadChecksum compares the file at path against expected (the
+// server's lowercase hex SHA-256 for the URL it was downloaded from). An
+// empty expected always passes — the server may be older than this field, or
+// have failed to compute one — so this is a corruption/tamper check layered
+// on top of isTrustedUpdateHost, not a replacement requiring every server to
+// support it before updates can proceed at all.
+func verifyDownloadChecksum(path, expected string) error {
+	if expected == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open for checksum: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("hash downloaded file: %w", err)
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(got, expected) {
+		return fmt.Errorf("checksum mismatch: downloaded %s, server expected %s", got, expected)
+	}
+	return nil
+}
 
 // WithUserPolicyHandler registers a callback invoked with the server's user
 // policy on each successful registration.
@@ -146,14 +180,16 @@ func (c *Client) WithOSVersion(v string) *Client {
 	return c
 }
 
-// Register sends a registration/heartbeat to the central server.
-func (c *Client) Register(ctx context.Context) (*SystemSettings, string) {
+// Register sends a registration/heartbeat to the central server. The third
+// return value is the server's SHA-256 of the update URL's file, or "" if
+// there's no update (or the server couldn't compute one).
+func (c *Client) Register(ctx context.Context) (*SystemSettings, string, string) {
 	res, err := c.doRegister(ctx)
 	if err != nil {
 		// Include the target so a misconfigured server address is diagnosable
 		// from the agent log instead of looking like a transient network blip.
 		c.logger.Error("registration failed", "error", err, "serverURL", c.serverURL)
-		return nil, ""
+		return nil, "", ""
 	}
 	if res.IgnoredExeNames != nil {
 		c.ignoredMu.Lock()
@@ -163,7 +199,7 @@ func (c *Client) Register(ctx context.Context) (*SystemSettings, string) {
 	if res.UserPolicy != nil && c.onUserPolicy != nil {
 		c.onUserPolicy(res.UserPolicy)
 	}
-	return res.Settings, res.UpdateURL
+	return res.Settings, res.UpdateURL, res.UpdateChecksum
 }
 
 // FetchUserPolicy retrieves the user policy without registering. Used at startup
@@ -273,7 +309,7 @@ func (c *Client) doRegister(ctx context.Context) (*RegisterAgentResponse, error)
 func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration) {
 	currentInterval := defaultInterval
 
-	s, updateURL := c.Register(ctx)
+	s, updateURL, updateChecksum := c.Register(ctx)
 	if s != nil && s.HeartbeatIntervalSeconds > 0 {
 		currentInterval = time.Duration(s.HeartbeatIntervalSeconds) * time.Second
 	}
@@ -282,7 +318,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 	if updateURL != "" {
 		if s != nil && IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
 			c.logger.Info("startup: server-directed update received, initiating self-update", "url", updateURL)
-			c.launchSelfUpdate(updateURL)
+			c.launchSelfUpdate(updateURL, updateChecksum)
 		} else {
 			c.logger.Info("startup: update available but outside maintenance window, deferring", "url", updateURL)
 		}
@@ -296,7 +332,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s, updateURL = c.Register(ctx)
+			s, updateURL, updateChecksum = c.Register(ctx)
 			c.logger.Debug("heartbeat completed", "updateURL", updateURL)
 			if s != nil {
 				if s.HeartbeatIntervalSeconds > 0 {
@@ -311,7 +347,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 				if updateURL != "" {
 					if IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
 						c.logger.Info("server-directed update received, initiating self-update", "url", updateURL)
-						c.launchSelfUpdate(updateURL)
+						c.launchSelfUpdate(updateURL, updateChecksum)
 					} else {
 						c.logger.Info("update available but outside maintenance window, deferring", "url", updateURL)
 					}

@@ -5,14 +5,14 @@ package enrollment
 import (
 	"fmt"
 	"io"
-	neturl "net/url"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"strings"
 )
 
-func (c *Client) executeSelfUpdate(url string) {
+func (c *Client) executeSelfUpdate(url, checksum string) {
 	if !strings.HasPrefix(url, "http") {
 		url = c.serverURL + url
 	}
@@ -58,6 +58,11 @@ func (c *Client) executeSelfUpdate(url string) {
 	}
 	// Must close before passing to msiexec; defer will close again (harmless).
 	out.Close()
+
+	if err := verifyDownloadChecksum(tempFile, checksum); err != nil {
+		c.logger.Error("downloaded update failed integrity check, aborting install", "error", err)
+		return
+	}
 
 	c.logger.Info("update downloaded, launching installer", "path", tempFile)
 
