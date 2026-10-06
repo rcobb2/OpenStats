@@ -21,6 +21,26 @@ import (
 	"github.com/rcobb/openlabstats-server/internal/store"
 )
 
+// concurrencyLimitedTransport caps how many requests are in flight to
+// Prometheus at once. A single report page fires ~6 panel queries
+// simultaneously, and increase() over this fleet's high-cardinality series is
+// expensive enough that letting them all hit Prometheus at once causes severe
+// contention rather than parallelism: measured in production, 6 concurrent
+// 30d queries took 17-72s each (one exceeding even a 45s client timeout),
+// versus 8-20s run one at a time. Limiting concurrency trades a short queue
+// for keeping each query close to its unconstrained cost instead of degrading
+// all of them together.
+type concurrencyLimitedTransport struct {
+	sem       chan struct{}
+	transport http.RoundTripper
+}
+
+func (t *concurrencyLimitedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.sem <- struct{}{}
+	defer func() { <-t.sem }()
+	return t.transport.RoundTrip(req)
+}
+
 // Server holds shared dependencies for all API handlers.
 type Server struct {
 	store        *store.Store
@@ -46,7 +66,15 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		// (hostname, app) series scales with range, and a 30d report routinely
 		// exceeded it (confirmed in production: 14d ~8s, 21d ~15s, 25d+ timed
 		// out) — surfaced as every report panel failing on the 30-day view.
-		promClient:    &http.Client{Timeout: 45 * time.Second},
+		// Transport caps concurrent Prometheus requests at 2 — see
+		// concurrencyLimitedTransport's doc comment for why.
+		promClient: &http.Client{
+			Timeout: 45 * time.Second,
+			Transport: &concurrencyLimitedTransport{
+				sem:       make(chan struct{}, 2),
+				transport: http.DefaultTransport,
+			},
+		},
 		checksumCache: make(map[string]installerChecksumEntry),
 	}
 
