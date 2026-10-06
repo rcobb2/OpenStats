@@ -36,7 +36,18 @@ type concurrencyLimitedTransport struct {
 }
 
 func (t *concurrencyLimitedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.sem <- struct{}{}
+	// Must select on the request's context, not just block on the semaphore:
+	// http.Client.Timeout works by cancelling this context, and a plain `t.sem
+	// <- struct{}{}` ignores that entirely — a request stuck waiting for a
+	// slot would hang past the client's own timeout instead of failing fast.
+	// This matters most for a handler that makes two sequential Prometheus
+	// calls (e.g. ReportAvgSessionTime): it needs two turns through the
+	// semaphore, so it waits longest under contention.
+	select {
+	case t.sem <- struct{}{}:
+	case <-req.Context().Done():
+		return nil, req.Context().Err()
+	}
 	defer func() { <-t.sem }()
 	return t.transport.RoundTrip(req)
 }

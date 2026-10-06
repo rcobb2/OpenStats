@@ -57,3 +57,36 @@ func TestConcurrencyLimitedTransportBoundsInFlightRequests(t *testing.T) {
 		t.Errorf("max concurrent in-flight requests = %d, want <= %d", got, limit)
 	}
 }
+
+// Proves a request queued waiting for a semaphore slot still respects
+// http.Client.Timeout (which works via context cancellation) instead of
+// hanging indefinitely — the bug this fix closed. A naive `t.sem <-
+// struct{}{}` blocks forever regardless of the request's context.
+func TestConcurrencyLimitedTransportRespectsClientTimeoutWhileQueued(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Hour) // never finishes on its own
+	}))
+	defer srv.Close()
+
+	sem := make(chan struct{}, 1)
+	sem <- struct{}{} // fully occupied: every request must queue
+
+	client := &http.Client{
+		Timeout: 200 * time.Millisecond,
+		Transport: &concurrencyLimitedTransport{
+			sem:       sem,
+			transport: http.DefaultTransport,
+		},
+	}
+
+	start := time.Now()
+	_, err := client.Get(srv.URL)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error from a request stuck queuing past the client timeout")
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("request stuck queuing took %v to fail, want well under the 200ms timeout's neighborhood (bug: ignored context cancellation)", elapsed)
+	}
+}
