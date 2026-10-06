@@ -30,8 +30,14 @@ type RegisterAgentResponse struct {
 	Agent           *store.Agent          `json:"agent"`
 	Settings        *store.SystemSettings `json:"settings"`
 	UpdateURL       string                `json:"updateUrl,omitempty"`
-	IgnoredExeNames []string              `json:"ignoredExeNames,omitempty"`
-	UserPolicy      *AgentUserPolicy      `json:"userPolicy,omitempty"`
+	// UpdateChecksum is the lowercase hex SHA-256 of the file UpdateURL points
+	// to, computed fresh from disk on every response (installerChecksumForURL
+	// caches by mtime/size). Empty when UpdateURL is empty, or when the
+	// checksum couldn't be computed — the agent installs without verification
+	// in that case rather than refusing the update outright.
+	UpdateChecksum  string           `json:"updateChecksum,omitempty"`
+	IgnoredExeNames []string         `json:"ignoredExeNames,omitempty"`
+	UserPolicy      *AgentUserPolicy `json:"userPolicy,omitempty"`
 }
 
 // RegisterAgent godoc
@@ -41,7 +47,7 @@ type RegisterAgentResponse struct {
 // @Accept       json
 // @Produce      json
 // @Param        body  body  RegisterAgentRequest  true  "Agent registration payload"
-// @Success      200   {object}  store.Agent
+// @Success      200   {object}  RegisterAgentResponse
 // @Failure      400   {object}  map[string]string
 // @Failure      500   {object}  map[string]string
 // @Router       /api/v1/agents/register [post]
@@ -147,6 +153,7 @@ func (s *Server) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		Agent:           agent,
 		Settings:        settings,
 		UpdateURL:       updateURL,
+		UpdateChecksum:  s.installerChecksumForURL(updateURL),
 		IgnoredExeNames: ignoredExeNames,
 		UserPolicy:      userPolicy,
 	})
@@ -307,9 +314,10 @@ func (s *Server) ForceAgentUpdate(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("force update queued", "agentID", agentID, "url", url)
 	writeJSON(w, http.StatusOK, map[string]string{
-		"status":    "queued",
-		"message":   "Agent will receive update URL on next heartbeat.",
-		"updateUrl": url,
+		"status":         "queued",
+		"message":        "Agent will receive update URL on next heartbeat.",
+		"updateUrl":      url,
+		"updateChecksum": s.installerChecksumForURL(url),
 	})
 }
 

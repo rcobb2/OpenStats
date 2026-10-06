@@ -95,6 +95,29 @@ definitions:
       room:
         type: string
     type: object
+  api.RegisterAgentResponse:
+    properties:
+      agent:
+        $ref: '#/definitions/store.Agent'
+      ignoredExeNames:
+        items:
+          type: string
+        type: array
+      settings:
+        $ref: '#/definitions/store.SystemSettings'
+      updateChecksum:
+        description: |-
+          UpdateChecksum is the lowercase hex SHA-256 of the file UpdateURL points
+          to, computed fresh from disk on every response (installerChecksumForURL
+          caches by mtime/size). Empty when UpdateURL is empty, or when the
+          checksum couldn't be computed — the agent installs without verification
+          in that case rather than refusing the update outright.
+        type: string
+      updateUrl:
+        type: string
+      userPolicy:
+        $ref: '#/definitions/api.AgentUserPolicy'
+    type: object
   api.SummaryResponse:
     properties:
       onlineAgents:
@@ -462,7 +485,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/store.Agent'
+            $ref: '#/definitions/api.RegisterAgentResponse'
         "400":
           description: Bad Request
           schema:

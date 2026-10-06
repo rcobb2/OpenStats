@@ -82,6 +82,9 @@ Agent registration handler:
 - Decides each heartbeat's `updateUrl`: a manual force-update (one-shot, via
   `SetAgentPendingUpdate`) always wins and bypasses the throttle; otherwise the
   staggered rollout controller decides (see `rollout.go`).
+- Whenever `updateUrl` is non-empty, also computes `updateChecksum` (SHA-256 of
+  that file, via `installerChecksumForURL` in `installers.go`, cached by
+  mtime/size) so the agent can verify the download before executing it.
 
 ### `internal/api/rollout.go`
 

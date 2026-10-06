@@ -128,7 +128,7 @@ Deleting agents and forcing a single agent's update are deliberately **not** exp
 
 ## API Contract (Agent ↔ Server)
 
-- **Registration/heartbeat**: `POST /api/v1/agents/register` — payload: `{ id, hostname, ipAddress, osVersion, agentVersion, port, building, room }`; response: `{ agent, settings, updateUrl, ignoredExeNames, userPolicy }`
+- **Registration/heartbeat**: `POST /api/v1/agents/register` — payload: `{ id, hostname, ipAddress, osVersion, agentVersion, port, building, room }`; response: `{ agent, settings, updateUrl, updateChecksum, ignoredExeNames, userPolicy }`. `updateChecksum` is the server's SHA-256 of the file `updateUrl` points to (computed fresh per response, cached by file mtime/size); the agent verifies it before executing a downloaded installer and aborts on mismatch, skipping verification only when the server couldn't compute one.
 - **User policy** (fetched once at agent startup): `GET /api/v1/users/policy`
 - All server API routes are under `/api/v1/*` returning JSON
 - Agent metrics at `http://<agent>:9183/metrics`, health at `http://<agent>:9183/health`

@@ -1,9 +1,15 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/rcobb/openlabstats-server/internal/config"
 )
 
 func TestExtractVersion(t *testing.T) {
@@ -137,5 +143,85 @@ func TestFindLatestInstallerFallsBackAcrossPlatforms(t *testing.T) {
 	}
 	if got != "openlabstats-agent-0.1.10.msi" {
 		t.Errorf("got %q, want the .msi fallback", got)
+	}
+}
+
+func newTestServerWithPublicDir(dir string) *Server {
+	return &Server{
+		cfg:           &config.Config{Server: config.ServerConfig{PublicDir: dir}},
+		logger:        slog.Default(),
+		checksumCache: make(map[string]installerChecksumEntry),
+	}
+}
+
+func TestInstallerChecksumForURLMatchesContent(t *testing.T) {
+	publicDir := t.TempDir()
+	installers := filepath.Join(publicDir, "installers")
+	if err := os.MkdirAll(installers, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("fake msi bytes")
+	if err := os.WriteFile(filepath.Join(installers, "openlabstats-agent-0.5.0.msi"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	want := hex.EncodeToString(sum[:])
+
+	s := newTestServerWithPublicDir(publicDir)
+	got := s.installerChecksumForURL("/installers/openlabstats-agent-0.5.0.msi")
+	if got != want {
+		t.Errorf("installerChecksumForURL() = %q, want %q", got, want)
+	}
+}
+
+func TestInstallerChecksumForURLEmptyWhenMissing(t *testing.T) {
+	s := newTestServerWithPublicDir(t.TempDir())
+	if got := s.installerChecksumForURL("/installers/does-not-exist.msi"); got != "" {
+		t.Errorf("installerChecksumForURL() = %q, want empty for a missing file", got)
+	}
+	if got := s.installerChecksumForURL(""); got != "" {
+		t.Errorf("installerChecksumForURL(\"\") = %q, want empty", got)
+	}
+}
+
+// The cache is keyed by mtime+size, not just path — a rolled-over installer
+// at the same filename (e.g. CI republishing the same version) must not keep
+// serving the old hash.
+func TestInstallerChecksumForURLCacheInvalidatesOnContentChange(t *testing.T) {
+	publicDir := t.TempDir()
+	installers := filepath.Join(publicDir, "installers")
+	if err := os.MkdirAll(installers, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(installers, "openlabstats-agent-0.5.0.msi")
+	if err := os.WriteFile(path, []byte("version one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServerWithPublicDir(publicDir)
+	first := s.installerChecksumForURL("/installers/openlabstats-agent-0.5.0.msi")
+	if first == "" {
+		t.Fatal("expected a non-empty checksum")
+	}
+
+	if err := os.WriteFile(path, []byte("version two, different content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newTime := time.Now()
+	if err := os.Chtimes(path, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+
+	second := s.installerChecksumForURL("/installers/openlabstats-agent-0.5.0.msi")
+	if second == first {
+		t.Error("checksum did not change after the file's content and mtime changed — stale cache")
+	}
+	sum := sha256.Sum256([]byte("version two, different content"))
+	if want := hex.EncodeToString(sum[:]); second != want {
+		t.Errorf("installerChecksumForURL() after change = %q, want %q", second, want)
 	}
 }

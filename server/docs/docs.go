@@ -75,7 +75,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/store.Agent"
+                            "$ref": "#/definitions/api.RegisterAgentResponse"
                         }
                     },
                     "400": {
@@ -1948,6 +1948,33 @@ const docTemplate = `{
                 },
                 "room": {
                     "type": "string"
+                }
+            }
+        },
+        "api.RegisterAgentResponse": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "$ref": "#/definitions/store.Agent"
+                },
+                "ignoredExeNames": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "settings": {
+                    "$ref": "#/definitions/store.SystemSettings"
+                },
+                "updateChecksum": {
+                    "description": "UpdateChecksum is the lowercase hex SHA-256 of the file UpdateURL points\nto, computed fresh from disk on every response (installerChecksumForURL\ncaches by mtime/size). Empty when UpdateURL is empty, or when the\nchecksum couldn't be computed — the agent installs without verification\nin that case rather than refusing the update outright.",
+                    "type": "string"
+                },
+                "updateUrl": {
+                    "type": "string"
+                },
+                "userPolicy": {
+                    "$ref": "#/definitions/api.AgentUserPolicy"
                 }
             }
         },

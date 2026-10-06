@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -10,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // GenerateInstallerRequest is the payload for generating a custom MSI.
@@ -112,6 +116,61 @@ func (s *Server) GetLatestInstallerVersion(osVersion string) string {
 		return ""
 	}
 	return installerVersionRe.FindString(filename)
+}
+
+// installerChecksumEntry caches a file's SHA-256 against the mtime/size it was
+// computed from, so re-hashing isn't repeated on every heartbeat from every
+// agent in the fleet for a file that hasn't changed.
+type installerChecksumEntry struct {
+	modTime time.Time
+	size    int64
+	sha256  string
+}
+
+// installerChecksumForURL returns the lowercase hex SHA-256 of the file an
+// updateUrl (as returned by GetLatestInstallerURL/decideRolloutUpdate/
+// ForceAgentUpdate) points to, or "" if it can't be computed (file missing,
+// read error). The agent treats "" as "no checksum available" and installs
+// without verification rather than refusing the update outright — this is a
+// corruption/tamper check layered on top of the existing trusted-host check,
+// not a replacement for it, so a transient hashing failure shouldn't stall
+// the whole fleet's updates.
+func (s *Server) installerChecksumForURL(updateURL string) string {
+	if updateURL == "" {
+		return ""
+	}
+	path := filepath.Join(s.cfg.Server.PublicDir, "installers", filepath.Base(updateURL))
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+
+	s.checksumCacheMu.Lock()
+	if cached, ok := s.checksumCache[path]; ok && cached.modTime.Equal(info.ModTime()) && cached.size == info.Size() {
+		s.checksumCacheMu.Unlock()
+		return cached.sha256
+	}
+	s.checksumCacheMu.Unlock()
+
+	f, err := os.Open(path)
+	if err != nil {
+		s.logger.Warn("failed to open installer for checksum", "path", path, "error", err)
+		return ""
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		s.logger.Warn("failed to hash installer", "path", path, "error", err)
+		return ""
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+
+	s.checksumCacheMu.Lock()
+	s.checksumCache[path] = installerChecksumEntry{modTime: info.ModTime(), size: info.Size(), sha256: sum}
+	s.checksumCacheMu.Unlock()
+	return sum
 }
 
 // DownloadLatestInstaller serves the latest installer file directly.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,17 +29,21 @@ type Server struct {
 	logger       *slog.Logger
 	metricsStore *MetricsStore
 	promClient   *http.Client
+
+	checksumCacheMu sync.Mutex
+	checksumCache   map[string]installerChecksumEntry
 }
 
 // NewRouter creates the chi router with all API routes.
 func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logger *slog.Logger) http.Handler {
 	s := &Server{
-		store:        st,
-		cfg:          cfg,
-		discovery:    disc,
-		logger:       logger,
-		metricsStore: newMetricsStore(),
-		promClient:   &http.Client{Timeout: 15 * time.Second},
+		store:         st,
+		cfg:           cfg,
+		discovery:     disc,
+		logger:        logger,
+		metricsStore:  newMetricsStore(),
+		promClient:    &http.Client{Timeout: 15 * time.Second},
+		checksumCache: make(map[string]installerChecksumEntry),
 	}
 
 	r := chi.NewRouter()
