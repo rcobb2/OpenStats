@@ -107,8 +107,16 @@ func TestUsageByLabQueryUsesForegroundSeconds(t *testing.T) {
 	if strings.Contains(got, "openlabstats_app_usage_seconds_total") {
 		t.Errorf("query must not use process-uptime seconds (unbounded per machine): %s", got)
 	}
-	if !strings.Contains(got, "openlabstats_app_foreground_seconds_total") {
-		t.Errorf("query must use foreground seconds, got: %s", got)
+	// Queries the openlabstats:app_foreground_seconds:rate15m recording rule
+	// (sum_over_time), not the raw counter directly (increase) — see
+	// prometheus/alerts.yml's openlabstats_report_rollups group. The rule
+	// itself is built from foreground seconds, not usage/uptime seconds, so
+	// this still guards the same bug this test was written for.
+	if !strings.Contains(got, "openlabstats:app_foreground_seconds:rate15m") {
+		t.Errorf("query must use the foreground-seconds rollup, got: %s", got)
+	}
+	if !strings.Contains(got, "sum_over_time") {
+		t.Errorf("query must read the recording rule via sum_over_time, not increase() on a raw counter: %s", got)
 	}
 	// The app dimension backs the report's App filter and the lab+app CSV export.
 	if !strings.Contains(got, "sum by (hostname, app)") {

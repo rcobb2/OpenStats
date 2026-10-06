@@ -55,3 +55,45 @@ groups:
       # Total unique apps in use right now.
       - record: openlabstats:active_apps:count
         expr: count(count by (app) (openlabstats_app_active == 1))
+
+  # Pre-computed 15m deltas backing server/internal/api/reports.go's
+  # arbitrary-range reports (?range=1h..30d). Those reports used to run
+  # increase() over the raw counters directly for whatever window the caller
+  # asked for — fine for 24h, but for this fleet's cardinality a 30-day window
+  # means walking on the order of 500M+ raw samples per request, from scratch,
+  # every time (measured in production: 14d ~8s, 21d ~15s, 25d+ exceeded a 45s
+  # client timeout). These rules move that cost here, computed once per 15m
+  # centrally, so a report query becomes sum_over_time() over ~2,880 points
+  # (30d / 15m) instead of re-deriving from raw samples.
+  #
+  # Every label a live report currently filters or groups by is retained
+  # (hostname for ?hostname=, user for the ignore-list matcher applied via
+  # buildLabelFilters/buildUserSessionFilters, app/category for the app-centric
+  # reports) so those filters keep working unchanged against the rollup —
+  # only the metric name and increase()->sum_over_time() change at the query
+  # site. Deliberately NOT by (lab, ...): usageByLabQuery already resolves lab
+  # from the current DB assignment in Go rather than the Prometheus label, so
+  # these rules don't need it.
+  #
+  # New rule = no history: a rule only starts accumulating from the moment
+  # it's added, so a 30-day report is measured against a growing window of
+  # real rollup data for the next 30 days after this ships, not a full 30
+  # days immediately. Not backfilled (would need promtool tsdb
+  # create-blocks-from rules run directly against podman02's TSDB).
+  - name: openlabstats_report_rollups
+    interval: 15m
+    rules:
+      - record: openlabstats:app_foreground_seconds:rate15m
+        expr: sum by (hostname, app, category, user) (increase(openlabstats_app_foreground_seconds_total[15m]))
+
+      - record: openlabstats:app_launches:rate15m
+        expr: sum by (hostname, app, category, user) (increase(openlabstats_app_launches_total[15m]))
+
+      - record: openlabstats:privilege_elevations:rate15m
+        expr: sum by (hostname, app, category, user) (increase(openlabstats_privilege_elevations_total[15m]))
+
+      - record: openlabstats:user_session_logins:rate15m
+        expr: sum by (hostname, user) (increase(openlabstats_user_session_logins_total[15m]))
+
+      - record: openlabstats:user_session_seconds:rate15m
+        expr: sum by (hostname, user) (increase(openlabstats_user_session_seconds_total[15m]))

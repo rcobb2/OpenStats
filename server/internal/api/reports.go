@@ -48,7 +48,7 @@ type promQueryInstantResult struct {
 // both divide by 3600 themselves.
 func usageByLabQuery(labelFilters, timeRange string) string {
 	return fmt.Sprintf(
-		`sum by (hostname, app) (increase(openlabstats_app_foreground_seconds_total%s[%s])) > 0`,
+		`sum by (hostname, app) (sum_over_time(openlabstats:app_foreground_seconds:rate15m%s[%s])) > 0`,
 		labelFilters, timeRange,
 	)
 }
@@ -600,7 +600,7 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	// topk is applied server-side after whitelist filtering.
 	query := fmt.Sprintf(
-		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
+		`sum by (app, category) (sum_over_time(openlabstats:app_launches:rate15m%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
@@ -631,7 +631,7 @@ func (s *Server) ReportTopAppsByElevations(w http.ResponseWriter, r *http.Reques
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`sum by (app, category) (increase(openlabstats_privilege_elevations_total%s[%s])) > 0`,
+		`sum by (app, category) (sum_over_time(openlabstats:privilege_elevations:rate15m%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	// No mapping whitelist here: elevations frequently come from unmapped
@@ -663,7 +663,7 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0`,
+		`sum by (app, category) (sum_over_time(openlabstats:app_foreground_seconds:rate15m%s[%s])) / 3600 > 0`,
 		lf, timeRange,
 	)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
@@ -702,7 +702,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 	}
 
 	query := fmt.Sprintf(
-		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
+		`sum by (app, category) (sum_over_time(openlabstats:app_launches:rate15m%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, true)
@@ -716,7 +716,7 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 func (s *Server) respondBottomAppsWithZeros(w http.ResponseWriter, r *http.Request, lf, timeRange string, atTime int64, limit int) {
 	ctx := r.Context()
 	query := fmt.Sprintf(
-		`sum by (app, category) (increase(openlabstats_app_launches_total%s[%s])) > 0`,
+		`sum by (app, category) (sum_over_time(openlabstats:app_launches:rate15m%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	raw, err := s.fetchInstantVector(ctx, query, atTime)
@@ -836,7 +836,7 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
 	query := fmt.Sprintf(
-		`sum by (app, category) (increase(openlabstats_app_foreground_seconds_total%s[%s])) / 3600 > 0`,
+		`sum by (app, category) (sum_over_time(openlabstats:app_foreground_seconds:rate15m%s[%s])) / 3600 > 0`,
 		lf, timeRange,
 	)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, true)
@@ -1098,7 +1098,7 @@ func (s *Server) ReportTopDevicesBySessionCount(w http.ResponseWriter, r *http.R
 	// every hostname's count and ranks in Go instead (rankHostnamesByValue).
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`sum by (hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0`,
+		`sum by (hostname) (sum_over_time(openlabstats:user_session_logins:rate15m%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	raw, err := s.fetchInstantVector(ctx, query, atTime)
@@ -1195,7 +1195,7 @@ func (s *Server) ReportTopUsersByLoginCount(w http.ResponseWriter, r *http.Reque
 	labFilter := q.Get("lab")
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`sum by (user, hostname) (increase(openlabstats_user_session_logins_total%s[%s])) > 0`,
+		`sum by (user, hostname) (sum_over_time(openlabstats:user_session_logins:rate15m%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy, hostnameToLab, labFilter)
@@ -1239,7 +1239,7 @@ func (s *Server) ReportTopUsersByElevations(w http.ResponseWriter, r *http.Reque
 	// canonical-user folding, matching the other user-keyed reports.
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`sum by (user, hostname) (increase(openlabstats_privilege_elevations_total%s[%s])) > 0`,
+		`sum by (user, hostname) (sum_over_time(openlabstats:privilege_elevations:rate15m%s[%s])) > 0`,
 		lf, timeRange,
 	)
 	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy, hostnameToLab, labFilter)
@@ -1281,7 +1281,7 @@ func (s *Server) ReportTopUsersBySessionTime(w http.ResponseWriter, r *http.Requ
 	labFilter := q.Get("lab")
 	lf := s.buildUserSessionFilters(ctx, q.Get("hostname"))
 	query := fmt.Sprintf(
-		`sum by (user, hostname) (increase(openlabstats_user_session_seconds_total%s[%s])) / 3600 > 0`,
+		`sum by (user, hostname) (sum_over_time(openlabstats:user_session_seconds:rate15m%s[%s])) / 3600 > 0`,
 		lf, timeRange,
 	)
 	totals, err := s.sumByCanonicalUser(ctx, query, atTime, policy, hostnameToLab, labFilter)
@@ -1353,9 +1353,9 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 	// then divided — averaging the per-raw-username averages would weight a
 	// user's Windows and macOS sessions equally regardless of how many of each.
 	secondsQuery := fmt.Sprintf(
-		`sum by (user, hostname) (increase(openlabstats_user_session_seconds_total%s[%s]))`, lf, timeRange)
+		`sum by (user, hostname) (sum_over_time(openlabstats:user_session_seconds:rate15m%s[%s]))`, lf, timeRange)
 	loginsQuery := fmt.Sprintf(
-		`sum by (user, hostname) (increase(openlabstats_user_session_logins_total%s[%s]))`, lf, timeRange)
+		`sum by (user, hostname) (sum_over_time(openlabstats:user_session_logins:rate15m%s[%s]))`, lf, timeRange)
 
 	seconds, err := s.sumByCanonicalUser(ctx, secondsQuery, atTime, policy, hostnameToLab, labFilter)
 	if err != nil {
