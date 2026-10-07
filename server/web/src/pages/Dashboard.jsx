@@ -4,25 +4,27 @@ import {
 } from 'recharts';
 import {
   getSummary, getTopAppsByLaunches, getActiveUsers, getUsageByLab,
-  getTopAppsByElevations, getAgents, parsePromVector,
+  getTopAppsByElevations, getAgents, getLabs, parsePromVector,
 } from '../api';
+import { useGlobalFilters } from '../hooks/useGlobalFilters';
+import GlobalFilterBar from '../components/GlobalFilterBar';
 
 const CHART_COLORS = [
   'var(--accent)', 'var(--success)', 'var(--warning)', 'var(--danger)', '#a78bfa',
   '#34d399', '#fb923c', '#60a5fa', '#f472b6', '#818cf8',
 ];
 
-function TopAppsChart({ range }) {
+function TopAppsChart({ range, filters }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setData(null);
     setError(null);
-    getTopAppsByLaunches(range, 10)
+    getTopAppsByLaunches(range, 10, filters)
       .then(res => setData(parsePromVector(res)))
       .catch(e => setError(e.message));
-  }, [range]);
+  }, [range, filters]);
 
   if (error) return <div className="error" style={{ padding: '1rem' }}>Chart unavailable: {error}</div>;
   if (!data) return <div className="loading" style={{ padding: '1rem' }}>Loading chart…</div>;
@@ -71,14 +73,14 @@ function TopAppsChart({ range }) {
 
 // getUsageByLab returns per-(lab, app) foreground seconds as a Prometheus
 // vector; this page only needs the per-lab total, so roll the apps up here.
-function LabUsageChart({ range }) {
+function LabUsageChart({ range, filters }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setData(null);
     setError(null);
-    getUsageByLab(range)
+    getUsageByLab(range, filters)
       .then(res => {
         const rows = parsePromVector(res);
         const byLab = new Map();
@@ -92,7 +94,7 @@ function LabUsageChart({ range }) {
         setData(totals);
       })
       .catch(e => setError(e.message));
-  }, [range]);
+  }, [range, filters]);
 
   if (error) return <div className="error" style={{ padding: '1rem' }}>Chart unavailable: {error}</div>;
   if (!data) return <div className="loading" style={{ padding: '1rem' }}>Loading chart…</div>;
@@ -132,17 +134,17 @@ function LabUsageChart({ range }) {
   );
 }
 
-function RecentElevationsPanel({ range }) {
+function RecentElevationsPanel({ range, filters }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setData(null);
     setError(null);
-    getTopAppsByElevations(range, 6)
+    getTopAppsByElevations(range, 6, filters)
       .then(res => setData(parsePromVector(res)))
       .catch(e => setError(e.message));
-  }, [range]);
+  }, [range, filters]);
 
   if (error) return <div className="error">Unavailable: {error}</div>;
   if (!data) return <div className="loading">Loading…</div>;
@@ -177,6 +179,9 @@ function RecentElevationsPanel({ range }) {
   );
 }
 
+// Deliberately fleet-wide regardless of the page's lab scope selector — this
+// is a triage panel ("what needs attention right now"), and narrowing it to
+// one lab would hide an offline machine in a lab you forgot to filter out.
 function FleetHealthPanel() {
   const [agents, setAgents] = useState(null);
   const [error, setError] = useState(false);
@@ -231,7 +236,13 @@ export default function Dashboard() {
   const [summaryError, setSummaryError] = useState(null);
   const [activeUsers, setActiveUsers] = useState(null);
   const [activeUsersError, setActiveUsersError] = useState(false);
-  const [range, setRange] = useState('24h');
+  const [labs, setLabs] = useState([]);
+  const globalFilters = useGlobalFilters();
+  const { range, isCustomReady, effectiveRange, filters } = globalFilters;
+
+  useEffect(() => {
+    getLabs().then(setLabs).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const load = () => {
@@ -247,15 +258,15 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <h2 style={{ margin: 0 }}>Dashboard</h2>
-        <select value={range} onChange={e => setRange(e.target.value)}>
-          <option value="1h">Last Hour</option>
-          <option value="24h">Last 24 Hours</option>
-          <option value="7d">Last 7 Days</option>
-          <option value="30d">Last 30 Days</option>
-        </select>
-      </div>
+      <h2>Dashboard</h2>
+
+      <GlobalFilterBar filters={globalFilters} labs={labs} showMachine={false} />
+
+      {range === 'custom' && !isCustomReady && (
+        <div className="warning-banner">
+          Select a valid start and end time to load data.
+        </div>
+      )}
 
       {summaryError && <div className="error" style={{ marginTop: '1rem' }}>{summaryError}</div>}
       {!summary && !summaryError && <div className="loading" style={{ padding: '1rem' }}>Loading…</div>}
@@ -288,27 +299,31 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="panel-grid">
-        <div className="chart-card">
-          <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Top Applications by Launch Count</h3>
-          <TopAppsChart range={range} />
-        </div>
-        <div className="chart-card">
-          <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Usage by Lab</h3>
-          <LabUsageChart range={range} />
-        </div>
-      </div>
+      {(range !== 'custom' || isCustomReady) && (
+        <>
+          <div className="panel-grid">
+            <div className="chart-card">
+              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Top Applications by Launch Count</h3>
+              <TopAppsChart range={effectiveRange} filters={filters} />
+            </div>
+            <div className="chart-card">
+              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Usage by Lab</h3>
+              <LabUsageChart range={effectiveRange} filters={filters} />
+            </div>
+          </div>
 
-      <div className="panel-grid">
-        <div className="chart-card">
-          <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Fleet Health</h3>
-          <FleetHealthPanel />
-        </div>
-        <div className="chart-card">
-          <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Recent Privilege Elevations</h3>
-          <RecentElevationsPanel range={range} />
-        </div>
-      </div>
+          <div className="panel-grid">
+            <div className="chart-card">
+              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Fleet Health</h3>
+              <FleetHealthPanel />
+            </div>
+            <div className="chart-card">
+              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Recent Privilege Elevations</h3>
+              <RecentElevationsPanel range={effectiveRange} filters={filters} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

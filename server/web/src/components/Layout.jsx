@@ -68,7 +68,11 @@ const navItems = [
   { to: '/labs', label: 'Labs', icon: icons.labs },
   { to: '/mappings', label: 'Mappings', icon: icons.mappings },
   { to: '/users', label: 'Users', icon: icons.users },
-  { to: '/reports', label: 'Reports', icon: icons.reports },
+  // Reports has its own sub-routes (/reports/user, /reports/hardware, ...)
+  // rather than a single page, so its link can't use exact-match `end` like
+  // the other flat items — it needs a prefix match to stay highlighted
+  // across all of them.
+  { to: '/reports', label: 'Reports', icon: icons.reports, end: false },
 ];
 
 export default function Layout() {
@@ -116,7 +120,7 @@ export default function Layout() {
                     </ul>
                   </div>
                 ) : (
-                  <NavLink to={item.to} end className={({ isActive }) => isActive ? 'active' : ''}>
+                  <NavLink to={item.to} end={item.end !== false} className={({ isActive }) => isActive ? 'active' : ''}>
                     {item.icon}
                     {item.label}
                   </NavLink>

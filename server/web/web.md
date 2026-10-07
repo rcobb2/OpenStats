@@ -18,19 +18,24 @@ server/web/
 ├── src/
 │   ├── api.js           # API client functions
 │   ├── main.jsx         # App entry, routing
-│   ├── App.jsx          # Root component
-│   ├── styles.css       # Global styles
+│   ├── styles.css       # Global styles (design tokens + shared classes)
 │   ├── pages/           # Page components
 │   │   ├── Dashboard.jsx
 │   │   ├── Labs.jsx
-│   │   ├── Agents.jsx
 │   │   ├── Mappings.jsx
 │   │   ├── Users.jsx
-│   │   ├── Reports.jsx
-│   │   └── Installer.jsx
+│   │   ├── Reports.jsx         # Shell + report-type routing; see below
+│   │   └── agents/
+│   │       ├── AgentsList.jsx  # "Monitor" — fleet list, status filter, search
+│   │       ├── Installer.jsx
+│   │       └── Settings.jsx
+│   ├── hooks/
+│   │   └── useGlobalFilters.js # Shared range/machine/lab scope, URL-persisted
 │   └── components/      # Shared components
-│       ├── Layout.jsx   # Nav + shell
-│       └── Table.jsx   # ResizableTable wrapper
+│       ├── Layout.jsx          # Nav + shell
+│       ├── Table.jsx           # ResizableTable wrapper
+│       ├── ErrorBoundary.jsx
+│       └── GlobalFilterBar.jsx # Range + Machine/Lab controls, used by Dashboard + Reports
 ├── index.html
 ├── package.json
 └── vite.config.js
@@ -82,10 +87,16 @@ Base URL: `/api/v1` (proxied by server)
 ## Pages
 
 ### Dashboard (`pages/Dashboard.jsx`)
-- Overview metrics summary
-- Active agents count
-- Active users count
-- Top apps quick view
+- Stat cards: total/online agents, labs, mappings, active users
+- Uses `useGlobalFilters` + `GlobalFilterBar` (range + lab, no machine scope) —
+  same URL-persisted state Reports uses, so a Dashboard link with `?range=`/
+  `&lab=` is shareable and survives a refresh
+- Top Applications by Launch Count, Usage by Lab (both honor the lab scope)
+- Fleet Health — online/outdated/offline counts + agents needing attention;
+  deliberately **not** scoped by the lab filter (see the comment on
+  `FleetHealthPanel` — a triage panel shouldn't let a lab filter hide an
+  offline machine elsewhere)
+- Recent Privilege Elevations (top apps by elevation count)
 
 ### Labs (`pages/Labs.jsx`)
 - List all labs
@@ -96,9 +107,13 @@ Base URL: `/api/v1` (proxied by server)
 
 #### Monitor (`pages/agents/AgentsList.jsx`)
 - List all registered agents
-- Show status (online/offline)
+- Status filter tabs (All/Online/Outdated/Offline, with live counts) + a
+  hostname/IP/lab search box — status is computed server-side (see
+  `applyEffectiveStatus` in `server/internal/api/agents.go`): "offline" means
+  `lastSeen` exceeds the configured stale timeout, not a value the agent
+  itself ever reports
 - Assign to lab
-- Delete agent
+- Delete agent, force an individual agent's update
 - Columns: hostname, IP, OS, version, lab, status, last seen
 
 #### Installers (`pages/agents/Installer.jsx`)
@@ -126,19 +141,34 @@ Base URL: `/api/v1` (proxied by server)
 - Tabs: All, Tracked, Ignored, Merged, Rules
 
 ### Reports (`pages/Reports.jsx`)
-Report type is a dropdown ("Report" selector), not literal tabs — `reportType`
-state switches which component renders: `UserBehaviorReport`, `LabUsageReport`
-(hardware), `SoftwareMeteringReport`, `ElevationReport`.
+Each report type is its own route — `/reports/user`, `/reports/hardware`,
+`/reports/software`, `/reports/elevations` (bare `/reports` redirects to
+`/reports/user`, preserving any query string) — not client-side-only dropdown
+state. `type` comes from `useParams()`; an unrecognized value redirects to
+`/reports/user`. Switching between them is a `.tab-bar` of `NavLink`s that
+explicitly carry the current `location.search` along, so range/machine/lab
+scope survives the navigation. `type` picks which component renders:
+`UserBehaviorReport`, `LabUsageReport` (hardware), `SoftwareMeteringReport`,
+`ElevationReport`.
+
+Time range, custom date range, and machine/lab scope are **not** local state —
+they come from `useGlobalFilters()` (`src/hooks/useGlobalFilters.js`), which
+reads/writes them as URL query params (`?range=`, `&start=`/`&end=`,
+`&hostname=`/`&lab=`) shared with the Dashboard. The `GlobalFilterBar`
+component renders the actual controls; Reports adds its own App-name filter
+(`appFilter`, client-side only, not in the URL) as an extra child control.
+`chartKey` still forces each report body to remount on any filter change,
+same as before.
+
 - Top applications by usage time
 - Usage by lab
 - Active users
 - **Privilege Elevations** (`ElevationReport`) — its own report type, not a
   panel under User Behavior: Top Elevated Apps, Top Users by Elevations. UAC
-  on Windows, sudo/admin authorization on macOS. Honors the page-level range
+  on Windows, sudo/admin authorization on macOS. Honors the shared range
   selector like every other panel (a forced 30-day floor for sparse
   login-derived panels was tried and then removed — see git history on
   Reports.jsx — since it hid genuinely sparse data instead of showing it).
-- Time range selector (24h, 7d, 30d)
 
 
 ## Components
@@ -147,12 +177,49 @@ state switches which component renders: `UserBehaviorReport`, `LabUsageReport`
 - Sidebar navigation
 - Page title
 - Routes: Dashboard, Labs, Agents, Mappings, Users, Reports, Installer
+- The Reports nav item's `NavLink` uses prefix matching (`end: false` in
+  `navItems`), not exact-match like every other flat item — it points at
+  `/reports`, which covers all of `/reports/user`, `/reports/hardware`, etc.
+  Every other flat item still uses exact match (`end: true`); only an item
+  with real sub-routes needs the prefix form.
+
+### GlobalFilterBar (`components/GlobalFilterBar.jsx`)
+- Renders Time Range (+ custom From/To when `range === 'custom'`), and
+  optional Machine/Lab selects (`showMachine`/`showLab` props, both default
+  true)
+- Takes a `filters` prop — the object returned by `useGlobalFilters()` — plus
+  `agents`/`labs` lists the caller already fetched for other reasons, so this
+  component doesn't do its own independent (and potentially racing) fetch
+- Accepts `children` for a page's own extra controls alongside the shared
+  ones (Reports' App-name filter)
+- Used by Dashboard (`showMachine={false}` — machine-level scope doesn't fit
+  a fleet overview) and Reports (all three scopes)
 
 ### Table (`components/Table.jsx`)
 - `ResizableTable` component
 - Automatically adds resizable handles to all column headers
 - Maintains `table-layout: fixed` for stable resizing
 - Hover effects for handle visibility
+
+## Shared Filter State (`hooks/useGlobalFilters.js`)
+
+Time range + machine/lab scope used to be local `useState` duplicated in both
+Dashboard.jsx and Reports.jsx (and not reset-safe — refreshing the page or
+switching report types threw it away). `useGlobalFilters()` instead reads and
+writes it as URL query params via `useSearchParams`:
+
+- `?range=` (default `24h`, omitted from the URL when default)
+- `&start=`/`&end=` (datetime-local strings, only meaningful when `range=custom`)
+- `&hostname=` / `&lab=` — mutually exclusive; setting one clears the other
+
+Returns `{ range, setRange, customStart, setCustomStart, customEnd,
+setCustomEnd, hostname, setHostname, lab, setLab, isCustomReady, filters,
+effectiveRange }` — `filters` is the memoized `{start,end,hostname,lab}`
+object the `api.js` report functions already expect; `effectiveRange` is
+either the preset string or `"<start>~<end>"` for a custom range. Because
+this is just a thin wrapper over the URL, two pages reading it at once (e.g.
+Dashboard and Reports, or two browser tabs) share the same state for free,
+and any filtered view is a real, shareable link.
 
 ## Routing (`main.jsx`)
 
@@ -168,7 +235,8 @@ Uses React Router:
     <Route path="labs" element={<Labs />} />
     <Route path="mappings" element={<Mappings />} />
     <Route path="users" element={<Users />} />
-    <Route path="reports" element={<Reports />} />
+    <Route path="reports" element={<ReportsIndexRedirect />} />
+    <Route path="reports/:type" element={<Reports />} />
   </Route>
 </Routes>
 ```

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useParams, useLocation, NavLink, Navigate } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   LineChart, Line, CartesianGrid, Legend,
@@ -24,6 +25,8 @@ import {
   ignoreApp,
   getUtilizationOverTime,
 } from '../api';
+import { useGlobalFilters } from '../hooks/useGlobalFilters';
+import GlobalFilterBar from '../components/GlobalFilterBar';
 
 const CHART_COLORS = [
   'var(--accent)', 'var(--success)', 'var(--warning)', 'var(--danger)', '#a78bfa',
@@ -35,12 +38,6 @@ const CHART_COLORS = [
 // generously sized because even a large fleet's distinct apps/users fit in
 // one in-memory sort.
 const VIEW_ALL_LIMIT = 1000;
-
-// Format a datetime-local string defaulting to now minus offsetHours
-function defaultDatetime(offsetHours = 0) {
-  const d = new Date(Date.now() - offsetHours * 3600 * 1000);
-  return d.toISOString().slice(0, 16);
-}
 
 function HBarChart({ data, valueLabel = 'value', roundValues = false, height = 300, onIgnore }) {
   if (data === null) return <div className="loading">Loading…</div>;
@@ -660,14 +657,25 @@ function SoftwareMeteringReport({ range, filters, appFilter, exporting, handleEx
 const labelStyle = { color: 'var(--text-dim)', fontSize: '0.85rem', marginRight: '0.3rem' };
 const ctrlStyle = { display: 'flex', alignItems: 'center', gap: '0.3rem' };
 
+// Each report type is its own route (/reports/user, /reports/hardware, ...)
+// rather than client-side-only dropdown state — a filtered report is now a
+// real, shareable URL, survives a refresh, and works with the browser's
+// back/forward buttons like the rest of the app.
+const REPORT_TYPES = [
+  { key: 'user', label: 'User Behavior', title: 'User Behavior Analytics' },
+  { key: 'hardware', label: 'Hardware Utilization', title: 'Hardware & Lab Utilization' },
+  { key: 'software', label: 'Software Metering', title: 'Software Metering' },
+  { key: 'elevations', label: 'Privilege Elevations', title: 'Privilege Elevations' },
+];
+const REPORT_KEYS = REPORT_TYPES.map(r => r.key);
+
 export default function Reports() {
-  const [range, setRange] = useState('24h');
-  const [customStart, setCustomStart] = useState(() => defaultDatetime(24));
-  const [customEnd, setCustomEnd] = useState(() => defaultDatetime(0));
-  const [hostname, setHostname] = useState('');
-  const [lab, setLab] = useState('');
+  const { type } = useParams();
+  const location = useLocation();
+  const globalFilters = useGlobalFilters();
+  const { range, isCustomReady, effectiveRange, filters } = globalFilters;
+
   const [appFilter, setAppFilter] = useState('');
-  const [reportType, setReportType] = useState('user');
   const [exporting, setExporting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [agents, setAgents] = useState([]);
@@ -678,20 +686,12 @@ export default function Reports() {
     getLabs().then(setLabs).catch(() => {});
   }, []);
 
-  const isCustomReady = range === 'custom' && customStart && customEnd
-    && new Date(customEnd) > new Date(customStart);
-
-  // Memoize so the object identity only changes when filter values actually change,
-  // preventing sub-component useEffects from re-firing on every parent render.
-  const filters = useMemo(() => ({
-    ...(isCustomReady ? { start: customStart, end: customEnd } : {}),
-    ...(hostname ? { hostname } : {}),
-    ...(lab ? { lab } : {}),
-  }), [isCustomReady, customStart, customEnd, hostname, lab]);
+  if (!REPORT_KEYS.includes(type)) {
+    return <Navigate to={{ pathname: '/reports/user', search: location.search }} replace />;
+  }
 
   // Encode all active filter params into the key so chart components reload on any filter change.
-  const effectiveRange = isCustomReady ? `${customStart}~${customEnd}` : range;
-  const chartKey = `${refreshKey}-${effectiveRange}-${hostname}-${lab}`;
+  const chartKey = `${refreshKey}-${effectiveRange}-${filters.hostname || ''}-${filters.lab || ''}`;
 
   const handleIgnore = async (name) => {
     if (!window.confirm(`Hide "${name}" from all charts?\nYou can re-enable it in the Mappings page.`)) return;
@@ -714,17 +714,12 @@ export default function Reports() {
     }
   };
 
-  const titles = {
-    user: 'User Behavior Analytics',
-    hardware: 'Hardware & Lab Utilization',
-    software: 'Software Metering',
-    elevations: 'Privilege Elevations',
-  };
+  const current = REPORT_TYPES.find(r => r.key === type);
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0 }}>{titles[reportType]}</h2>
+        <h2 style={{ margin: 0 }}>{current.title}</h2>
         <button
           className="btn-secondary"
           onClick={() => setRefreshKey(k => k + 1)}
@@ -735,71 +730,19 @@ export default function Reports() {
         </button>
       </div>
 
-      <div className="filter-bar">
-        <div style={ctrlStyle}>
-          <label style={labelStyle}>Report</label>
-          <select value={reportType} onChange={e => setReportType(e.target.value)}>
-            <option value="user">User Behavior</option>
-            <option value="hardware">Hardware Utilization</option>
-            <option value="software">Software Metering</option>
-            <option value="elevations">Privilege Elevations</option>
-          </select>
-        </div>
+      <div className="tab-bar">
+        {REPORT_TYPES.map(r => (
+          <NavLink
+            key={r.key}
+            to={{ pathname: `/reports/${r.key}`, search: location.search }}
+            className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
+          >
+            {r.label}
+          </NavLink>
+        ))}
+      </div>
 
-        <div style={ctrlStyle}>
-          <label style={labelStyle}>Time Range</label>
-          <select value={range} onChange={e => setRange(e.target.value)}>
-            <option value="1h">Last Hour</option>
-            <option value="24h">Last 24 Hours</option>
-            <option value="7d">Last 7 Days</option>
-            <option value="30d">Last 30 Days</option>
-            <option value="custom">Custom…</option>
-          </select>
-        </div>
-
-        {range === 'custom' && (
-          <>
-            <div style={ctrlStyle}>
-              <label style={labelStyle}>From</label>
-              <input
-                type="datetime-local"
-                value={customStart}
-                onChange={e => setCustomStart(e.target.value)}
-                style={{ fontSize: '0.85rem' }}
-              />
-            </div>
-            <div style={ctrlStyle}>
-              <label style={labelStyle}>To</label>
-              <input
-                type="datetime-local"
-                value={customEnd}
-                onChange={e => setCustomEnd(e.target.value)}
-                style={{ fontSize: '0.85rem' }}
-              />
-            </div>
-          </>
-        )}
-
-        <div style={ctrlStyle}>
-          <label style={labelStyle}>Machine</label>
-          <select value={hostname} onChange={e => { setHostname(e.target.value); if (e.target.value) setLab(''); }}>
-            <option value="">All Machines</option>
-            {agents.map(a => (
-              <option key={a.id} value={a.hostname}>{a.hostname}</option>
-            ))}
-          </select>
-        </div>
-
-        <div style={ctrlStyle}>
-          <label style={labelStyle}>Lab</label>
-          <select value={lab} onChange={e => { setLab(e.target.value); if (e.target.value) setHostname(''); }}>
-            <option value="">All Labs</option>
-            {labs.map(l => (
-              <option key={l.id} value={l.name}>{l.name}</option>
-            ))}
-          </select>
-        </div>
-
+      <GlobalFilterBar filters={globalFilters} agents={agents} labs={labs}>
         <div style={ctrlStyle}>
           <label style={labelStyle}>App</label>
           <input
@@ -810,7 +753,7 @@ export default function Reports() {
             style={{ width: '120px', fontSize: '0.85rem' }}
           />
         </div>
-      </div>
+      </GlobalFilterBar>
 
       {range === 'custom' && !isCustomReady && (
         <div className="warning-banner">
@@ -820,13 +763,13 @@ export default function Reports() {
 
       {(range !== 'custom' || isCustomReady) && (
         <>
-          {reportType === 'user' && (
+          {type === 'user' && (
             <UserBehaviorReport key={chartKey} range={effectiveRange} filters={filters} appFilter={appFilter} onIgnore={handleIgnore} />
           )}
-          {reportType === 'hardware' && (
+          {type === 'hardware' && (
             <LabUsageReport key={chartKey} range={effectiveRange} filters={filters} appFilter={appFilter} />
           )}
-          {reportType === 'software' && (
+          {type === 'software' && (
             <SoftwareMeteringReport
               key={chartKey}
               range={effectiveRange}
@@ -837,7 +780,7 @@ export default function Reports() {
               onIgnore={handleIgnore}
             />
           )}
-          {reportType === 'elevations' && (
+          {type === 'elevations' && (
             <ElevationReport key={chartKey} range={effectiveRange} filters={filters} appFilter={appFilter} />
           )}
         </>
