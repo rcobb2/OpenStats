@@ -90,17 +90,25 @@ Base URL: `/api/v1` (proxied by server)
 ## Pages
 
 ### Dashboard (`pages/Dashboard.jsx`)
-- Stat cards: total/online agents, labs, mappings, active users
+- `TriageBanner` — the first thing on the page, above even the filter bar:
+  a single quiet line ("All N agents online and up to date") when the fleet
+  is healthy, or a prominent alert block (counts + a chip list of affected
+  hostnames linking to `AgentDetail`, capped at 8 with a "+N more" link to
+  the Agents page) when something needs attention. Modeled on how Tenable/
+  Datadog put "what's Critical right now" ahead of routine metrics rather
+  than burying it in a chart grid. Deliberately **not** scoped by the lab
+  filter (see the comment on `TriageBanner` — a triage panel shouldn't let a
+  lab filter hide an offline machine elsewhere)
+- Stat cards: total/online agents, labs, mappings, active users — each links
+  to the corresponding page (`/agents`, `/labs`, `/mappings`, `/users`)
 - Uses `useGlobalFilters` + `GlobalFilterBar` (range + lab, no machine scope) —
   same URL-persisted state Reports uses, so a Dashboard link with `?range=`/
   `&lab=` is shareable and survives a refresh
-- Top Applications by Launch Count, Usage by Lab (both honor the lab scope).
-  Usage by Lab's bars are clickable — navigates to that lab's `LabDetail` page
-  (no-op for the synthetic "Unassigned" bucket, which isn't a real entity)
-- Fleet Health — online/outdated/offline counts + agents needing attention
-  (hostnames link to `AgentDetail`); deliberately **not** scoped by the lab
-  filter (see the comment on `FleetHealthPanel` — a triage panel shouldn't let
-  a lab filter hide an offline machine elsewhere)
+- Top Applications by Launch Count, Usage by Lab, Recent Privilege Elevations
+  — one `panel-grid` (previously two, with Fleet Health as a fourth panel;
+  removed now that it's `TriageBanner` instead). Usage by Lab's bars are
+  clickable — navigates to that lab's `LabDetail` page (no-op for the
+  synthetic "Unassigned" bucket, which isn't a real entity)
 - Recent Privilege Elevations (top apps by elevation count) — uses the shared
   `MiniBarList` component
 

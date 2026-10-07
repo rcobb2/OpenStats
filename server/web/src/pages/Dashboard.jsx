@@ -173,10 +173,15 @@ function RecentElevationsPanel({ range, filters }) {
   );
 }
 
-// Deliberately fleet-wide regardless of the page's lab scope selector — this
-// is a triage panel ("what needs attention right now"), and narrowing it to
-// one lab would hide an offline machine in a lab you forgot to filter out.
-function FleetHealthPanel() {
+// Triage-first, not "one panel among several": a fleet with agents needing
+// attention should be unmissable at the top of the page, not competing for
+// space in a chart grid below the fold. Quiet (a single line) when nothing
+// needs attention, prominent when something does — the same shape Tenable
+// and Datadog use for "what's Critical right now" vs. a clean bill of
+// health. Deliberately fleet-wide regardless of the page's lab scope
+// selector — narrowing it to one lab would hide an offline machine in a lab
+// you forgot to filter out.
+function TriageBanner() {
   const [agents, setAgents] = useState(null);
   const [error, setError] = useState(false);
 
@@ -185,36 +190,53 @@ function FleetHealthPanel() {
   }, []);
 
   if (error) return <div className="error">Failed to load fleet status.</div>;
-  if (!agents) return <div className="loading">Loading…</div>;
+  if (!agents) return <div className="loading">Loading fleet status…</div>;
   if (agents.length === 0) return <div className="empty">No agents registered yet.</div>;
 
   const byStatus = { online: 0, offline: 0, outdated: 0 };
   for (const a of agents) {
     if (byStatus[a.status] !== undefined) byStatus[a.status]++;
   }
-  // Only the agents that actually need attention — the full roster already
-  // lives on the Agents page.
   const needsAttention = agents
     .filter(a => a.status === 'offline' || a.status === 'outdated')
-    .slice(0, 6);
+    // Offline first — a dead machine is more urgent than one that's just
+    // behind on updates.
+    .sort((a, b) => (a.status === 'offline' ? 0 : 1) - (b.status === 'offline' ? 0 : 1));
+
+  if (needsAttention.length === 0) {
+    return (
+      <div className="triage-banner ok">
+        <span className="triage-icon">✓</span>
+        <span>All {byStatus.online} agent{byStatus.online !== 1 ? 's' : ''} online and up to date.</span>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: '0.6rem', marginBottom: needsAttention.length ? '1rem' : 0, flexWrap: 'wrap' }}>
-        <span className="badge online">{byStatus.online} online</span>
-        <span className="badge outdated">{byStatus.outdated} outdated</span>
-        <span className="badge offline">{byStatus.offline} offline</span>
+    <div className="triage-banner alert">
+      <div className="triage-header">
+        <span className="triage-icon">⚠</span>
+        <span>{needsAttention.length} agent{needsAttention.length !== 1 ? 's' : ''} need attention</span>
+        <span className="triage-counts">
+          {byStatus.offline > 0 && <span className="badge offline">{byStatus.offline} offline</span>}
+          {byStatus.outdated > 0 && <span className="badge outdated">{byStatus.outdated} outdated</span>}
+          <span className="badge online">{byStatus.online} online</span>
+        </span>
+        <Link to="/agents" className="btn-secondary" style={{ marginLeft: 'auto', fontSize: 12, padding: '3px 10px' }}>
+          View all →
+        </Link>
       </div>
-      {needsAttention.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {needsAttention.map(a => (
-            <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
-              <Link to={`/agents/${a.id}`}>{a.hostname}</Link>
-              <span className={`badge ${a.status}`}>{a.status}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="triage-list">
+        {needsAttention.slice(0, 8).map(a => (
+          <Link key={a.id} to={`/agents/${a.id}`} className="triage-item">
+            {a.hostname}
+            <span className={`badge ${a.status}`}>{a.status}</span>
+          </Link>
+        ))}
+        {needsAttention.length > 8 && (
+          <Link to="/agents" className="triage-item">+{needsAttention.length - 8} more</Link>
+        )}
+      </div>
     </div>
   );
 }
@@ -254,6 +276,8 @@ export default function Dashboard() {
     <div>
       <h2>Dashboard</h2>
 
+      <TriageBanner />
+
       <GlobalFilterBar filters={globalFilters} labs={labs} showMachine={false} />
 
       {range === 'custom' && !isCustomReady && (
@@ -266,57 +290,48 @@ export default function Dashboard() {
       {!summary && !summaryError && <div className="loading" style={{ padding: '1rem' }}>Loading…</div>}
       {summary && (
         <div className="stats-grid" style={{ marginTop: '1rem' }}>
-          <div className="stat-card">
+          <Link to="/agents" className="stat-card">
             <span className="stat-value">{summary.totalAgents}</span>
             <span className="stat-label">Total Agents</span>
-          </div>
-          <div className="stat-card">
+          </Link>
+          <Link to="/agents" className="stat-card">
             <span className="stat-value" style={{ color: 'var(--success)' }}>{summary.onlineAgents}</span>
             <span className="stat-label">Online</span>
-          </div>
-          <div className="stat-card">
+          </Link>
+          <Link to="/labs" className="stat-card">
             <span className="stat-value">{summary.totalLabs}</span>
             <span className="stat-label">Labs</span>
-          </div>
-          <div className="stat-card">
+          </Link>
+          <Link to="/mappings" className="stat-card">
             <span className="stat-value">{summary.totalMappings}</span>
             <span className="stat-label">Mappings</span>
-          </div>
-          <div className="stat-card">
+          </Link>
+          <Link to="/users" className="stat-card">
             <span className="stat-value" style={{ color: activeUsersError ? 'var(--danger)' : 'var(--accent)' }}>
               {activeUsersError ? '—' : activeUsers === null ? '…' : activeUsers}
             </span>
             <span className="stat-label">
               Active Users{activeUsersError && <span title="Failed to load active users">⚠</span>}
             </span>
-          </div>
+          </Link>
         </div>
       )}
 
       {(range !== 'custom' || isCustomReady) && (
-        <>
-          <div className="panel-grid">
-            <div className="chart-card">
-              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Top Applications by Launch Count</h3>
-              <TopAppsChart range={effectiveRange} filters={filters} />
-            </div>
-            <div className="chart-card">
-              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Usage by Lab</h3>
-              <LabUsageChart range={effectiveRange} filters={filters} labs={labs} />
-            </div>
+        <div className="panel-grid">
+          <div className="chart-card">
+            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Top Applications by Launch Count</h3>
+            <TopAppsChart range={effectiveRange} filters={filters} />
           </div>
-
-          <div className="panel-grid">
-            <div className="chart-card">
-              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Fleet Health</h3>
-              <FleetHealthPanel />
-            </div>
-            <div className="chart-card">
-              <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Recent Privilege Elevations</h3>
-              <RecentElevationsPanel range={effectiveRange} filters={filters} />
-            </div>
+          <div className="chart-card">
+            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Usage by Lab</h3>
+            <LabUsageChart range={effectiveRange} filters={filters} labs={labs} />
           </div>
-        </>
+          <div className="chart-card">
+            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Recent Privilege Elevations</h3>
+            <RecentElevationsPanel range={effectiveRange} filters={filters} />
+          </div>
+        </div>
       )}
     </div>
   );
