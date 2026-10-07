@@ -2,11 +2,13 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -177,7 +179,32 @@ func (s *Server) ListAgents(w http.ResponseWriter, r *http.Request) {
 	if agents == nil {
 		agents = []store.Agent{}
 	}
+	s.applyEffectiveStatus(r.Context(), agents)
 	writeJSON(w, http.StatusOK, agents)
+}
+
+// applyEffectiveStatus overrides each agent's Status with "offline" when it
+// hasn't been seen within the configured stale timeout. Status is otherwise
+// set once at registration (RegisterAgent) and never updated again, so
+// without this, every consumer of this field — the web portal, openstatsctl,
+// and the fleet summary's online count — would see an agent that's gone dark
+// as "online" (or "outdated") forever. Mutates in place; the DB-stored value
+// is left untouched, this only affects what the API returns.
+func (s *Server) applyEffectiveStatus(ctx context.Context, agents []store.Agent) {
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		s.logger.Warn("failed to get settings for stale-agent check", "error", err)
+		return
+	}
+	if settings == nil || settings.StaleTimeoutDays <= 0 {
+		return
+	}
+	staleDur := time.Duration(settings.StaleTimeoutDays) * 24 * time.Hour
+	for i := range agents {
+		if !agents[i].LastSeen.IsZero() && time.Since(agents[i].LastSeen) > staleDur {
+			agents[i].Status = "offline"
+		}
+	}
 }
 
 // GetAgent godoc
@@ -201,7 +228,9 @@ func (s *Server) GetAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, agent)
+	single := []store.Agent{*agent}
+	s.applyEffectiveStatus(r.Context(), single)
+	writeJSON(w, http.StatusOK, single[0])
 }
 
 // AssignLabRequest is the payload for assigning an agent to a lab.

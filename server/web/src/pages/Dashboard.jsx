@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import {
   getSummary, getTopAppsByLaunches, getActiveUsers, getUsageByLab,
-  getTopAppsByElevations, getAgents, getSettings, parsePromVector,
+  getTopAppsByElevations, getAgents, parsePromVector,
 } from '../api';
 
 const CHART_COLORS = [
@@ -177,48 +177,26 @@ function RecentElevationsPanel({ range }) {
   );
 }
 
-// The backend's agent.status is only ever "online" or "outdated" — it's set
-// once at registration and never updated again, so it can't detect an agent
-// that's gone dark (see agents.go's UpsertAgent call site). staleTimeoutDays
-// (Agents > Settings) is stored and validated but not otherwise enforced
-// anywhere in the app — this derives real offline detection from it and
-// lastSeen, which is the only place that setting currently does anything.
-function deriveFleetStatus(agent, staleTimeoutDays) {
-  const staleMs = staleTimeoutDays * 24 * 60 * 60 * 1000;
-  if (agent.lastSeen && Date.now() - new Date(agent.lastSeen).getTime() > staleMs) {
-    return 'offline';
-  }
-  return agent.status;
-}
-
 function FleetHealthPanel() {
   const [agents, setAgents] = useState(null);
-  const [staleTimeoutDays, setStaleTimeoutDays] = useState(90);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    Promise.all([getAgents(), getSettings()])
-      .then(([agentsRes, settingsRes]) => {
-        setAgents(agentsRes);
-        setStaleTimeoutDays(settingsRes?.staleTimeoutDays ?? 90);
-      })
-      .catch(() => setError(true));
+    getAgents().then(setAgents).catch(() => setError(true));
   }, []);
 
   if (error) return <div className="error">Failed to load fleet status.</div>;
   if (!agents) return <div className="loading">Loading…</div>;
   if (agents.length === 0) return <div className="empty">No agents registered yet.</div>;
 
-  const withStatus = agents.map(a => ({ ...a, effectiveStatus: deriveFleetStatus(a, staleTimeoutDays) }));
-
   const byStatus = { online: 0, offline: 0, outdated: 0 };
-  for (const a of withStatus) {
-    if (byStatus[a.effectiveStatus] !== undefined) byStatus[a.effectiveStatus]++;
+  for (const a of agents) {
+    if (byStatus[a.status] !== undefined) byStatus[a.status]++;
   }
   // Only the agents that actually need attention — the full roster already
   // lives on the Agents page.
-  const needsAttention = withStatus
-    .filter(a => a.effectiveStatus === 'offline' || a.effectiveStatus === 'outdated')
+  const needsAttention = agents
+    .filter(a => a.status === 'offline' || a.status === 'outdated')
     .slice(0, 6);
 
   return (
@@ -233,7 +211,7 @@ function FleetHealthPanel() {
           {needsAttention.map(a => (
             <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
               <span>{a.hostname}</span>
-              <span className={`badge ${a.effectiveStatus}`}>{a.effectiveStatus}</span>
+              <span className={`badge ${a.status}`}>{a.status}</span>
             </div>
           ))}
         </div>

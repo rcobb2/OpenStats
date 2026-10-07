@@ -269,6 +269,7 @@ func (s *Server) ReportSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get agents")
 		return
 	}
+	s.applyEffectiveStatus(ctx, agents)
 
 	online := 0
 	for _, a := range agents {
