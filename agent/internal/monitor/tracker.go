@@ -213,7 +213,7 @@ func (t *Tracker) OnProcessStop(pid uint32) *ProcessSession {
 	foregroundDelta := group.ForegroundDelta
 	delete(t.groups, rootPID)
 	if group.FamilyKey != "" {
-		delete(t.familyGroups, group.FamilyKey)
+		delete(t.familyGroups, group.User+"\x00"+group.FamilyKey)
 	}
 
 	t.logger.Debug("process group ended",
@@ -349,7 +349,7 @@ func (t *Tracker) Reconcile(runningPIDs map[uint32]bool) []*ProcessSession {
 		if len(group.MemberPIDs) == 0 {
 			delete(t.groups, rootPID)
 			if group.FamilyKey != "" {
-				delete(t.familyGroups, group.FamilyKey)
+				delete(t.familyGroups, group.User+"\x00"+group.FamilyKey)
 			}
 			stopped = append(stopped, &ProcessSession{
 				PID:       group.RootPID,

@@ -257,6 +257,37 @@ func TestTrackerReconcileRemovesStaleGroups(t *testing.T) {
 	}
 }
 
+// TestTrackerFamilyGroupsCleanedUpOnStop verifies that a group's familyGroups
+// entry is removed when the group's last member exits via OnProcessStop.
+// familyGroups is keyed "user\x00familyKey", not just familyKey — deleting
+// with the wrong key leaves a stale entry behind indefinitely, since a group
+// that never recurs on that machine is never cleaned up lazily either. On a
+// long-running agent service this is an unbounded memory leak.
+func TestTrackerFamilyGroupsCleanedUpOnStop(t *testing.T) {
+	tr := NewTracker(discardLogger())
+
+	tr.OnProcessStart(100, 0, "word.exe", "/apps/word.exe", "alice", "microsoft-word")
+	tr.OnProcessStop(100)
+
+	if len(tr.familyGroups) != 0 {
+		t.Fatalf("expected familyGroups to be empty after last member exits, got %d entries: %v", len(tr.familyGroups), tr.familyGroups)
+	}
+}
+
+// TestTrackerFamilyGroupsCleanedUpOnReconcile verifies the same cleanup holds
+// for the Reconcile path (stale-PID sweep), which has its own independent
+// familyGroups delete call.
+func TestTrackerFamilyGroupsCleanedUpOnReconcile(t *testing.T) {
+	tr := NewTracker(discardLogger())
+
+	tr.OnProcessStart(900, 0, "word.exe", "/apps/word.exe", "ivan", "microsoft-word")
+	tr.Reconcile(map[uint32]bool{})
+
+	if len(tr.familyGroups) != 0 {
+		t.Fatalf("expected familyGroups to be empty after reconcile removes the group, got %d entries: %v", len(tr.familyGroups), tr.familyGroups)
+	}
+}
+
 // TestTrackerGetProcessUser verifies user lookup by PID.
 func TestTrackerGetProcessUser(t *testing.T) {
 	tr := NewTracker(discardLogger())

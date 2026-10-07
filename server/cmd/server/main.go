@@ -83,10 +83,14 @@ func main() {
 	router := api.NewRouter(db, cfg, disc, logger)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:        addr,
+		Handler:     router,
+		ReadTimeout: 15 * time.Second,
+		// Must stay comfortably above api.promQueryTimeout (45s): a report
+		// handler can block on a Prometheus query for nearly that long, and
+		// a WriteTimeout below it would truncate an otherwise-successful
+		// slow response before the handler's own timeout even fires.
+		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

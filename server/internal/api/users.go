@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -329,17 +330,38 @@ func (s *Server) ListDiscoveredUsers(w http.ResponseWriter, r *http.Request) {
 
 	policy := s.userPolicy(ctx)
 
-	rawUsers, err := s.fetchUserLabelValues(ctx)
-	if err != nil {
-		s.logger.Error("failed to fetch user label values", "error", err)
+	// These three Prometheus calls are independent — run them concurrently
+	// (bounded by the shared promClient's concurrency-limited transport)
+	// instead of sequentially, since each is individually subject to the
+	// full promQueryTimeout and three in a row can exceed the HTTP server's
+	// own WriteTimeout before any one of them gets a chance to fail cleanly.
+	var (
+		wg                      sync.WaitGroup
+		rawUsers                []string
+		fetchErr                error
+		hoursByRaw, activeByRaw map[string]float64
+	)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		rawUsers, fetchErr = s.fetchUserLabelValues(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		hoursByRaw = s.instantQueryByUser(ctx,
+			fmt.Sprintf(`sum by (user) (increase(openlabstats_user_session_seconds_total{user!=""}[%s])) / 3600`, timeRange))
+	}()
+	go func() {
+		defer wg.Done()
+		activeByRaw = s.instantQueryByUser(ctx, `sum by (user) (openlabstats_user_session_active{user!=""})`)
+	}()
+	wg.Wait()
+
+	if fetchErr != nil {
+		s.logger.Error("failed to fetch user label values", "error", fetchErr)
 		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
 		return
 	}
-
-	// Recent session hours and current activity, both keyed by raw username.
-	hoursByRaw := s.instantQueryByUser(ctx,
-		fmt.Sprintf(`sum by (user) (increase(openlabstats_user_session_seconds_total{user!=""}[%s])) / 3600`, timeRange))
-	activeByRaw := s.instantQueryByUser(ctx, `sum by (user) (openlabstats_user_session_active{user!=""})`)
 
 	// A raw user only present in one of the sources still deserves a row.
 	for raw := range hoursByRaw {
