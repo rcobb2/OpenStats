@@ -158,10 +158,10 @@ export default function Users() {
         </button>
       </div>
 
-      {error && <div style={{ color: 'var(--error, #e55353)', marginBottom: '1rem' }}>{error}</div>}
+      {error && <div className="error-banner">{error}</div>}
 
       {policy && (
-        <div style={{ padding: '0.6rem 0.85rem', marginBottom: '1rem', borderRadius: '4px', background: 'var(--surface2, rgba(255,255,255,0.05))', fontSize: '0.875rem' }}>
+        <div className="info-banner">
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
             <input type="checkbox" checked={policy.stripDomain} onChange={handleToggleStripDomain} disabled={saving} />
             <span>
@@ -278,7 +278,7 @@ function DiscoveredTable({ users, filter, saving, onIgnore, onUnignore, onMerge 
           <tr key={u.canonicalUser} style={u.ignored ? { opacity: 0.45 } : undefined}>
             <td>
               <code>{u.canonicalUser}</code>
-              {u.displayName && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #aaa)' }}>{u.displayName}</div>}
+              {u.displayName && <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{u.displayName}</div>}
             </td>
             <td>
               {u.rawUsers.map(raw => (
@@ -310,7 +310,7 @@ function DiscoveredTable({ users, filter, saving, onIgnore, onUnignore, onMerge 
           </tr>
         ))}
         {users.length === 0 && (
-          <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted, #aaa)', padding: '1.5rem' }}>
+          <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '1.5rem' }}>
             {filter ? 'No users match the filter.' : 'No users recorded yet.'}
           </td></tr>
         )}
@@ -336,7 +336,7 @@ function RulesTable({ rules, filter, saving, onToggleIgnore, onDelete }) {
           <tr key={r.id}>
             <td><code>{r.pattern}</code></td>
             <td>{r.ignored ? <span className="badge">ignored</span> : <code>{r.canonicalUser}</code>}</td>
-            <td style={{ fontSize: '0.85rem', color: 'var(--text-muted, #aaa)' }}>{r.notes}</td>
+            <td style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>{r.notes}</td>
             <td><span className="badge">{r.source}</span></td>
             <td>
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -351,7 +351,7 @@ function RulesTable({ rules, filter, saving, onToggleIgnore, onDelete }) {
           </tr>
         ))}
         {rules.length === 0 && (
-          <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted, #aaa)', padding: '1.5rem' }}>
+          <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '1.5rem' }}>
             {filter ? 'No rules match the filter.' : 'No rules yet. System and service accounts are filtered by built-in defaults.'}
           </td></tr>
         )}

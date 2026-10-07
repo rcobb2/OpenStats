@@ -114,7 +114,7 @@ export default function Mappings() {
         </button>
       </div>
 
-      {error && <div style={{ color: 'var(--error, #e55353)', marginBottom: '1rem' }}>{error}</div>}
+      {error && <div className="error-banner">{error}</div>}
 
       {showAddForm && (
         <form onSubmit={handleAdd} className="form-inline" style={{ marginBottom: '1.25rem' }}>
@@ -243,7 +243,7 @@ export default function Mappings() {
             </tr>
           ))}
           {filtered.length === 0 && (
-            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted, #aaa)', padding: '1.5rem' }}>
+            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '1.5rem' }}>
               {filter ? 'No mappings match the filter.' : tab === 'review' ? 'No auto-discovered processes to review.' : tab === 'ignored' ? 'No ignored processes.' : tab === 'allowed' ? 'No approved mappings yet.' : 'No mappings yet.'}
             </td></tr>
           )}
