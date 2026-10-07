@@ -496,7 +496,7 @@ function UtilizationChart({ range, filters }) {
       </div>
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={displayData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border,#333)" />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
         <XAxis
           dataKey="t"
           tickFormatter={fmtTime}

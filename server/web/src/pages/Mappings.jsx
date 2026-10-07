@@ -233,7 +233,7 @@ export default function Mappings() {
                   <button
                     onClick={() => handleToggleIgnore(m)}
                     title={m.ignored ? 'Remove from ignored list' : 'Ignore — drop from metrics'}
-                    style={m.ignored ? { borderColor: 'var(--accent, #1e90ff)' } : undefined}
+                    style={m.ignored ? { borderColor: 'var(--accent)' } : undefined}
                   >
                     {m.ignored ? 'Unignore' : 'Ignore'}
                   </button>
