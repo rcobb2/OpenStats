@@ -179,8 +179,23 @@ type Agent struct {
 
 // UpsertAgent registers or updates an agent (idempotent on hostname).
 func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
-	// If building/room are provided, try to find or create a matching lab.
-	if a.Building != "" && a.Room != "" {
+	// lab_id is sticky after its first assignment (see the UPSERT's COALESCE
+	// below, which never overwrites an existing value) — so only resolve or
+	// auto-create a lab when this agent doesn't already have one. Previously
+	// this ran on every single heartbeat regardless, which was pure waste for
+	// an already-assigned agent and, worse, silently created a brand new
+	// orphan lab row every time a later heartbeat's building/room didn't
+	// exactly match an existing lab — even though that lab would never
+	// actually be used, since the agent's lab_id doesn't change either way.
+	var existingLabID *string
+	err := s.pool.QueryRow(ctx, `SELECT lab_id FROM agents WHERE id = $1`, a.ID).Scan(&existingLabID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("failed to check existing lab assignment: %w", err)
+	}
+
+	if existingLabID != nil {
+		a.LabID = existingLabID
+	} else if a.Building != "" && a.Room != "" {
 		var labID string
 		err := s.pool.QueryRow(ctx, `SELECT id FROM labs WHERE building = $1 AND room = $2`, a.Building, a.Room).Scan(&labID)
 		if err != nil {
@@ -202,7 +217,7 @@ func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
 		a.LabID = &labID
 	}
 
-	_, err := s.pool.Exec(ctx, `
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO agents (id, hostname, ip_address, os_version, agent_version, port, status, pending_update, last_seen, lab_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
 		ON CONFLICT (id) DO UPDATE SET
