@@ -29,6 +29,7 @@ export const assignAgentToLab = (agentId, labId) =>
 
 // Labs
 export const getLabs = () => request('/labs');
+export const getLab = (id) => request(`/labs/${id}`);
 export const createLab = (data) => request('/labs', { method: 'POST', body: JSON.stringify(data) });
 export const updateLab = (id, data) => request(`/labs/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteLab = (id) => request(`/labs/${id}`, { method: 'DELETE' });

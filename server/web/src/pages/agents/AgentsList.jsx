@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { getAgents, deleteAgent, assignAgentToLab, getLabs, forceAgentUpdate } from '../../api';
 import ResizableTable from '../../components/Table';
 
@@ -186,7 +187,7 @@ export default function AgentsList() {
         <tbody>
           {sortedAgents.map(a => (
             <tr key={a.id}>
-              <td>{a.hostname}</td>
+              <td><Link to={`/agents/${a.id}`}>{a.hostname}</Link></td>
               <td>{a.ipAddress}</td>
               <td style={{ fontSize: '0.85em', color: 'var(--text-dim)' }}>{a.osVersion || '—'}</td>
               <td><span className={`badge ${a.status}`}>{a.status}</span></td>

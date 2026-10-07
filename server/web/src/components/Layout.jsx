@@ -65,7 +65,9 @@ const navItems = [
       { to: '/agents/settings', label: 'Settings', icon: icons.settings },
     ]
   },
-  { to: '/labs', label: 'Labs', icon: icons.labs },
+  // Labs now has a /labs/:id detail page too — same prefix-match reasoning
+  // as Reports below.
+  { to: '/labs', label: 'Labs', icon: icons.labs, end: false },
   { to: '/mappings', label: 'Mappings', icon: icons.mappings },
   { to: '/users', label: 'Users', icon: icons.users },
   // Reports has its own sub-routes (/reports/user, /reports/hardware, ...)

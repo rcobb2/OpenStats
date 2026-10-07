@@ -22,11 +22,13 @@ server/web/
 │   ├── pages/           # Page components
 │   │   ├── Dashboard.jsx
 │   │   ├── Labs.jsx
+│   │   ├── LabDetail.jsx       # /labs/:id — one lab's own usage + its agents
 │   │   ├── Mappings.jsx
 │   │   ├── Users.jsx
 │   │   ├── Reports.jsx         # Shell + report-type routing; see below
 │   │   └── agents/
 │   │       ├── AgentsList.jsx  # "Monitor" — fleet list, status filter, search
+│   │       ├── AgentDetail.jsx # /agents/:id — one machine's own usage
 │   │       ├── Installer.jsx
 │   │       └── Settings.jsx
 │   ├── hooks/
@@ -35,7 +37,8 @@ server/web/
 │       ├── Layout.jsx          # Nav + shell
 │       ├── Table.jsx           # ResizableTable wrapper
 │       ├── ErrorBoundary.jsx
-│       └── GlobalFilterBar.jsx # Range + Machine/Lab controls, used by Dashboard + Reports
+│       ├── GlobalFilterBar.jsx # Range + Machine/Lab controls, used by Dashboard + Reports
+│       └── MiniBarList.jsx     # Compact top-N bar list, used by 3+ pages
 ├── index.html
 ├── package.json
 └── vite.config.js
@@ -91,17 +94,33 @@ Base URL: `/api/v1` (proxied by server)
 - Uses `useGlobalFilters` + `GlobalFilterBar` (range + lab, no machine scope) —
   same URL-persisted state Reports uses, so a Dashboard link with `?range=`/
   `&lab=` is shareable and survives a refresh
-- Top Applications by Launch Count, Usage by Lab (both honor the lab scope)
-- Fleet Health — online/outdated/offline counts + agents needing attention;
-  deliberately **not** scoped by the lab filter (see the comment on
-  `FleetHealthPanel` — a triage panel shouldn't let a lab filter hide an
-  offline machine elsewhere)
-- Recent Privilege Elevations (top apps by elevation count)
+- Top Applications by Launch Count, Usage by Lab (both honor the lab scope).
+  Usage by Lab's bars are clickable — navigates to that lab's `LabDetail` page
+  (no-op for the synthetic "Unassigned" bucket, which isn't a real entity)
+- Fleet Health — online/outdated/offline counts + agents needing attention
+  (hostnames link to `AgentDetail`); deliberately **not** scoped by the lab
+  filter (see the comment on `FleetHealthPanel` — a triage panel shouldn't let
+  a lab filter hide an offline machine elsewhere)
+- Recent Privilege Elevations (top apps by elevation count) — uses the shared
+  `MiniBarList` component
 
 ### Labs (`pages/Labs.jsx`)
 - List all labs
 - Create/edit/delete labs
 - Fields: name, building, room, description
+- Lab name links to `LabDetail` (`/labs/:id`)
+
+### Lab Detail (`pages/LabDetail.jsx`)
+- Reached by clicking a lab name anywhere (Labs list, Dashboard's Usage by
+  Lab chart). Route: `/labs/:id`
+- Metadata: building, room, description
+- Same four `MiniBarList` panels as `AgentDetail`, scoped to this lab via the
+  `lab` report filter (by name, not id — the backend's lab-scoped queries key
+  on the lab's name string)
+- A table of this lab's agents (filtered client-side from `getAgents()` by
+  `labId`), with hostnames linking to `AgentDetail`
+- Uses `GlobalFilterBar` with `showMachine={false} showLab={false}` — same
+  reasoning as `AgentDetail`
 
 ### Agents
 
@@ -112,9 +131,21 @@ Base URL: `/api/v1` (proxied by server)
   `applyEffectiveStatus` in `server/internal/api/agents.go`): "offline" means
   `lastSeen` exceeds the configured stale timeout, not a value the agent
   itself ever reports
+- Hostname links to `AgentDetail` (`/agents/:id`)
 - Assign to lab
 - Delete agent, force an individual agent's update
 - Columns: hostname, IP, OS, version, lab, status, last seen
+
+#### Agent Detail (`pages/agents/AgentDetail.jsx`)
+- Reached by clicking a hostname anywhere (Agents list, Dashboard's Fleet
+  Health). Route: `/agents/:id`
+- Metadata: IP, OS version, agent version, status badge, lab (links to
+  `LabDetail`), last seen
+- Four `MiniBarList` panels scoped to just this machine via the `hostname`
+  report filter: Most Active Apps, Most Launched Apps, Users Signed In,
+  Privilege Elevations
+- Uses `GlobalFilterBar` with `showMachine={false} showLab={false}` — scope
+  is already fixed to this one host, so only Time Range is exposed
 
 #### Installers (`pages/agents/Installer.jsx`)
 - Generate customized agent installer
@@ -177,11 +208,17 @@ same as before.
 - Sidebar navigation
 - Page title
 - Routes: Dashboard, Labs, Agents, Mappings, Users, Reports, Installer
-- The Reports nav item's `NavLink` uses prefix matching (`end: false` in
-  `navItems`), not exact-match like every other flat item — it points at
-  `/reports`, which covers all of `/reports/user`, `/reports/hardware`, etc.
-  Every other flat item still uses exact match (`end: true`); only an item
-  with real sub-routes needs the prefix form.
+- Both the Reports and Labs nav items use prefix matching (`end: false` in
+  `navItems`), not exact-match like every other flat item — they point at
+  `/reports` and `/labs` respectively, which need to also match their detail
+  sub-routes (`/reports/:type`, `/labs/:id`) for the sidebar to stay
+  highlighted while on one. Every other flat item still uses exact match
+  (`end: true`, the default); only an item with real sub-routes needs the
+  prefix form. (Agents has the same issue for `/agents/:id`, but its sidebar
+  entry is a `children` group, not a flat item — `isParentActive` already
+  does prefix matching for the group, so no change was needed there; no
+  individual sub-nav item highlights while on an agent's detail page, which
+  is an acceptable gap since detail pages aren't themselves in the nav.)
 
 ### GlobalFilterBar (`components/GlobalFilterBar.jsx`)
 - Renders Time Range (+ custom From/To when `range === 'custom'`), and
@@ -192,6 +229,19 @@ same as before.
   component doesn't do its own independent (and potentially racing) fetch
 - Accepts `children` for a page's own extra controls alongside the shared
   ones (Reports' App-name filter)
+- `AgentDetail`/`LabDetail` pass `showMachine={false} showLab={false}` —
+  scope is already fixed to one entity, so only Time Range is shown
+
+### MiniBarList (`components/MiniBarList.jsx`)
+- Compact horizontal bar list for small top-N panels — no axes/gridlines/
+  tooltip, unlike the Recharts-based charts elsewhere
+- Used by Dashboard's Recent Privilege Elevations panel and both
+  `AgentDetail`/`LabDetail`'s four usage panels (extracted once a third
+  usage appeared — see the comment at the top of the file)
+- Props: `data`/`error` (same null/false/array convention as every other
+  chart component in this app), `emptyMessage`, `formatValue` (defaults to
+  `Math.round`), `colors` (defaults to a single accent color; Dashboard
+  passes its `CHART_COLORS` array for per-row color variation)
 - Used by Dashboard (`showMachine={false}` — machine-level scope doesn't fit
   a fleet overview) and Reports (all three scopes)
 
@@ -232,7 +282,9 @@ Uses React Router:
     <Route path="agents" element={<AgentsList />} />
     <Route path="agents/installers" element={<Installer />} />
     <Route path="agents/settings" element={<Settings />} />
+    <Route path="agents/:id" element={<AgentDetail />} />
     <Route path="labs" element={<Labs />} />
+    <Route path="labs/:id" element={<LabDetail />} />
     <Route path="mappings" element={<Mappings />} />
     <Route path="users" element={<Users />} />
     <Route path="reports" element={<ReportsIndexRedirect />} />

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { getLabs, createLab, updateLab, deleteLab } from '../api';
 import ResizableTable from '../components/Table';
 
@@ -94,7 +95,7 @@ export default function Labs() {
         <tbody>
           {labs.map(l => (
             <tr key={l.id} style={editingId === l.id ? { background: 'var(--accent-soft)' } : {}}>
-              <td>{l.name}</td>
+              <td><Link to={`/labs/${l.id}`}>{l.name}</Link></td>
               <td>{l.building}</td>
               <td>{l.room}</td>
               <td>{l.description}</td>

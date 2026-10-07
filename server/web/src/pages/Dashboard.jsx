@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
@@ -8,6 +9,7 @@ import {
 } from '../api';
 import { useGlobalFilters } from '../hooks/useGlobalFilters';
 import GlobalFilterBar from '../components/GlobalFilterBar';
+import MiniBarList from '../components/MiniBarList';
 
 const CHART_COLORS = [
   'var(--accent)', 'var(--success)', 'var(--warning)', 'var(--danger)', '#a78bfa',
@@ -73,9 +75,11 @@ function TopAppsChart({ range, filters }) {
 
 // getUsageByLab returns per-(lab, app) foreground seconds as a Prometheus
 // vector; this page only needs the per-lab total, so roll the apps up here.
-function LabUsageChart({ range, filters }) {
+function LabUsageChart({ range, filters, labs }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const navigate = useNavigate();
+  const labIdByName = Object.fromEntries(labs.map(l => [l.name, l.id]));
 
   useEffect(() => {
     setData(null);
@@ -124,9 +128,22 @@ function LabUsageChart({ range, filters }) {
           labelStyle={{ color: 'var(--text)' }}
           formatter={(v) => [`${v.toLocaleString(undefined, { maximumFractionDigits: 1 })} hrs`, 'active time']}
         />
-        <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={22}>
-          {data.map((_, i) => (
-            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+        <Bar
+          dataKey="value"
+          radius={[0, 4, 4, 0]}
+          maxBarSize={22}
+          onClick={(d) => {
+            const name = d?.payload?.name ?? d?.name;
+            const labId = labIdByName[name];
+            if (labId) navigate(`/labs/${labId}`);
+          }}
+        >
+          {data.map((d, i) => (
+            <Cell
+              key={i}
+              fill={CHART_COLORS[i % CHART_COLORS.length]}
+              cursor={labIdByName[d.name] ? 'pointer' : 'default'}
+            />
           ))}
         </Bar>
       </BarChart>
@@ -136,46 +153,23 @@ function LabUsageChart({ range, filters }) {
 
 function RecentElevationsPanel({ range, filters }) {
   const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     setData(null);
-    setError(null);
+    setError(false);
     getTopAppsByElevations(range, 6, filters)
       .then(res => setData(parsePromVector(res)))
-      .catch(e => setError(e.message));
+      .catch(() => setError(true));
   }, [range, filters]);
 
-  if (error) return <div className="error">Unavailable: {error}</div>;
-  if (!data) return <div className="loading">Loading…</div>;
-  if (data.length === 0) return <div className="empty">No privilege elevations in this period.</div>;
-
-  const max = Math.max(...data.map(d => d.value));
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-      {data.map((d, i) => (
-        <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-          <span style={{
-            width: 140, fontSize: 13, color: 'var(--text)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0,
-          }}>
-            {d.name}
-          </span>
-          <div style={{ flex: 1, height: 8, background: 'var(--surface-2)', borderRadius: 4, overflow: 'hidden' }}>
-            <div style={{
-              width: `${max > 0 ? (d.value / max) * 100 : 0}%`,
-              height: '100%',
-              background: CHART_COLORS[i % CHART_COLORS.length],
-              borderRadius: 4,
-            }} />
-          </div>
-          <span style={{ fontSize: 12, color: 'var(--text-dim)', width: 32, textAlign: 'right', flexShrink: 0 }}>
-            {Math.round(d.value)}
-          </span>
-        </div>
-      ))}
-    </div>
+    <MiniBarList
+      data={data}
+      error={error}
+      colors={CHART_COLORS}
+      emptyMessage="No privilege elevations in this period."
+    />
   );
 }
 
@@ -215,7 +209,7 @@ function FleetHealthPanel() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {needsAttention.map(a => (
             <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
-              <span>{a.hostname}</span>
+              <Link to={`/agents/${a.id}`}>{a.hostname}</Link>
               <span className={`badge ${a.status}`}>{a.status}</span>
             </div>
           ))}
@@ -308,7 +302,7 @@ export default function Dashboard() {
             </div>
             <div className="chart-card">
               <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Usage by Lab</h3>
-              <LabUsageChart range={effectiveRange} filters={filters} />
+              <LabUsageChart range={effectiveRange} filters={filters} labs={labs} />
             </div>
           </div>
 

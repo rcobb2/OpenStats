@@ -61,6 +61,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Baseline for in-content links (table rows linking to an entity's detail
+   page, etc.) — more specific selectors (.sidebar li a, .tab, .sidebar-footer
+   a) already set their own color/decoration and are unaffected by this. */
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
 /* A faint radial glow anchored behind the sidebar gives the whole app a
    sense of depth instead of a single flat #0a0b10 fill — subtle enough to
    not read as "decoration" at a glance. */

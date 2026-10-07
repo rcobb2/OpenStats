@@ -5,9 +5,11 @@ import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import AgentsList from './pages/agents/AgentsList';
+import AgentDetail from './pages/agents/AgentDetail';
 import Installer from './pages/agents/Installer';
 import Settings from './pages/agents/Settings';
 import Labs from './pages/Labs';
+import LabDetail from './pages/LabDetail';
 import Mappings from './pages/Mappings';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
@@ -31,7 +33,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/agents" element={<AgentsList />} />
             <Route path="/agents/installers" element={<Installer />} />
             <Route path="/agents/settings" element={<Settings />} />
+            <Route path="/agents/:id" element={<AgentDetail />} />
             <Route path="/labs" element={<Labs />} />
+            <Route path="/labs/:id" element={<LabDetail />} />
             <Route path="/mappings" element={<Mappings />} />
             <Route path="/users" element={<Users />} />
             <Route path="/reports" element={<ReportsIndexRedirect />} />
