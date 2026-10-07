@@ -218,6 +218,12 @@ body::before {
   padding: 1.35rem;
   box-shadow: var(--shadow-sm);
 }
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+}
 
 .hint { font-size: 0.78rem; color: var(--text-faint); margin-top: -0.15rem; line-height: 1.45; }
 .settings-page section { border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; margin-bottom: 1.25rem; }
