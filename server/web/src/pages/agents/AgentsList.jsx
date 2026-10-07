@@ -10,6 +10,8 @@ export default function AgentsList() {
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState({ key: 'hostname', dir: 'asc' });
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [filter, setFilter] = useState('');
 
   const load = () => {
     setError(null); setLoading(true);
@@ -78,8 +80,26 @@ export default function AgentsList() {
     }
   };
 
+  const statusCounts = useMemo(() => {
+    const counts = { online: 0, outdated: 0, offline: 0 };
+    for (const a of agents) {
+      if (counts[a.status] !== undefined) counts[a.status]++;
+    }
+    return counts;
+  }, [agents]);
+
   const sortedAgents = useMemo(() => {
-    const rows = [...agents];
+    let rows = agents;
+    if (statusFilter !== 'all') rows = rows.filter(a => a.status === statusFilter);
+    if (filter) {
+      const q = filter.toLowerCase();
+      rows = rows.filter(a =>
+        a.hostname?.toLowerCase().includes(q) ||
+        a.ipAddress?.toLowerCase().includes(q) ||
+        labName(a).toLowerCase().includes(q)
+      );
+    }
+    rows = [...rows];
     rows.sort((a, b) => {
       const av = sortValue(a, sort.key);
       const bv = sortValue(b, sort.key);
@@ -89,7 +109,7 @@ export default function AgentsList() {
       return sort.dir === 'asc' ? cmp : -cmp;
     });
     return rows;
-  }, [agents, labs, sort]);
+  }, [agents, labs, sort, statusFilter, filter]);
 
   const toggleSort = (key) => {
     setSort(s => s.key === key
@@ -115,13 +135,41 @@ export default function AgentsList() {
         <div className={`toast-banner ${toast.type}`} style={{
           position: 'fixed', top: '1.5rem', right: '1.5rem', zIndex: 9999,
           padding: '0.85rem 1.5rem', borderRadius: '10px', fontWeight: 500,
-          background: toast.type === 'error' ? 'var(--danger, #e74c3c)' : 'var(--success, #27ae60)',
+          background: toast.type === 'error' ? 'var(--danger)' : 'var(--success)',
           color: '#fff', boxShadow: '0 4px 18px rgba(0,0,0,0.18)',
           animation: 'fadeIn 0.2s ease'
         }}>{toast.msg}</div>
       )}
 
       <h2>Agents ({agents.length})</h2>
+
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="tab-bar" style={{ marginBottom: 0 }}>
+          <button className={`tab ${statusFilter === 'all' ? 'active' : ''}`} onClick={() => setStatusFilter('all')}>
+            All <span className="badge">{agents.length}</span>
+          </button>
+          <button className={`tab ${statusFilter === 'online' ? 'active' : ''}`} onClick={() => setStatusFilter('online')}>
+            Online
+            {statusCounts.online > 0 && <span className="badge online" style={{ marginLeft: '0.4em' }}>{statusCounts.online}</span>}
+          </button>
+          <button className={`tab ${statusFilter === 'outdated' ? 'active' : ''}`} onClick={() => setStatusFilter('outdated')}>
+            Outdated
+            {statusCounts.outdated > 0 && <span className="badge outdated" style={{ marginLeft: '0.4em' }}>{statusCounts.outdated}</span>}
+          </button>
+          <button className={`tab ${statusFilter === 'offline' ? 'active' : ''}`} onClick={() => setStatusFilter('offline')}>
+            Offline
+            {statusCounts.offline > 0 && <span className="badge offline" style={{ marginLeft: '0.4em' }}>{statusCounts.offline}</span>}
+          </button>
+        </div>
+        <input
+          className="search"
+          placeholder="Filter by hostname, IP, or lab..."
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          style={{ marginLeft: 'auto', width: '240px' }}
+        />
+      </div>
+
       <ResizableTable>
         <thead>
           <tr>
@@ -175,6 +223,7 @@ export default function AgentsList() {
         </tbody>
       </ResizableTable>
       {agents.length === 0 && <p className="empty">No agents enrolled yet. Install the agent on lab machines to get started.</p>}
+      {agents.length > 0 && sortedAgents.length === 0 && <p className="empty">No agents match the current filter.</p>}
     </div>
   );
 }
