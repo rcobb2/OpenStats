@@ -13,8 +13,8 @@ export default class ErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: '2rem', color: '#dc2626' }}>
-          <h2>Something went wrong</h2>
+        <div className="error-banner" style={{ margin: '2rem', padding: '1.5rem' }}>
+          <h2 style={{ marginTop: 0, color: 'var(--danger)' }}>Something went wrong</h2>
           <pre style={{ fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
             {this.state.error.message}
           </pre>

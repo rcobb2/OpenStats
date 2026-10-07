@@ -209,8 +209,8 @@ function RolloutStatusCard({ rollout }) {
               </span>
             </div>
             <div style={barStyle}>
-              <div style={{ width: pct(p.updated), background: '#43b581' }} title={`updated: ${p.updated}`} />
-              <div style={{ width: pct(p.updating), background: '#f0a030' }} title={`updating: ${p.updating}`} />
+              <div style={{ width: pct(p.updated), background: 'var(--success)' }} title={`updated: ${p.updated}`} />
+              <div style={{ width: pct(p.updating), background: 'var(--warning)' }} title={`updating: ${p.updating}`} />
               <div style={{ width: pct(p.pending), background: 'var(--border)' }} title={`pending: ${p.pending}`} />
             </div>
           </div>

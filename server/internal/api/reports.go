@@ -1526,11 +1526,10 @@ func (s *Server) buildUtilizationData(ctx context.Context, startUnix, endUnix, s
 
 	// Denominator: total DB-registered machines per lab.
 	machinesPerLab := make(map[string]int)
-	for hostname, labName := range hostnameToLab {
+	for _, labName := range hostnameToLab {
 		if labFilter != "" && !strings.EqualFold(labName, labFilter) {
 			continue
 		}
-		_ = hostname
 		machinesPerLab[labName]++
 	}
 
