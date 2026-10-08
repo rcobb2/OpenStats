@@ -15,11 +15,15 @@ export default function Mappings() {
   const [editForm, setEditForm] = useState(EMPTY_FORM);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() =>
-    getMappings().then(data => setMappings(data || [])).catch(() => setError('Failed to load mappings.')),
-    []
-  );
+  const load = useCallback(() => {
+    setError('');
+    return getMappings()
+      .then(data => setMappings(data || []))
+      .catch(() => setError('Failed to load mappings.'))
+      .finally(() => setLoading(false));
+  }, []);
 
   useEffect(() => { load(); }, [load]);
   // Fixed vocabulary from the server — a free-text category field is what
@@ -168,6 +172,9 @@ export default function Mappings() {
         </div>
       )}
 
+      {loading ? (
+        <div className="loading">Loading mappings…</div>
+      ) : (
       <ResizableTable>
         <thead>
           <tr>
@@ -249,6 +256,7 @@ export default function Mappings() {
           )}
         </tbody>
       </ResizableTable>
+      )}
     </div>
   );
 }
