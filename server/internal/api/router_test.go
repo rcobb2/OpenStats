@@ -254,3 +254,28 @@ func TestCachingTransportBypassesNonGET(t *testing.T) {
 		t.Errorf("upstream hits = %d, want 3 (POST requests must not be cached)", got)
 	}
 }
+
+// Regression: RoundTrip only ever added cache entries, never removed them —
+// every distinct query URL (including one embedding a unique &time=<ts> or
+// &start=<ts>&end=<ts> from a custom-range report) is its own key, so a
+// long-running server process accumulated one permanent entry per distinct
+// range ever requested. prune (called periodically by runJanitor, via
+// newCachingTransport) must remove only entries that have actually expired.
+func TestCachingTransportPruneRemovesOnlyExpiredEntries(t *testing.T) {
+	now := time.Now()
+	ct := &cachingTransport{
+		cache: map[string]cachedEntry{
+			"expired": {expires: now.Add(-time.Minute)},
+			"fresh":   {expires: now.Add(time.Minute)},
+		},
+	}
+
+	ct.prune(now)
+
+	if _, ok := ct.cache["expired"]; ok {
+		t.Error("expired entry should have been pruned")
+	}
+	if _, ok := ct.cache["fresh"]; !ok {
+		t.Error("fresh entry should not have been pruned")
+	}
+}

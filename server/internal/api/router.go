@@ -113,6 +113,49 @@ type cachedEntry struct {
 	expires time.Time
 }
 
+// newCachingTransport constructs a cachingTransport and starts its background
+// janitor. RoundTrip only ever adds cache entries, never removes them — every
+// distinct query URL is its own key, including one embedding a unique
+// &time=<unix-ts> (a custom-range report, parseCustomTimeRange) or
+// &start=<ts>&end=<ts> (the utilization charts' query_range calls). Without
+// pruning, a long-running server process accumulates one permanent entry
+// (full response body included) per distinct custom range ever requested,
+// forever — the same unbounded-growth shape as every other leak fixed this
+// session, just on the server's own Prometheus-response cache instead of an
+// agent-side map.
+func newCachingTransport(ttl time.Duration, inner http.RoundTripper) *cachingTransport {
+	t := &cachingTransport{
+		ttl:       ttl,
+		cache:     make(map[string]cachedEntry),
+		transport: inner,
+	}
+	go t.runJanitor()
+	return t
+}
+
+// prune removes every cache entry that expired before now. Split out from
+// runJanitor so it's testable without waiting on a real ticker.
+func (t *cachingTransport) prune(now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for k, e := range t.cache {
+		if now.After(e.expires) {
+			delete(t.cache, k)
+		}
+	}
+}
+
+// runJanitor periodically prunes expired entries. Runs for the lifetime of
+// the server process, same as runStaleChecker in cmd/server/main.go — never
+// explicitly stopped, since the process itself is the only thing that ends.
+func (t *cachingTransport) runJanitor() {
+	ticker := time.NewTicker(t.ttl)
+	defer ticker.Stop()
+	for now := range ticker.C {
+		t.prune(now)
+	}
+}
+
 func (t *cachingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Method != http.MethodGet {
 		return t.transport.RoundTrip(req)
@@ -190,14 +233,10 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 		// queries reach Prometheus at once. See each type's doc comment.
 		promClient: &http.Client{
 			Timeout: promQueryTimeout,
-			Transport: &cachingTransport{
-				ttl:   promCacheTTL,
-				cache: make(map[string]cachedEntry),
-				transport: &concurrencyLimitedTransport{
-					sem:       make(chan struct{}, 2),
-					transport: http.DefaultTransport,
-				},
-			},
+			Transport: newCachingTransport(promCacheTTL, &concurrencyLimitedTransport{
+				sem:       make(chan struct{}, 2),
+				transport: http.DefaultTransport,
+			}),
 		},
 		checksumCache: make(map[string]installerChecksumEntry),
 	}
