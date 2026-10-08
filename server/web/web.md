@@ -140,9 +140,9 @@ Base URL: `/api/v1` (proxied by server)
 - Reached by clicking a lab name anywhere (Labs list, Dashboard's Usage by
   Lab chart). Route: `/labs/:id`
 - Metadata: building, room, description
-- Same four `MiniBarList` panels as `AgentDetail`, scoped to this lab via the
-  `lab` report filter (by name, not id — the backend's lab-scoped queries key
-  on the lab's name string)
+- Same `EntityActivityPanels` as `AgentDetail` (see that component's own
+  entry), scoped to this lab via the `lab` report filter (by name, not id —
+  the backend's lab-scoped queries key on the lab's name string)
 - A table of this lab's agents (filtered client-side from `getAgents()` by
   `labId`), with hostnames linking to `AgentDetail`
 - Uses `GlobalFilterBar` with `showMachine={false} showLab={false}` — same
@@ -173,7 +173,7 @@ Base URL: `/api/v1` (proxied by server)
   Health). Route: `/agents/:id`
 - Metadata: IP, OS version, agent version, status badge, lab (links to
   `LabDetail`), last seen
-- Four `MiniBarList` panels scoped to just this machine via the `hostname`
+- `EntityActivityPanels` scoped to just this machine via the `hostname`
   report filter: Most Active Apps, Most Launched Apps, Users Signed In,
   Privilege Elevations
 - Uses `GlobalFilterBar` with `showMachine={false} showLab={false}` — scope
@@ -317,13 +317,30 @@ same as before.
 ### MiniBarList (`components/MiniBarList.jsx`)
 - Compact horizontal bar list for small top-N panels — no axes/gridlines/
   tooltip, unlike the Recharts-based charts elsewhere
-- Used by Dashboard's Top Users by Session Time panel and both
-  `AgentDetail`/`LabDetail`'s four usage panels (extracted once a third
-  usage appeared — see the comment at the top of the file)
+- Used by Dashboard's Top Users by Session Time panel and (via
+  `EntityActivityPanels`) `AgentDetail`/`LabDetail`'s four usage panels
 - Props: `data`/`error` (same null/false/array convention as every other
   chart component in this app), `emptyMessage`, `formatValue` (defaults to
   `Math.round`), `colors` (defaults to a single accent color; Dashboard
   passes its `CHART_COLORS` array for per-row color variation)
+
+### EntityActivityPanels (`components/EntityActivityPanels.jsx`)
+- The four-panel "what's this one entity been doing" grid (Most Active Apps,
+  Most Launched Apps, Users Signed In, Privilege Elevations) — extracted from
+  `AgentDetail`/`LabDetail`, which used to each hand-duplicate the same four
+  fetches, four `useState` pairs, and panel-grid JSX, differing only in the
+  filter object passed to each query (`{hostname}` vs `{lab}`). That
+  duplication had already caused real drift: the Dashboard's Elevations→Top
+  Users panel swap only touched `Dashboard.jsx`, silently leaving these two
+  copies' panel choices out of sync with it
+- Props: `filters` (the report-filter object, e.g. `{hostname: id}` or
+  `{lab: lab.name}`), `range` (the resolved/effective range string, not the
+  raw `useGlobalFilters()` value), `ready` (gates the fetch the same way the
+  custom-range "not ready yet" check does elsewhere)
+- Owns its own fetch/state for all four panels; the caller only needs to
+  already know its entity exists (both callers render this after their own
+  `if (!agent)`/`if (!lab)` early return, so `filters` is never built from a
+  not-yet-loaded entity)
 
 ### FilterableSelect (`components/FilterableSelect.jsx`)
 - Wraps a plain `<select>` with a live filter text input that appears only

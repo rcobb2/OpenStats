@@ -1,12 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  getLab, getAgents, getTopAppsByForeground, getTopAppsByLaunches,
-  getTopUsersByLogins, getTopAppsByElevations, parsePromVector,
-} from '../api';
+import { getLab, getAgents } from '../api';
 import { useGlobalFilters } from '../hooks/useGlobalFilters';
 import GlobalFilterBar from '../components/GlobalFilterBar';
-import MiniBarList from '../components/MiniBarList';
+import EntityActivityPanels from '../components/EntityActivityPanels';
 import ResizableTable from '../components/Table';
 
 // Per-lab detail page — clicking a lab name anywhere (Labs list) lands here
@@ -22,15 +19,6 @@ export default function LabDetail() {
   const { range, isCustomReady, effectiveRange } = globalFilters;
   const ready = range !== 'custom' || isCustomReady;
 
-  const [foreground, setForeground] = useState(null);
-  const [foregroundError, setForegroundError] = useState(false);
-  const [launches, setLaunches] = useState(null);
-  const [launchesError, setLaunchesError] = useState(false);
-  const [logins, setLogins] = useState(null);
-  const [loginsError, setLoginsError] = useState(false);
-  const [elevations, setElevations] = useState(null);
-  const [elevationsError, setElevationsError] = useState(false);
-
   useEffect(() => {
     setLab(null);
     setLabError(false);
@@ -42,27 +30,6 @@ export default function LabDetail() {
   }, []);
 
   const labAgents = useMemo(() => agents.filter(a => a.labId === id), [agents, id]);
-
-  useEffect(() => {
-    if (!ready || !lab) return;
-    const lf = { lab: lab.name };
-
-    setForeground(null); setForegroundError(false);
-    getTopAppsByForeground(effectiveRange, 10, lf)
-      .then(r => setForeground(parsePromVector(r))).catch(() => setForegroundError(true));
-
-    setLaunches(null); setLaunchesError(false);
-    getTopAppsByLaunches(effectiveRange, 10, lf)
-      .then(r => setLaunches(parsePromVector(r))).catch(() => setLaunchesError(true));
-
-    setLogins(null); setLoginsError(false);
-    getTopUsersByLogins(effectiveRange, 10, lf)
-      .then(r => setLogins(parsePromVector(r, 'user'))).catch(() => setLoginsError(true));
-
-    setElevations(null); setElevationsError(false);
-    getTopAppsByElevations(effectiveRange, 10, lf)
-      .then(r => setElevations(parsePromVector(r))).catch(() => setElevationsError(true));
-  }, [lab, effectiveRange, ready]);
 
   if (labError) return <div className="error">Failed to load lab.</div>;
   if (!lab) return <div className="loading">Loading…</div>;
@@ -87,30 +54,7 @@ export default function LabDetail() {
         </div>
       )}
 
-      {ready && (
-        <div className="panel-grid">
-          <div className="chart-card">
-            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Most Active Apps</h3>
-            <MiniBarList
-              data={foreground} error={foregroundError}
-              formatValue={v => `${v.toFixed(1)}h`}
-              emptyMessage="No app usage in this period."
-            />
-          </div>
-          <div className="chart-card">
-            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Most Launched Apps</h3>
-            <MiniBarList data={launches} error={launchesError} emptyMessage="No launches in this period." />
-          </div>
-          <div className="chart-card">
-            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Users Signed In</h3>
-            <MiniBarList data={logins} error={loginsError} emptyMessage="No logins in this period." />
-          </div>
-          <div className="chart-card">
-            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Privilege Elevations</h3>
-            <MiniBarList data={elevations} error={elevationsError} emptyMessage="No privilege elevations in this period." />
-          </div>
-        </div>
-      )}
+      <EntityActivityPanels filters={{ lab: lab.name }} range={effectiveRange} ready={ready} />
 
       <h3 style={{ marginTop: '1.5rem' }}>Agents in this Lab ({labAgents.length})</h3>
       {labAgents.length === 0 ? (
