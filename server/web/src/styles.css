@@ -172,7 +172,18 @@ body::before {
   margin-left: var(--sidebar-w);
   padding: 2.25rem 2.5rem;
   flex: 1;
-  max-width: 1280px;
+  /* 1280px (a centered-article width, inherited from a generic CRUD-app
+     layout) was actively squeezing this app's busiest pages: the 739-row
+     fleet table, Mappings/Users tables, and Reports' panel-grid charts all
+     got crammed into less space than a typical 1440p+ monitor has to give,
+     forcing table cells into the ellipsis-truncation this app's own CSS
+     already has to handle (th/td's overflow:hidden). A dense ops console
+     (Splunk, Datadog, Tenable) uses the width it's given instead of
+     centering a narrow column on a wide screen. 1800px still bounds it on
+     an ultrawide/5K display — card- and form-based pages (Settings,
+     Installer) are unaffected, since .card/.form-stack already cap
+     themselves narrower on their own.*/
+  max-width: 1800px;
   position: relative;
   z-index: 1;
 }

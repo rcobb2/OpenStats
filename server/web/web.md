@@ -45,6 +45,16 @@ server/web/
 └── vite.config.js
 ```
 
+`.content`'s max-width is 1800px, not a centered-article width — this app's
+busiest pages (the 739-row fleet table, Mappings/Users tables, Reports'
+panel-grid charts) were being squeezed narrower than a typical 1440p+ monitor
+actually has to give, forcing table cells into truncation (`th`/`td`'s own
+`overflow:hidden`) that didn't need to happen. Card/form-heavy pages
+(Settings, Installer) are unaffected — `.card`/`.form-stack` already cap
+themselves narrower independently. `panel-grid`/`stats-grid`'s existing
+`auto-fit`/`minmax` grid columns pick up the extra width automatically (more
+columns per row on a wide screen), no per-page changes needed.
+
 ## API Client (`src/api.js`)
 
 Central API client using fetch:
