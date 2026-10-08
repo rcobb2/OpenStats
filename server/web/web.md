@@ -216,6 +216,13 @@ same as before.
   selector like every other panel (a forced 30-day floor for sparse
   login-derived panels was tried and then removed — see git history on
   Reports.jsx — since it hid genuinely sparse data instead of showing it).
+  Its info-banner no longer tells the user to "try a longer range" on its
+  own: the underlying `openlabstats:privilege_elevations:rate15m` rollup (like
+  every `openlabstats_report_rollups` rule) has no historical backfill, so a
+  longer range can't surface events older than the rollup itself — that advice
+  was actively misleading for a recently-added rule. The banner now explains
+  both causes of a sparse result (genuinely rare events, and limited rollup
+  history) instead of implying more range always means more data.
 
 
 ## Components

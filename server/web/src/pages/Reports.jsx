@@ -371,8 +371,12 @@ function ElevationReport({ range, filters, appFilter }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div className="info-banner">
         Elevations are rare events — UAC prompts on Windows, <code>sudo</code>/admin
-        authorization on macOS. Empty or sparse results on a short range are
-        expected; try a longer range or Last 30 Days.
+        authorization on macOS — so expect long stretches with none. This
+        report also reads a 15-minute rollup with no historical backfill: it
+        only accumulates data from the moment it was deployed, so picking a
+        longer range won't surface events from further back than that. A
+        quiet result reflects actual activity plus however much history has
+        built up so far, not a sign the feature is broken.
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
         <ChartCard
