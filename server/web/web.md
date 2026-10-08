@@ -217,6 +217,13 @@ Base URL: `/api/v1` (proxied by server)
   differs from the AD account name
 - Toggles cross-platform correlation (domain/UPN stripping) fleet-wide
 - Tabs: All, Tracked, Ignored, Merged, Rules
+- Checkbox selection + bulk-ignore on the All/Tracked/Merged tabs (mirrors
+  Mappings.jsx's own bulk-review pattern) — reviewing a batch of newly-
+  discovered service/kiosk accounts one Ignore-click at a time was the same
+  generic-list gap Mappings' review queue had. Not shown on Ignored (nothing
+  left to bulk-ignore there) or Rules (a different table). Selection clears
+  on tab switch; a partial bulk failure still reloads the list so the rows
+  that did succeed show as ignored immediately
 - Session Hours is a fixed 30-day window (`getUsers()` defaults `range` to
   `'30d'` with no UI override) shown with an explicit caveat banner and a
   per-row ⚠ flag past 720h (30d's wall-clock ceiling) — a shared/kiosk

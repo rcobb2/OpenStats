@@ -44,6 +44,7 @@ export default function Users() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,6 +80,62 @@ export default function Users() {
   });
 
   const visibleRules = rules.filter(r => matches(r.pattern) || matches(r.canonicalUser));
+
+  // Bulk-ignore only applies where dismissing several at once is a real
+  // workflow: the Ignored tab is already-dismissed (nothing to bulk-ignore),
+  // and Rules is a different table entirely. All/Tracked/Merged are where a
+  // batch of newly-discovered service/kiosk accounts (e.g. after a new
+  // semester's machines start reporting) actually needs reviewing — the
+  // exact one-row-at-a-time gap this mirrors from the Mappings review queue.
+  const bulkIgnoreEnabled = view !== 'ignored' && view !== 'rules';
+  const selectableUsers = visibleUsers.filter(u => !u.ignored);
+  const selectedCount = selectableUsers.reduce((n, u) => n + (selected.has(u.canonicalUser) ? 1 : 0), 0);
+  const allSelected = selectableUsers.length > 0 && selectedCount === selectableUsers.length;
+
+  useEffect(() => { setSelected(new Set()); }, [view]);
+
+  const toggleSelectAll = () => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        selectableUsers.forEach(u => next.delete(u.canonicalUser));
+      } else {
+        selectableUsers.forEach(u => next.add(u.canonicalUser));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectUser = (canonicalUser) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(canonicalUser)) next.delete(canonicalUser); else next.add(canonicalUser);
+      return next;
+    });
+  };
+
+  // Not built on the run() helper above: run() skips its final load() on any
+  // thrown error, which would leave the table stale after a PARTIAL bulk
+  // failure (the users that did succeed still showing as not-ignored). This
+  // always reloads, mirroring Mappings.jsx's own bulk-ignore handler.
+  const handleBulkIgnore = async () => {
+    const targets = selectableUsers.filter(u => selected.has(u.canonicalUser));
+    if (targets.length === 0) return;
+    if (!confirm(`Hide ${targets.length} user${targets.length !== 1 ? 's' : ''} from all reports?\nYou can re-enable them from the Ignored tab.`)) return;
+    setError('');
+    setSaving(true);
+    const results = await Promise.allSettled(targets.map(u => {
+      const target = u.rawUsers.length === 1 ? u.rawUsers[0] : u.canonicalUser;
+      return ignoreUser(target, 'Bulk ignored from Users page');
+    }));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    setSaving(false);
+    if (failed > 0) {
+      setError(`Ignored ${targets.length - failed} of ${targets.length} — ${failed} failed.`);
+    }
+    setSelected(new Set());
+    await load();
+  };
 
   const run = async (fn, failure) => {
     setError(''); setSaving(true);
@@ -248,6 +305,21 @@ export default function Users() {
         </div>
       )}
 
+      {bulkIgnoreEnabled && selected.size > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+          padding: '0.6rem 0.9rem', marginBottom: '0.75rem',
+          background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+          borderRadius: 'var(--radius-sm)',
+        }}>
+          <strong>{selected.size} selected</strong>
+          <button onClick={handleBulkIgnore} disabled={saving} className="btn-danger">
+            {saving ? '⏳ Ignoring…' : `Ignore ${selected.size}`}
+          </button>
+          <button onClick={() => setSelected(new Set())} style={{ marginLeft: 'auto' }}>Clear selection</button>
+        </div>
+      )}
+
       {loading ? (
         <div className="loading">Loading…</div>
       ) : view === 'rules' ? (
@@ -266,17 +338,35 @@ export default function Users() {
           onIgnore={handleIgnoreUser}
           onUnignore={handleUnignoreUser}
           onMerge={(u) => { setMergeFor(u); setMergeTarget(''); setError(''); }}
+          bulkEnabled={bulkIgnoreEnabled}
+          selected={selected}
+          allSelected={allSelected}
+          onToggleSelectAll={toggleSelectAll}
+          onToggleSelectUser={toggleSelectUser}
         />
       )}
     </div>
   );
 }
 
-function DiscoveredTable({ users, filter, saving, onIgnore, onUnignore, onMerge }) {
+function DiscoveredTable({
+  users, filter, saving, onIgnore, onUnignore, onMerge,
+  bulkEnabled, selected, allSelected, onToggleSelectAll, onToggleSelectUser,
+}) {
   return (
     <ResizableTable>
       <thead>
         <tr>
+          {bulkEnabled && (
+            <th style={{ width: '2.25rem' }}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+                title="Select all visible, non-ignored rows"
+              />
+            </th>
+          )}
           <th>User</th>
           <th>Seen As</th>
           <th>Session Hours (30d)</th>
@@ -287,6 +377,17 @@ function DiscoveredTable({ users, filter, saving, onIgnore, onUnignore, onMerge 
       <tbody>
         {users.map(u => (
           <tr key={u.canonicalUser} style={u.ignored ? { opacity: 0.45 } : undefined}>
+            {bulkEnabled && (
+              <td>
+                {!u.ignored && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(u.canonicalUser)}
+                    onChange={() => onToggleSelectUser(u.canonicalUser)}
+                  />
+                )}
+              </td>
+            )}
             <td>
               <code>{u.canonicalUser}</code>
               {u.displayName && <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{u.displayName}</div>}
@@ -331,7 +432,7 @@ function DiscoveredTable({ users, filter, saving, onIgnore, onUnignore, onMerge 
           </tr>
         ))}
         {users.length === 0 && (
-          <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '1.5rem' }}>
+          <tr><td colSpan={bulkEnabled ? 6 : 5} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '1.5rem' }}>
             {filter ? 'No users match the filter.' : 'No users recorded yet.'}
           </td></tr>
         )}
