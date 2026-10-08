@@ -158,9 +158,15 @@ Base URL: `/api/v1` (proxied by server)
   `lastSeen` exceeds the configured stale timeout, not a value the agent
   itself ever reports
 - Hostname links to `AgentDetail` (`/agents/:id`)
-- Assign to lab
+- Assign to lab (per-row `<select>`) or select-and-bulk-assign via row
+  checkboxes + the action bar that appears above the table once anything's
+  selected (uses `FilterableSelect` for the 175+-lab picker). "Select all"
+  scopes to whatever's currently visible — filtering to Outdated first means
+  the header checkbox only selects the outdated rows. This closes out a
+  follow-up explicitly flagged when the per-row select was first built:
+  reassigning many machines used to mean one dropdown click per machine
 - Delete agent, force an individual agent's update
-- Columns: hostname, IP, OS, version, lab, status, last seen
+- Columns: select, hostname, IP, OS, version, lab, status, last seen
 
 #### Agent Detail (`pages/agents/AgentDetail.jsx`)
 - Reached by clicking a hostname anywhere (Agents list, Dashboard's Fleet
@@ -315,12 +321,14 @@ same as before.
   Always keeps the currently-selected option visible even when it doesn't
   match the filter text, so picking a result and then refining the filter
   doesn't make the select's displayed value look broken
-- Used by `GlobalFilterBar`'s Machine and Lab controls. **Deliberately not**
-  used for `AgentsList`'s per-row lab-assignment `<select>` — with 175+
-  labs, an inline filter box repeated across every one of 739 table rows
-  would make the table far taller and busier, trading one usability problem
-  for a worse one. A bulk/modal-based assignment UI would be the right fix
-  there; flagged as a follow-up, not done.
+- Used by `GlobalFilterBar`'s Machine and Lab controls, and by
+  `AgentsList`'s bulk-assign action bar. **Deliberately not** used for
+  `AgentsList`'s per-row lab-assignment `<select>` — with 175+ labs, an
+  inline filter box repeated across every one of 739 table rows would make
+  the table far taller and busier, trading one usability problem for a
+  worse one. Bulk selection (checkboxes + the action bar) is the fix for
+  reassigning many machines at once; the per-row select stays plain for
+  quick single-row changes.
 
 ### Table (`components/Table.jsx`)
 - `ResizableTable` component

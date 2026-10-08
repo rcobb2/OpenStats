@@ -1,12 +1,14 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getAgents, deleteAgent, assignAgentToLab, getLabs, forceAgentUpdate } from '../../api';
 import ResizableTable from '../../components/Table';
-// Per-row lab assignment intentionally stays a plain <select>, not
-// FilterableSelect — with 175+ labs, an inline filter box repeated across
-// every one of 739 rows would make the table far taller and busier than it
-// already is. A bulk/modal-based assignment UI would be the right fix for
-// this specific case; flagged as a follow-up rather than done here.
+import FilterableSelect from '../../components/FilterableSelect';
+// Per-row lab assignment stays a plain <select> (175+ labs would make an
+// inline filter box repeated across every one of 739 rows far busier than
+// it already is) — but reassigning many machines at once no longer means
+// 739 individual dropdown clicks. Checkbox selection + the bulk-assign bar
+// below cover that case instead; this was explicitly flagged as a follow-up
+// when the per-row select was first built, and is what closes it out.
 
 export default function AgentsList() {
   const [agents, setAgents] = useState([]);
@@ -18,6 +20,10 @@ export default function AgentsList() {
   const [sort, setSort] = useState({ key: 'hostname', dir: 'asc' });
   const [statusFilter, setStatusFilter] = useState('all');
   const [filter, setFilter] = useState('');
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkLabId, setBulkLabId] = useState('');
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+  const headerCheckboxRef = useRef(null);
 
   const load = () => {
     setError(null); setLoading(true);
@@ -117,6 +123,61 @@ export default function AgentsList() {
     return rows;
   }, [agents, labs, sort, statusFilter, filter]);
 
+  // Selection is scoped to what's currently visible (sortedAgents), matching
+  // the standard "select all" convention: filtering to Outdated then
+  // checking the header selects only the outdated rows, not the full 739.
+  const visibleIds = useMemo(() => sortedAgents.map(a => a.id), [sortedAgents]);
+  const selectedVisibleCount = useMemo(
+    () => visibleIds.reduce((n, id) => n + (selected.has(id) ? 1 : 0), 0),
+    [visibleIds, selected]
+  );
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
+    }
+  }, [selectedVisibleCount, allVisibleSelected]);
+
+  const toggleSelectAll = () => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleIds.forEach(id => next.delete(id));
+      } else {
+        visibleIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectRow = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelected(new Set());
+
+  const handleBulkAssign = async () => {
+    const ids = [...selected];
+    if (ids.length === 0 || !bulkLabId) return;
+    setBulkAssigning(true);
+    const results = await Promise.allSettled(ids.map(id => assignAgentToLab(id, bulkLabId)));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    setBulkAssigning(false);
+    if (failed === 0) {
+      showToast(`✓ Assigned ${ids.length} agent${ids.length !== 1 ? 's' : ''} to lab`);
+    } else {
+      showToast(`✗ Assigned ${ids.length - failed} of ${ids.length} — ${failed} failed`, 'error');
+    }
+    clearSelection();
+    setBulkLabId('');
+    load();
+  };
+
   const toggleSort = (key) => {
     setSort(s => s.key === key
       ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
@@ -176,9 +237,44 @@ export default function AgentsList() {
         />
       </div>
 
+      {selected.size > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+          padding: '0.6rem 0.9rem', marginBottom: '0.75rem',
+          background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+          borderRadius: 'var(--radius-sm)',
+        }}>
+          <strong>{selected.size} selected</strong>
+          <span style={{ color: 'var(--text-dim)' }}>Assign to lab:</span>
+          <div style={{ minWidth: '220px' }}>
+            <FilterableSelect
+              options={labs}
+              getValue={l => l.id}
+              getLabel={l => `${l.name}${l.building || l.room ? ` (${[l.building, l.room].filter(Boolean).join(' - ')})` : ''}`}
+              value={bulkLabId}
+              onChange={e => setBulkLabId(e.target.value)}
+              allOption={{ value: '', label: 'Choose a lab…' }}
+            />
+          </div>
+          <button onClick={handleBulkAssign} disabled={!bulkLabId || bulkAssigning}>
+            {bulkAssigning ? '⏳ Assigning…' : 'Apply'}
+          </button>
+          <button onClick={clearSelection} style={{ marginLeft: 'auto' }}>Clear selection</button>
+        </div>
+      )}
+
       <ResizableTable>
         <thead>
           <tr>
+            <th style={{ width: '2.25rem' }}>
+              <input
+                type="checkbox"
+                ref={headerCheckboxRef}
+                checked={allVisibleSelected}
+                onChange={toggleSelectAll}
+                title="Select all visible rows"
+              />
+            </th>
             <SortHeader label="Hostname" sortKey="hostname" />
             <SortHeader label="IP" sortKey="ipAddress" />
             <SortHeader label="OS Version" sortKey="osVersion" />
@@ -191,7 +287,14 @@ export default function AgentsList() {
         </thead>
         <tbody>
           {sortedAgents.map(a => (
-            <tr key={a.id}>
+            <tr key={a.id} style={selected.has(a.id) ? { background: 'var(--accent-soft)' } : undefined}>
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selected.has(a.id)}
+                  onChange={() => toggleSelectRow(a.id)}
+                />
+              </td>
               <td><Link to={`/agents/${a.id}`}>{a.hostname}</Link></td>
               <td>{a.ipAddress}</td>
               <td style={{ fontSize: '0.85em', color: 'var(--text-dim)' }}>{a.osVersion || '—'}</td>
