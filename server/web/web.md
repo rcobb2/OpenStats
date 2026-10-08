@@ -236,6 +236,20 @@ same as before.
   individual sub-nav item highlights while on an agent's detail page, which
   is an acceptable gap since detail pages aren't themselves in the nav.)
 
+### ErrorBoundary (`components/ErrorBoundary.jsx`)
+- Scoped per-route in `Layout.jsx`, keyed on `location.pathname`, wrapping
+  only `<Outlet />` — not the whole app in `main.jsx` anymore (that outer one
+  is now just the last-resort fallback for a crash in `Layout` itself). A
+  page-level render error used to take down the sidebar along with it,
+  leaving no way to navigate elsewhere; now the nav stays usable and simply
+  clicking a different page remounts this boundary with a clean slate.
+- "Try again" remounts the crashed subtree (via an internal `resetCount` used
+  as a `key`) instead of just clearing the boundary's own state and
+  re-rendering the identical `children` — the old version would immediately
+  re-throw the same error for anything that wasn't a one-off glitch.
+- "Go to Dashboard" is the explicit escape hatch for the outer, whole-app
+  instance, where there's no sidebar to click back to.
+
 ### GlobalFilterBar (`components/GlobalFilterBar.jsx`)
 - Renders Time Range (+ custom From/To when `range === 'custom'`), and
   optional Machine/Lab selects (`showMachine`/`showLab` props, both default

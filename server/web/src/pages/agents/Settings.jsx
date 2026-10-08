@@ -51,7 +51,7 @@ export default function Settings() {
     }
   };
 
-  if (loading) return <div>Loading settings...</div>;
+  if (loading) return <div className="loading">Loading settings…</div>;
 
   return (
     <div className="settings-page">

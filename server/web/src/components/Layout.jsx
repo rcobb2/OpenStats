@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { getBuildInfo } from '../api';
+import ErrorBoundary from './ErrorBoundary';
 
 // Small hand-rolled line icons (no icon library dependency) — stroke-based
 // so they inherit color/opacity from the nav link's own CSS rather than
@@ -142,7 +143,15 @@ export default function Layout() {
         </div>
       </nav>
       <main className="content">
-        <Outlet />
+        {/* Scoped per-route (keyed on pathname) rather than wrapping the whole
+            app: if one page's render throws, the sidebar stays usable and
+            simply navigating elsewhere remounts this boundary with a clean
+            slate — no need to hit "Try again" or lose the nav entirely. The
+            app-level ErrorBoundary in main.jsx (outside Layout) is the
+            fallback for a crash in Layout itself. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );
