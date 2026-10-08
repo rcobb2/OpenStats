@@ -282,11 +282,21 @@ same as before.
   sub-routes (`/reports/:type`, `/labs/:id`) for the sidebar to stay
   highlighted while on one. Every other flat item still uses exact match
   (`end: true`, the default); only an item with real sub-routes needs the
-  prefix form. (Agents has the same issue for `/agents/:id`, but its sidebar
-  entry is a `children` group, not a flat item — `isParentActive` already
-  does prefix matching for the group, so no change was needed there; no
-  individual sub-nav item highlights while on an agent's detail page, which
-  is an acceptable gap since detail pages aren't themselves in the nav.)
+  prefix form.
+- Agents' sidebar entry is a `children` group (Monitor/Installers/Settings),
+  not a flat item, so the same prefix-match trick doesn't directly apply —
+  `isParentActive` expands the group on any `/agents/*` path, but which
+  **child** should highlight on `/agents/:id` (AgentDetail) isn't a plain
+  prefix match either, since `/agents/installers` and `/agents/settings` are
+  also prefixes of `/agents`. `isChildActive` resolves this: a non-default
+  child (Installers, Settings) matches its own path/subpaths; the default
+  child (Monitor, `to === parentTo`) matches anything under the parent that
+  no sibling already claims — so Monitor stays highlighted on `/agents/:id`
+  without stealing the highlight when a sibling's own path is current. This
+  replaced an earlier version of this doc's own claim that no highlight on
+  `/agents/:id` was an "acceptable gap" — it wasn't; it left zero sidebar
+  orientation on that page, mitigated only by the detail page's own small
+  inline "← Back to Agents" link.
 
 ### ErrorBoundary (`components/ErrorBoundary.jsx`)
 - Scoped per-route in `Layout.jsx`, keyed on `location.pathname`, wrapping

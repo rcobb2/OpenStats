@@ -78,6 +78,23 @@ const navItems = [
   { to: '/reports', label: 'Reports', icon: icons.reports, end: false },
 ];
 
+// A nav group's "default" child (the one whose `to` equals the parent's own
+// `to`, e.g. Monitor at /agents) needs to stay highlighted on a detail route
+// under it too (/agents/:id), not just its own exact path — otherwise
+// landing on AgentDetail highlights nothing in the sidebar at all, the only
+// "you are here" cue left being a small inline back-link on the page itself.
+// It must NOT claim a path a more specific sibling already owns (/agents/
+// installers, /agents/settings), so this checks every sibling first and only
+// falls through to the default child if none of them match.
+function isChildActive(child, siblings, parentTo, pathname) {
+  if (child.to !== parentTo) {
+    return pathname === child.to || pathname.startsWith(child.to + '/');
+  }
+  if (pathname === child.to) return true;
+  if (!pathname.startsWith(parentTo + '/')) return false;
+  return !siblings.some(s => s.to !== parentTo && (pathname === s.to || pathname.startsWith(s.to + '/')));
+}
+
 export default function Layout() {
   const location = useLocation();
   const [buildInfo, setBuildInfo] = useState(null);
@@ -113,7 +130,9 @@ export default function Layout() {
                           <NavLink
                             to={child.to}
                             end={child.to === item.to}
-                            className={({ isActive }) => isActive ? 'active' : ''}
+                            className={
+                              isChildActive(child, item.children, item.to, location.pathname) ? 'active' : ''
+                            }
                           >
                             {child.icon}
                             {child.label}
