@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -21,6 +23,48 @@ type CreateLabRequest struct {
 	Description string `json:"description"`
 }
 
+// checkLabCollision writes a 409 and returns a non-nil error if building and
+// room both match an existing lab's exactly (a blank building or room never
+// collides — UpsertAgent's auto-create path only fires when both are set).
+// excludeID skips a lab against its own unchanged values during an update.
+//
+// UpsertAgent's lab lookup (postgres.go: SELECT id FROM labs WHERE
+// building = $1 AND room = $2) uses QueryRow, which returns an arbitrary one
+// of multiple matching rows — a second lab sharing an existing lab's
+// building+room, created or edited through this handler, makes that lookup
+// nondeterministic. Same fragmentation-bug family as UpsertAgent's own fix
+// earlier this session, just reachable via this manual path instead of the
+// heartbeat auto-create path.
+func (s *Server) checkLabCollision(ctx context.Context, w http.ResponseWriter, building, room, excludeID string) error {
+	if building == "" || room == "" {
+		return nil
+	}
+	labs, err := s.store.ListLabs(ctx)
+	if err != nil {
+		return nil // best-effort check; don't block the write on a lookup failure
+	}
+	if l := findLabCollision(labs, building, room, excludeID); l != nil {
+		err := fmt.Errorf("a lab already exists for building %q room %q: %q", building, room, l.Name)
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"a lab for building %q room %q already exists (%q) — edit that lab instead",
+			building, room, l.Name))
+		return err
+	}
+	return nil
+}
+
+// findLabCollision returns the existing lab (other than excludeID) whose
+// building and room both exactly match, or nil if there's no such lab.
+func findLabCollision(labs []store.Lab, building, room, excludeID string) *store.Lab {
+	for i := range labs {
+		l := &labs[i]
+		if l.ID != excludeID && l.Building == building && l.Room == room {
+			return l
+		}
+	}
+	return nil
+}
+
 // CreateLab godoc
 // @Summary      Create a lab/room
 // @Description  Creates a new lab or room grouping for agents.
@@ -30,6 +74,7 @@ type CreateLabRequest struct {
 // @Param        body  body  CreateLabRequest  true  "Lab details"
 // @Success      201   {object}  store.Lab
 // @Failure      400   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
 // @Router       /api/v1/labs [post]
 func (s *Server) CreateLab(w http.ResponseWriter, r *http.Request) {
 	var req CreateLabRequest
@@ -39,6 +84,9 @@ func (s *Server) CreateLab(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := s.checkLabCollision(r.Context(), w, req.Building, req.Room, ""); err != nil {
 		return
 	}
 
@@ -115,12 +163,18 @@ func (s *Server) GetLab(w http.ResponseWriter, r *http.Request) {
 // @Param        labID  path  string  true  "Lab ID"
 // @Param        body   body  CreateLabRequest  true  "Updated lab details"
 // @Success      200  {object}  map[string]string
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
 // @Router       /api/v1/labs/{labID} [put]
 func (s *Server) UpdateLab(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "labID")
 	var req CreateLabRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.checkLabCollision(r.Context(), w, req.Building, req.Room, id); err != nil {
 		return
 	}
 
