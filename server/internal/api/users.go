@@ -316,6 +316,24 @@ func (s *Server) buildAgentUserPolicy(ctx context.Context) (*AgentUserPolicy, er
 	return out, nil
 }
 
+// sessionHoursByUserQuery builds the PromQL behind ListDiscoveredUsers' "recent
+// session hours" column — the Users page's default view, loaded on every
+// visit with a 30d range unless the caller overrides it.
+//
+// It reads the openlabstats:user_session_seconds:rate15m recording rule via
+// sum_over_time(), not increase() on the raw openlabstats_user_session_seconds_total
+// counter directly. This site was missed when every other range-based query
+// was cut over to the 15m rollups (see topAppsUsageQuery in reports.go for
+// the same migration applied to a sibling report) — a 30d default range here
+// ran increase() over raw session-duration samples for the entire fleet on
+// every single Users page load, not just an explicit report request.
+func sessionHoursByUserQuery(timeRange string) string {
+	return fmt.Sprintf(
+		`sum by (user) (sum_over_time(openlabstats:user_session_seconds:rate15m{user!=""}[%s])) / 3600`,
+		timeRange,
+	)
+}
+
 // ListDiscoveredUsers godoc
 // @Summary      List users seen in metrics
 // @Description  Returns every username Prometheus has recorded, grouped by the canonical identity it resolves to, with its ignore state and recent session hours.
@@ -348,8 +366,7 @@ func (s *Server) ListDiscoveredUsers(w http.ResponseWriter, r *http.Request) {
 	}()
 	go func() {
 		defer wg.Done()
-		hoursByRaw = s.instantQueryByUser(ctx,
-			fmt.Sprintf(`sum by (user) (increase(openlabstats_user_session_seconds_total{user!=""}[%s])) / 3600`, timeRange))
+		hoursByRaw = s.instantQueryByUser(ctx, sessionHoursByUserQuery(timeRange))
 	}()
 	go func() {
 		defer wg.Done()
