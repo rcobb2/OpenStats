@@ -169,8 +169,18 @@ export default function Installer() {
             <pre><code>sudo nano /usr/local/openlabstats/configs/agent.yaml</code></pre>
             <p>
               Set the <code>building</code> and <code>room</code> fields under <code>monitor:</code>,
-              then restart the agent:
+              then restart the agent. There's no install-time equivalent of the Windows
+              installer's autocomplete here — match an existing name below, or a typo
+              (or an inconsistent convention, like a room number here against
+              "Classrooms" elsewhere for the same building) silently fragments the
+              labs list, same as it would on the Windows form:
             </p>
+            {(knownBuildings.length > 0 || knownRooms.length > 0) && (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                {knownBuildings.length > 0 && <>Known buildings: {knownBuildings.join(', ')}<br /></>}
+                {knownRooms.length > 0 && <>Known rooms: {knownRooms.join(', ')}</>}
+              </p>
+            )}
             <pre><code>{`sudo launchctl bootout system/com.openlabstats.agent
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.openlabstats.agent.plist`}</code></pre>
 
