@@ -2,6 +2,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { getAgents, deleteAgent, assignAgentToLab, getLabs, forceAgentUpdate } from '../../api';
 import ResizableTable from '../../components/Table';
+// Per-row lab assignment intentionally stays a plain <select>, not
+// FilterableSelect — with 175+ labs, an inline filter box repeated across
+// every one of 739 rows would make the table far taller and busier than it
+// already is. A bulk/modal-based assignment UI would be the right fix for
+// this specific case; flagged as a follow-up rather than done here.
 
 export default function AgentsList() {
   const [agents, setAgents] = useState([]);

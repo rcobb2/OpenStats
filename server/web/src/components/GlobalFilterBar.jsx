@@ -1,3 +1,5 @@
+import FilterableSelect from './FilterableSelect';
+
 const labelStyle = { color: 'var(--text-dim)', fontSize: '0.85rem', marginRight: '0.3rem' };
 const ctrlStyle = { display: 'flex', alignItems: 'center', gap: '0.3rem' };
 
@@ -53,24 +55,30 @@ export default function GlobalFilterBar({
       {showMachine && (
         <div style={ctrlStyle}>
           <label style={labelStyle}>Machine</label>
-          <select value={hostname} onChange={e => setHostname(e.target.value)}>
-            <option value="">All Machines</option>
-            {agents.map(a => (
-              <option key={a.id} value={a.hostname}>{a.hostname}</option>
-            ))}
-          </select>
+          <FilterableSelect
+            options={agents}
+            getValue={a => a.hostname}
+            getLabel={a => a.hostname}
+            value={hostname}
+            onChange={e => setHostname(e.target.value)}
+            allOption={{ value: '', label: 'All Machines' }}
+            filterPlaceholder="Filter machines…"
+          />
         </div>
       )}
 
       {showLab && (
         <div style={ctrlStyle}>
           <label style={labelStyle}>Lab</label>
-          <select value={lab} onChange={e => setLab(e.target.value)}>
-            <option value="">All Labs</option>
-            {labs.map(l => (
-              <option key={l.id} value={l.name}>{l.name}</option>
-            ))}
-          </select>
+          <FilterableSelect
+            options={labs}
+            getValue={l => l.name}
+            getLabel={l => l.name}
+            value={lab}
+            onChange={e => setLab(e.target.value)}
+            allOption={{ value: '', label: 'All Labs' }}
+            filterPlaceholder="Filter labs…"
+          />
         </div>
       )}
 

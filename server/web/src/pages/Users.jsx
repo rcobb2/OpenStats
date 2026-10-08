@@ -237,6 +237,17 @@ export default function Users() {
         </form>
       )}
 
+      {view !== 'rules' && (
+        <div className="info-banner">
+          Session Hours is a 30-day accrual, not wall-clock time — a shared or
+          kiosk account signed into by many people (or signed into on
+          multiple machines at once) can rack up far more than 720 hours.
+          A high number alone doesn't mean the account is misbehaving; it
+          usually means it's shared, not personal. Values over 720h are
+          flagged below.
+        </div>
+      )}
+
       {loading ? (
         <div className="loading">Loading…</div>
       ) : view === 'rules' ? (
@@ -285,7 +296,17 @@ function DiscoveredTable({ users, filter, saving, onIgnore, onUnignore, onMerge 
                 <div key={raw} style={{ fontSize: '0.85rem' }}><code>{raw}</code></div>
               ))}
             </td>
-            <td>{u.sessionHours ? u.sessionHours.toFixed(1) : '—'}</td>
+            <td>
+              {u.sessionHours ? u.sessionHours.toFixed(1) : '—'}
+              {u.sessionHours > 720 && (
+                <span
+                  title="Exceeds 720h — the 30-day wall-clock ceiling. Usually means this is a shared/kiosk account, not a sign of bad data."
+                  style={{ marginLeft: '0.4em', color: 'var(--warning)', cursor: 'help' }}
+                >
+                  ⚠
+                </span>
+              )}
+            </td>
             <td>
               {u.ignored ? (
                 <span className="badge">ignored</span>

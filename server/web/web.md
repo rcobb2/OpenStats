@@ -38,7 +38,8 @@ server/web/
 │       ├── Table.jsx           # ResizableTable wrapper
 │       ├── ErrorBoundary.jsx
 │       ├── GlobalFilterBar.jsx # Range + Machine/Lab controls, used by Dashboard + Reports
-│       └── MiniBarList.jsx     # Compact top-N bar list, used by 3+ pages
+│       ├── MiniBarList.jsx     # Compact top-N bar list, used by 3+ pages
+│       └── FilterableSelect.jsx # <select> + live filter, for long option lists
 ├── index.html
 ├── package.json
 └── vite.config.js
@@ -178,6 +179,13 @@ Base URL: `/api/v1` (proxied by server)
   differs from the AD account name
 - Toggles cross-platform correlation (domain/UPN stripping) fleet-wide
 - Tabs: All, Tracked, Ignored, Merged, Rules
+- Session Hours is a fixed 30-day window (`getUsers()` defaults `range` to
+  `'30d'` with no UI override) shown with an explicit caveat banner and a
+  per-row ⚠ flag past 720h (30d's wall-clock ceiling) — a shared/kiosk
+  account signed into by many people, or on multiple machines at once, can
+  legitimately exceed it; a bare number with no context read as untrustworthy
+  with nothing distinguishing "obviously shared" from "a real person's
+  oddly-high total"
 
 ### Reports (`pages/Reports.jsx`)
 Each report type is its own route — `/reports/user`, `/reports/hardware`,
@@ -250,8 +258,25 @@ same as before.
   chart component in this app), `emptyMessage`, `formatValue` (defaults to
   `Math.round`), `colors` (defaults to a single accent color; Dashboard
   passes its `CHART_COLORS` array for per-row color variation)
-- Used by Dashboard (`showMachine={false}` — machine-level scope doesn't fit
-  a fleet overview) and Reports (all three scopes)
+
+### FilterableSelect (`components/FilterableSelect.jsx`)
+- Wraps a plain `<select>` with a live filter text input that appears only
+  once the option list exceeds `threshold` (default 15) — narrows which
+  `<option>`s render, nothing else. The select's own `value`/`onChange`
+  contract is completely unchanged, so this can't produce a value the
+  caller wasn't already prepared to receive from a plain `<select>`
+- Added after production data showed why this matters: the Machine filter
+  has one option per agent (739 in production at the time), Lab has one per
+  lab (175) — both well past what a native select can present usably.
+  Always keeps the currently-selected option visible even when it doesn't
+  match the filter text, so picking a result and then refining the filter
+  doesn't make the select's displayed value look broken
+- Used by `GlobalFilterBar`'s Machine and Lab controls. **Deliberately not**
+  used for `AgentsList`'s per-row lab-assignment `<select>` — with 175+
+  labs, an inline filter box repeated across every one of 739 table rows
+  would make the table far taller and busier, trading one usability problem
+  for a worse one. A bulk/modal-based assignment UI would be the right fix
+  there; flagged as a follow-up, not done.
 
 ### Table (`components/Table.jsx`)
 - `ResizableTable` component
