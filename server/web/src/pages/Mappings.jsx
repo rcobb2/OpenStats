@@ -16,6 +16,8 @@ export default function Mappings() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   const load = useCallback(() => {
     setError('');
@@ -49,6 +51,53 @@ export default function Mappings() {
     m.exeName.toLowerCase().includes(filter.toLowerCase()) ||
     m.displayName.toLowerCase().includes(filter.toLowerCase())
   );
+
+  // Bulk selection only makes sense on the Needs Review queue — reviewing a
+  // pile of auto-discovered processes one Ignore-click at a time (common
+  // after a new semester's software rollout surfaces a batch of installer
+  // temp exes together) is exactly the workflow a flat list+edit-modal
+  // doesn't support. Switching tabs clears it instead of carrying selections
+  // across a different, unrelated row set.
+  useEffect(() => { setSelected(new Set()); }, [tab]);
+
+  const visibleIds = filtered.map(m => m.id);
+  const selectedVisibleCount = visibleIds.reduce((n, id) => n + (selected.has(id) ? 1 : 0), 0);
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+
+  const toggleSelectAll = () => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleIds.forEach(id => next.delete(id));
+      } else {
+        visibleIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectRow = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkIgnore = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkWorking(true);
+    setError('');
+    const results = await Promise.allSettled(ids.map(id => patchMappingIgnore(id, true)));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    setBulkWorking(false);
+    if (failed > 0) {
+      setError(`Ignored ${ids.length - failed} of ${ids.length} — ${failed} failed.`);
+    }
+    setSelected(new Set());
+    load();
+  };
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -168,7 +217,23 @@ export default function Mappings() {
 
       {tab === 'review' && reviewCount > 0 && (
         <div style={{ padding: '0.5rem 0.75rem', marginBottom: '0.75rem', borderRadius: 'var(--radius-sm)', background: 'var(--surface-2)', fontSize: '0.875rem', color: 'var(--text-dim)' }}>
-          {reviewCount} process{reviewCount !== 1 ? 'es' : ''} auto-discovered. Edit to set a friendly display name, or ignore junk processes to drop them from metrics.
+          {reviewCount} process{reviewCount !== 1 ? 'es' : ''} auto-discovered. Edit to set a friendly display name,
+          or select junk processes below and ignore them all at once.
+        </div>
+      )}
+
+      {tab === 'review' && selected.size > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+          padding: '0.6rem 0.9rem', marginBottom: '0.75rem',
+          background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+          borderRadius: 'var(--radius-sm)',
+        }}>
+          <strong>{selected.size} selected</strong>
+          <button onClick={handleBulkIgnore} disabled={bulkWorking} className="btn-danger">
+            {bulkWorking ? '⏳ Ignoring…' : `Ignore ${selected.size}`}
+          </button>
+          <button onClick={() => setSelected(new Set())} style={{ marginLeft: 'auto' }}>Clear selection</button>
         </div>
       )}
 
@@ -178,6 +243,16 @@ export default function Mappings() {
       <ResizableTable>
         <thead>
           <tr>
+            {tab === 'review' && (
+              <th style={{ width: '2.25rem' }}>
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleSelectAll}
+                  title="Select all visible rows"
+                />
+              </th>
+            )}
             <th>Exe Name</th>
             <th>Display Name</th>
             <th>Category</th>
@@ -189,6 +264,7 @@ export default function Mappings() {
         <tbody>
           {filtered.map(m => editId === m.id ? (
             <tr key={m.id}>
+              {tab === 'review' && <td></td>}
               <td><code>{m.exeName}</code></td>
               <td>
                 <input
@@ -225,6 +301,15 @@ export default function Mappings() {
             </tr>
           ) : (
             <tr key={m.id} style={m.ignored ? { opacity: 0.45 } : undefined}>
+              {tab === 'review' && (
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(m.id)}
+                    onChange={() => toggleSelectRow(m.id)}
+                  />
+                </td>
+              )}
               <td><code>{m.exeName}</code></td>
               <td>{m.displayName}</td>
               <td>{m.category}</td>
@@ -250,7 +335,7 @@ export default function Mappings() {
             </tr>
           ))}
           {filtered.length === 0 && (
-            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '1.5rem' }}>
+            <tr><td colSpan={tab === 'review' ? 7 : 6} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '1.5rem' }}>
               {filter ? 'No mappings match the filter.' : tab === 'review' ? 'No auto-discovered processes to review.' : tab === 'ignored' ? 'No ignored processes.' : tab === 'allowed' ? 'No approved mappings yet.' : 'No mappings yet.'}
             </td></tr>
           )}

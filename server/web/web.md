@@ -199,6 +199,15 @@ Base URL: `/api/v1` (proxied by server)
 - List software name mappings
 - Create/edit/delete mappings
 - Fields: exe name, display name, category, publisher, family
+- Tabs: All, Allowed, Needs Review (auto-discovered, unreviewed), Ignored
+- Needs Review gets checkbox selection (header checkbox selects/deselects
+  whatever's currently visible under the active search, not the full queue)
+  and a bulk-ignore action bar — reviewing a batch of auto-discovered junk
+  processes (common after a software rollout surfaces several at once) no
+  longer means one Ignore click per row. `Promise.allSettled` reports a
+  partial failure instead of silently stopping at the first error, matching
+  `AgentsList`'s bulk lab-assignment pattern. Selection clears on tab switch.
+  Per-row Edit/Ignore/Delete is unchanged on every tab.
 
 ### Users (`pages/Users.jsx`)
 - Lists every username seen in metrics, grouped by the canonical identity it
