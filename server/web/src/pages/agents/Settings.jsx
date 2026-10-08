@@ -163,7 +163,7 @@ export default function Settings() {
           </div>
           <label style={{ marginTop: '1rem' }}>
             Stale Agent Timeout (days)
-            <p className="hint">Automatically remove agents from the database if they haven't checked in for this long.</p>
+            <p className="hint">Agents that haven't checked in for this long are shown as "offline" in the fleet list and dashboard. This is a display flag only — nothing is ever automatically deleted; decommissioned agents stay in the database until manually removed.</p>
             <input 
               type="number" 
               value={settings.staleTimeoutDays} 

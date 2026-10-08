@@ -1,11 +1,21 @@
-import { useState } from 'react';
-import { generateInstaller, getMacInstallerURL } from '../../api';
+import { useState, useEffect } from 'react';
+import { generateInstaller, getMacInstallerURL, getLabs } from '../../api';
 
 export default function Installer() {
   const [tab, setTab] = useState('windows');
   const [form, setForm] = useState({ serverAddress: '', port: 9183, building: '', room: '' });
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  // Suggests building/room values already in use, as non-blocking autocomplete
+  // — this field is exactly how lab records get created (server auto-creates
+  // one per distinct building+room on an agent's first registration), so a
+  // typo or an inconsistent convention here (a room number here, "Classrooms"
+  // there, for the same building) silently fragments the labs list. Still
+  // free text: a genuinely new building/room is not blocked.
+  const [labs, setLabs] = useState([]);
+  useEffect(() => { getLabs().then(setLabs).catch(() => {}); }, []);
+  const knownBuildings = [...new Set(labs.map(l => l.building).filter(Boolean))].sort();
+  const knownRooms = [...new Set(labs.map(l => l.room).filter(Boolean))].sort();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -74,7 +84,11 @@ export default function Installer() {
                   placeholder="Science Hall"
                   value={form.building}
                   onChange={e => setForm({ ...form, building: e.target.value })}
+                  list="installer-known-buildings"
                 />
+                <datalist id="installer-known-buildings">
+                  {knownBuildings.map(b => <option key={b} value={b} />)}
+                </datalist>
               </label>
               <label>
                 Room (optional)
@@ -83,7 +97,11 @@ export default function Installer() {
                   placeholder="302"
                   value={form.room}
                   onChange={e => setForm({ ...form, room: e.target.value })}
+                  list="installer-known-rooms"
                 />
+                <datalist id="installer-known-rooms">
+                  {knownRooms.map(r => <option key={r} value={r} />)}
+                </datalist>
               </label>
             </div>
             <button type="submit">Generate</button>
