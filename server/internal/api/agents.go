@@ -483,6 +483,29 @@ func promLabelEscape(s string) string {
 	return s
 }
 
+// builtInIgnoreExeSuffixes matches ephemeral, per-version temp executables
+// that should never become a mapping row at all — not even an auto-
+// discovered, admin-ignored one. Chrome's updater drops one of these per
+// version per machine (confirmed live: 32 distinct version-stamped rows,
+// e.g. "151.0.7922.77_chrome_installer_uncompressed.exe", all already
+// manually ignored one at a time); without this, the exact same pattern
+// just keeps accumulating a new row on every future Chrome update,
+// forever, for a file that is never a real "application" in any
+// software-metering sense.
+var builtInIgnoreExeSuffixes = []string{
+	"_chrome_installer.exe",
+	"_chrome_installer_uncompressed.exe",
+}
+
+func isBuiltInIgnoredExe(exeNameLower string) bool {
+	for _, suffix := range builtInIgnoreExeSuffixes {
+		if strings.HasSuffix(exeNameLower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // applyServerMappings rewrites app/category labels using DB mappings, drops
 // ignored exe lines, and returns exe names not yet in the DB along with the
 // app/category labels the agent already attached to them — the agent has
@@ -524,6 +547,9 @@ func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping
 		key := strings.ToLower(exeName)
 		m, found := mappings[key]
 		if !found {
+			if isBuiltInIgnoredExe(key) {
+				continue // drop line — never even auto-insert a mapping row
+			}
 			// Keyed case-insensitively, matching the lookup above and
 			// GetMappingsMap: two case variants of the same exe reported in
 			// one push (or across pushes before either is catalogued) must

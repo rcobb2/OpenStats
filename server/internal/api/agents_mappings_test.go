@@ -117,3 +117,32 @@ func TestApplyServerMappingsExistingBehaviorUnchanged(t *testing.T) {
 		t.Errorf("no exe should be reported unknown when all three are already mapped, got %v", unknown)
 	}
 }
+
+// Versioned Chrome installer temp executables (one new name per Chrome
+// update, per machine, forever) must be dropped outright — never auto-
+// inserted as a mapping row at all, not even one that just ends up manually
+// ignored later. Live data had 32 of these already individually ignored by
+// hand before this was added.
+func TestApplyServerMappingsDropsBuiltInIgnoredExesWithoutAutoInsert(t *testing.T) {
+	body := []byte(strings.Join([]string{
+		`m{app="150.0.7871.101_chrome_installer_uncompressed.exe",exe="150.0.7871.101_chrome_installer_uncompressed.exe",category="Unknown",user="a",hostname="h"} 1`,
+		`m{app="150.0.7871.187_chrome_installer.exe",exe="150.0.7871.187_chrome_installer.exe",category="Unknown",user="a",hostname="h"} 1`,
+		`m{app="Microsoft Excel",exe="EXCEL.EXE",category="Business",user="a",hostname="h"} 1`,
+	}, "\n"))
+
+	out, unknown := applyServerMappings(body, map[string]*store.SoftwareMapping{})
+	outStr := string(out)
+
+	if strings.Contains(outStr, "chrome_installer") {
+		t.Errorf("built-in-ignored exe lines should have been dropped, got: %s", outStr)
+	}
+	if !strings.Contains(outStr, "EXCEL.EXE") {
+		t.Errorf("unrelated exe lines should still pass through, got: %s", outStr)
+	}
+	if len(unknown) != 1 {
+		t.Fatalf("expected only excel.exe to be reported unknown, got %d: %v", len(unknown), unknown)
+	}
+	if _, ok := unknown["excel.exe"]; !ok {
+		t.Errorf("expected excel.exe in unknown, got %v", unknown)
+	}
+}
