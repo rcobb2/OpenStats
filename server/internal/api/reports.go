@@ -1468,6 +1468,39 @@ type utilLabTimeData struct {
 	labs           []string
 }
 
+// utilizationRollupMinStepSeconds is openlabstats_report_rollups' own 15m
+// evaluation cadence (server/prometheus/alerts.yml). Below this, the rollup
+// can't resolve finer than its own interval, so reading it would produce a
+// choppy or misaligned chart for a short/zoomed-in range — see
+// utilizationRateQuery.
+const utilizationRollupMinStepSeconds = 900
+
+// utilizationRateQuery builds the PromQL behind buildUtilizationData's
+// per-point "is this machine active" rate.
+//
+// query_range calls this once per chart point (up to 48), each evaluating
+// rate() over a [step]-sized window. For a short window (a zoomed-in chart,
+// or the default 24h view: step ~30m) that's cheap and stays on the raw
+// openlabstats_app_usage_seconds_total counter directly. For a long window
+// (a 30d range: step ~15h) running rate() on the raw, unaggregated counter
+// at each of 48 points is the same expensive raw-sample walk per point that
+// the openlabstats_report_rollups migration exists to avoid for the
+// instant-query reports (see topAppsUsageQuery) — just repeated 48 times
+// instead of once. Past utilizationRollupMinStepSeconds this reads the 15m
+// rollup via sum_over_time() and divides by the window to approximate
+// rate()'s per-second average; only the >0 "active" threshold is checked by
+// the caller, so the rollup's exe-label collapse (exe folded into app) and
+// the rate/sum_over_time approximation don't change the result.
+func utilizationRateQuery(hostLabelFilter string, step int64, stepStr string) string {
+	if step >= utilizationRollupMinStepSeconds {
+		return fmt.Sprintf(
+			`sum_over_time(openlabstats:app_usage_seconds:rate15m%s[%s]) / %d`,
+			hostLabelFilter, stepStr, step,
+		)
+	}
+	return fmt.Sprintf(`rate(openlabstats_app_usage_seconds_total%s[%s])`, hostLabelFilter, stepStr)
+}
+
 // buildUtilizationData runs the Prometheus range query and computes per-(lab, timestamp)
 // active machine counts. It is the shared core for both utilization endpoints.
 func (s *Server) buildUtilizationData(ctx context.Context, startUnix, endUnix, step int64, labFilter, hnFilter string) (*utilLabTimeData, error) {
@@ -1485,7 +1518,7 @@ func (s *Server) buildUtilizationData(ctx context.Context, startUnix, endUnix, s
 		hfParts = append(hfParts, fmt.Sprintf(`hostname="%s"`, v))
 	}
 	hf := "{" + strings.Join(hfParts, ",") + "}"
-	promQuery := fmt.Sprintf(`rate(openlabstats_app_usage_seconds_total%s[%s])`, hf, stepStr)
+	promQuery := utilizationRateQuery(hf, step, stepStr)
 
 	promURL := fmt.Sprintf(
 		"%s/api/v1/query_range?query=%s&start=%d&end=%d&step=%d",

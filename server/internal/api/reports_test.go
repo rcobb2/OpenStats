@@ -416,3 +416,33 @@ func TestMergeBottomAppsWithZerosLimit(t *testing.T) {
 		}
 	}
 }
+
+// Regression: buildUtilizationData's per-point query_range call ran rate()
+// directly on the raw, unaggregated openlabstats_app_usage_seconds_total
+// counter for every step, including a 30d range's ~15h-wide steps — the same
+// expensive raw-sample walk per point that the openlabstats_report_rollups
+// migration exists to avoid for the instant-query reports (see
+// TestTopAppsUsageQueryUsesRollup), just repeated across the chart instead of
+// run once. A short/zoomed-in step must stay on the raw counter, though: the
+// rollup only resolves to its own 15m cadence, so reading it below that would
+// make a short-range chart choppy or wrong, not just slow.
+func TestUtilizationRateQueryUsesRollupOnlyForLongSteps(t *testing.T) {
+	longStep := utilizationRateQuery(`{hostname="lab1-pc1"}`, 54000, "54000s") // 30d / 48 points
+	if strings.Contains(longStep, "rate(openlabstats_app_usage_seconds_total") {
+		t.Errorf("long step must not run rate() on the raw counter: %s", longStep)
+	}
+	if !strings.Contains(longStep, "openlabstats:app_usage_seconds:rate15m") || !strings.Contains(longStep, "sum_over_time") {
+		t.Errorf("long step must read the rollup via sum_over_time: %s", longStep)
+	}
+	if !strings.Contains(longStep, "/ 54000") {
+		t.Errorf("long step must divide the rollup sum by the window to approximate a rate: %s", longStep)
+	}
+
+	shortStep := utilizationRateQuery(`{hostname="lab1-pc1"}`, 300, "300s") // zoomed-in chart
+	if !strings.Contains(shortStep, "rate(openlabstats_app_usage_seconds_total") {
+		t.Errorf("short step below the rollup's own 15m cadence must stay on the raw counter: %s", shortStep)
+	}
+	if strings.Contains(shortStep, "rate15m") {
+		t.Errorf("short step must not read the 15m rollup, it can't resolve finer than its own cadence: %s", shortStep)
+	}
+}
