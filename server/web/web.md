@@ -172,7 +172,13 @@ Base URL: `/api/v1` (proxied by server)
 - Fleet-wide configuration
 - Heartbeat interval
 - Force agent version updates
-- Stale agent cleanup threshold
+- Stale agent cleanup threshold — `0` is a valid, documented value meaning
+  "never auto-delete" (see `runStaleChecker` in `cmd/server/main.go`); the
+  field's `onChange` previously did `parseInt(e.target.value) || 90`, which
+  silently coerced a deliberately-typed `0` back to `90` since `0` is falsy
+  in JS — `validateSettings` (`settings.go`) had the matching backend bug
+  (`< 1` instead of `< 0`), so the sentinel was unreachable through this
+  form either way until both were fixed together
 ### Mappings (`pages/Mappings.jsx`)
 - List software name mappings
 - Create/edit/delete mappings

@@ -164,10 +164,21 @@ export default function Settings() {
           <label style={{ marginTop: '1rem' }}>
             Stale Agent Timeout (days)
             <p className="hint">Agents are shown as "offline" within minutes of going quiet (separate from this setting). Past this many days with no check-in, they are permanently deleted from the database — there is no undo.</p>
-            <input 
-              type="number" 
-              value={settings.staleTimeoutDays} 
-              onChange={e => setSettings({...settings, staleTimeoutDays: parseInt(e.target.value) || 90})} 
+            <input
+              type="number"
+              min="0"
+              value={settings.staleTimeoutDays}
+              onChange={e => {
+                // Unlike the other numeric fields on this form, 0 here is a
+                // valid, documented value (see this field's own hint above:
+                // never auto-delete), not just an empty/unset placeholder —
+                // `parseInt(e.target.value) || 90` would silently coerce a
+                // deliberately-typed 0 back to 90 on every keystroke, since
+                // 0 is falsy in JS, making that setting unreachable from
+                // this form.
+                const n = parseInt(e.target.value, 10);
+                setSettings({...settings, staleTimeoutDays: isNaN(n) ? 90 : n});
+              }}
             />
           </label>
         </section>

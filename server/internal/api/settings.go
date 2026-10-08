@@ -30,6 +30,37 @@ func (s *Server) GetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settings)
 }
 
+// validateSettings returns a non-empty error message if settings has an
+// invalid field, or "" if it's acceptable to persist. Split out from
+// UpdateSettings so it's unit-testable without an HTTP request or a store.
+func validateSettings(settings *store.SystemSettings) string {
+	if settings.HeartbeatIntervalSeconds != 0 && settings.HeartbeatIntervalSeconds < 30 {
+		return "heartbeatIntervalSeconds must be >= 30"
+	}
+	// 0 is a valid, documented sentinel meaning "never auto-delete" — see
+	// runStaleChecker in cmd/server/main.go, which only calls
+	// DeleteStaleAgents when StaleTimeoutDays > 0. Rejecting anything below
+	// 1 made that sentinel unreachable through this endpoint: an admin could
+	// never actually disable automatic deletion, only ever shorten its
+	// window.
+	if settings.StaleTimeoutDays < 0 {
+		return "staleTimeoutDays must be >= 0 (0 = never auto-delete)"
+	}
+	if settings.RolloutMaxConcurrent < 0 {
+		return "rolloutMaxConcurrent must be >= 0 (0 = unlimited)"
+	}
+	if settings.RolloutGraceSeconds != 0 && settings.RolloutGraceSeconds < 60 {
+		return "rolloutGraceSeconds must be >= 60"
+	}
+	if settings.UpdateIntervalSeconds != 0 && settings.UpdateIntervalSeconds < 60 {
+		return "updateIntervalSeconds must be >= 60"
+	}
+	if settings.MinAgentVersion != "" && !minAgentVersionPattern.MatchString(settings.MinAgentVersion) {
+		return `minAgentVersion must look like "0.1.10" (dotted numeric segments)`
+	}
+	return ""
+}
+
 // UpdateSettings godoc
 // @Summary      Update system settings
 // @Description  Updates global configuration for agents and server.
@@ -47,28 +78,8 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if settings.HeartbeatIntervalSeconds != 0 && settings.HeartbeatIntervalSeconds < 30 {
-		writeError(w, http.StatusBadRequest, "heartbeatIntervalSeconds must be >= 30")
-		return
-	}
-	if settings.StaleTimeoutDays < 1 {
-		writeError(w, http.StatusBadRequest, "staleTimeoutDays must be >= 1")
-		return
-	}
-	if settings.RolloutMaxConcurrent < 0 {
-		writeError(w, http.StatusBadRequest, "rolloutMaxConcurrent must be >= 0 (0 = unlimited)")
-		return
-	}
-	if settings.RolloutGraceSeconds != 0 && settings.RolloutGraceSeconds < 60 {
-		writeError(w, http.StatusBadRequest, "rolloutGraceSeconds must be >= 60")
-		return
-	}
-	if settings.UpdateIntervalSeconds != 0 && settings.UpdateIntervalSeconds < 60 {
-		writeError(w, http.StatusBadRequest, "updateIntervalSeconds must be >= 60")
-		return
-	}
-	if settings.MinAgentVersion != "" && !minAgentVersionPattern.MatchString(settings.MinAgentVersion) {
-		writeError(w, http.StatusBadRequest, `minAgentVersion must look like "0.1.10" (dotted numeric segments)`)
+	if msg := validateSettings(&settings); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 
