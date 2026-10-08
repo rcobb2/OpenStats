@@ -116,6 +116,7 @@ func (s *Server) ListMappings(w http.ResponseWriter, r *http.Request) {
 // @Param        body  body  MappingRequest  true  "Mapping details"
 // @Success      201   {object}  map[string]string
 // @Failure      400   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
 // @Router       /api/v1/mappings [post]
 func (s *Server) CreateMapping(w http.ResponseWriter, r *http.Request) {
 	var req MappingRequest
@@ -200,6 +201,8 @@ func findCaseCollision(existing map[string]*store.SoftwareMapping, exeName strin
 // @Produce      json
 // @Param        body  body  MappingRequest  true  "Mapping details"
 // @Success      200   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
 // @Router       /api/v1/mappings [put]
 func (s *Server) UpdateMapping(w http.ResponseWriter, r *http.Request) {
 	var req MappingRequest
