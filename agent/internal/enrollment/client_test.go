@@ -75,6 +75,41 @@ func TestVerifyDownloadChecksumMatches(t *testing.T) {
 	}
 }
 
+// Regression: RunHeartbeat used to call IsInMaintenanceWindow directly, with
+// no way for setmaintenance's override to ever reach this decision — the CLI
+// command printed a convincing "forced on/off" message while the running
+// service kept gating self-updates purely on the server's time-based window.
+// inMaintenanceWindow must let a persisted override win outright in both
+// directions, and fall through to the time-based window when none is set.
+func TestInMaintenanceWindowOverrideWinsOverSchedule(t *testing.T) {
+	dir := t.TempDir()
+	c := NewClient("openstats.colgate.edu", 9183, "", "", testLogger()).WithMaintenanceOverrideDir(dir)
+
+	// Outside any configured window by the time-based check (start==end means
+	// never), so a nil override must say "not in window".
+	neverSettings := &SystemSettings{MaintenanceWindowStart: "10:00", MaintenanceWindowEnd: "10:00"}
+	if c.inMaintenanceWindow(neverSettings) {
+		t.Fatal("expected false with no override and a zero-length window")
+	}
+
+	on := true
+	if err := WriteMaintenanceOverride(dir, &on); err != nil {
+		t.Fatal(err)
+	}
+	if !c.inMaintenanceWindow(neverSettings) {
+		t.Error("forced-on override should win even when the schedule says never")
+	}
+
+	off := false
+	if err := WriteMaintenanceOverride(dir, &off); err != nil {
+		t.Fatal(err)
+	}
+	alwaysSettings := &SystemSettings{} // empty start/end means "always in window"
+	if c.inMaintenanceWindow(alwaysSettings) {
+		t.Error("forced-off override should win even when the schedule says always")
+	}
+}
+
 func TestVerifyDownloadChecksumMismatchErrors(t *testing.T) {
 	path := t.TempDir() + "/file.bin"
 	if err := os.WriteFile(path, []byte("real content"), 0o644); err != nil {

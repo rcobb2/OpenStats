@@ -19,6 +19,14 @@ type Config struct {
 	Inventory  InventoryConfig  `yaml:"inventory"`
 	Store      StoreConfig      `yaml:"store"`
 	Logging    LoggingConfig    `yaml:"logging"`
+
+	// BaseDir is the install root Store.DBPath and friends are resolved
+	// against (one level up from the config file's own directory) — never
+	// read from YAML, only ever set by Load. Exposed so local agent state
+	// that isn't really "config" (e.g. the setmaintenance override marker)
+	// has one obvious place to live instead of inventing its own path
+	// convention.
+	BaseDir string `yaml:"-"`
 }
 
 type ServerConfig struct {
@@ -90,6 +98,7 @@ func Load(configPath string) (*Config, error) {
 	cfg.Store.DBPath = resolvePath(baseDir, cfg.Store.DBPath)
 	cfg.Logging.FilePath = resolvePath(baseDir, cfg.Logging.FilePath)
 	cfg.Normalizer.MappingFile = resolvePath(baseDir, cfg.Normalizer.MappingFile)
+	cfg.BaseDir = baseDir
 
 	return cfg, nil
 }

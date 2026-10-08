@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParsePort(t *testing.T) {
 	tests := []struct {
@@ -25,5 +29,30 @@ func TestParsePort(t *testing.T) {
 		if ok != tt.ok || got != tt.want {
 			t.Errorf("parsePort(%q) = (%d, %v), want (%d, %v)", tt.in, got, ok, tt.want, tt.ok)
 		}
+	}
+}
+
+// Regression: BaseDir must resolve to the same install root Store.DBPath and
+// friends are already resolved against (one level up from the config file's
+// own directory) — it's the one place local agent state that isn't really
+// "config" (the setmaintenance override marker) can live without inventing
+// its own path convention.
+func TestLoadSetsBaseDirToInstallRoot(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "configs")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "agent.yaml")
+	if err := os.WriteFile(configPath, []byte("server:\n  port: 9183\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BaseDir != root {
+		t.Errorf("BaseDir = %q, want %q", cfg.BaseDir, root)
 	}
 }

@@ -27,7 +27,7 @@ import (
 // constant and passes -d Version=... to WiX, which Package.wxs consumes as
 // $(var.Version). No second edit is needed. (The file this comment used to name,
 // openlabstats.wxs, does not exist — the manifest is Package.wxs.)
-const AgentVersion = "0.5.3"
+const AgentVersion = "0.5.4"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
@@ -93,6 +93,35 @@ type Client struct {
 	// onUserPolicy, when set, receives the policy from every successful
 	// registration so the agent can apply changes without restarting.
 	onUserPolicy func(*UserPolicy)
+
+	// maintenanceOverrideDir, when set, is where inMaintenanceWindow looks for
+	// a marker file written by the `setmaintenance` CLI command (see
+	// ReadMaintenanceOverride). Empty disables the override entirely — the
+	// zero value for a Client built without WithMaintenanceOverrideDir (e.g.
+	// in tests) must never accidentally read a stray file from the working
+	// directory, which is why ReadMaintenanceOverride itself also no-ops on
+	// an empty dir.
+	maintenanceOverrideDir string
+}
+
+// WithMaintenanceOverrideDir enables the setmaintenance CLI override for this
+// client's self-update gating. Without this, RunHeartbeat falls back to
+// IsInMaintenanceWindow's time-based check alone — `setmaintenance` would
+// still print a confident "forced on/off" message, but the running service
+// would never actually see it, the exact bug this was added to fix.
+func (c *Client) WithMaintenanceOverrideDir(dir string) *Client {
+	c.maintenanceOverrideDir = dir
+	return c
+}
+
+// inMaintenanceWindow is RunHeartbeat's single decision point for whether a
+// self-update may proceed right now: a persisted CLI override (if any) wins
+// outright, otherwise it falls back to the server's time-based window.
+func (c *Client) inMaintenanceWindow(s *SystemSettings) bool {
+	if override := ReadMaintenanceOverride(c.maintenanceOverrideDir); override != nil {
+		return *override
+	}
+	return IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd)
 }
 
 // launchSelfUpdate starts a self-update at most once at a time, after a small
@@ -316,7 +345,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 
 	// Also check for update on startup.
 	if updateURL != "" {
-		if s != nil && IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
+		if s != nil && c.inMaintenanceWindow(s) {
 			c.logger.Info("startup: server-directed update received, initiating self-update", "url", updateURL)
 			c.launchSelfUpdate(updateURL, updateChecksum)
 		} else {
@@ -345,7 +374,7 @@ func (c *Client) RunHeartbeat(ctx context.Context, defaultInterval time.Duration
 				}
 
 				if updateURL != "" {
-					if IsInMaintenanceWindow(s.MaintenanceWindowStart, s.MaintenanceWindowEnd) {
+					if c.inMaintenanceWindow(s) {
 						c.logger.Info("server-directed update received, initiating self-update", "url", updateURL)
 						c.launchSelfUpdate(updateURL, updateChecksum)
 					} else {

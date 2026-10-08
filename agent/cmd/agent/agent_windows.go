@@ -40,7 +40,8 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		if cfg.Server.ReportURL != "" {
 			enrollClient = enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
 				WithOSVersion(getWindowsOSCaption(logger)).
-				WithUserPolicyHandler(func(p *enrollment.UserPolicy) { applyUserPolicy(p, logger) })
+				WithUserPolicyHandler(func(p *enrollment.UserPolicy) { applyUserPolicy(p, logger) }).
+				WithMaintenanceOverrideDir(cfg.BaseDir)
 			bootstrapUserPolicy(ctx, enrollClient, logger)
 		} else {
 			// Without a server URL the agent still collects metrics locally but

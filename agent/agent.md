@@ -358,6 +358,14 @@ console mode.
 | `setmaintenance <val>` | Set maintenance override (`true`, `false`, or `auto`) |
 | `status` | Print full agent status (version, building, room, server, heartbeat, maintenance) |
 
+`setmaintenance` persists to a `maintenance_override` marker file in the install
+root (`internal/enrollment/maintenance_override.go`) rather than in-process state —
+each CLI invocation is its own process, so an in-process variable would never
+survive past that one command, and the running agent service (a separate, already-
+running process) needs to see it too. `Client.inMaintenanceWindow`, consulted by
+`RunHeartbeat` before every self-update, reads this same file and lets it override
+the server's time-based window outright in either direction.
+
 ### Examples
 
 ```powershell

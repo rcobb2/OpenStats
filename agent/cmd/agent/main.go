@@ -14,10 +14,6 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/service"
 )
 
-var (
-	maintenanceOverride *bool // nil = auto, true = forced on, false = forced off
-)
-
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -154,24 +150,26 @@ func handleMaintenanceWindow() {
 		os.Exit(1)
 	}
 
+	override := enrollment.ReadMaintenanceOverride(cfg.BaseDir)
+
 	client := enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, slog.Default())
 	settings, err := client.GetSettings(context.Background())
 	if err != nil {
 		fmt.Printf("In Maintenance Window: unknown (server unreachable)\n")
 		fmt.Printf("Configured Window: %s - %s\n", "22:00", "04:00")
-		fmt.Printf("Override: %s\n", getMaintenanceOverrideStatus())
+		fmt.Printf("Override: %s\n", maintenanceOverrideStatus(override))
 		return
 	}
 
 	inWindow := enrollment.IsInMaintenanceWindow(settings.MaintenanceWindowStart, settings.MaintenanceWindowEnd)
 
-	if maintenanceOverride != nil {
-		fmt.Printf("In Maintenance Window: %v (override)\n", *maintenanceOverride)
+	if override != nil {
+		fmt.Printf("In Maintenance Window: %v (override)\n", *override)
 	} else {
 		fmt.Printf("In Maintenance Window: %v\n", inWindow)
 	}
 	fmt.Printf("Configured Window: %s - %s\n", settings.MaintenanceWindowStart, settings.MaintenanceWindowEnd)
-	fmt.Printf("Override: %s\n", getMaintenanceOverrideStatus())
+	fmt.Printf("Override: %s\n", maintenanceOverrideStatus(override))
 }
 
 func handleSetMaintenance() {
@@ -180,30 +178,48 @@ func handleSetMaintenance() {
 		os.Exit(1)
 	}
 
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Previously set an in-process variable and exited — every CLI
+	// invocation is its own process, so it never persisted, and the running
+	// agent service never consulted it either: this command printed a
+	// confident "forced on/off" while changing nothing an admin trying to
+	// block an update during, say, a maintenance blackout could rely on.
+	// WriteMaintenanceOverride persists a marker file the running service's
+	// own self-update gating (Client.inMaintenanceWindow) now reads.
+	var writeErr error
 	arg := strings.ToLower(os.Args[2])
 	switch arg {
 	case "true", "1", "yes", "on":
 		val := true
-		maintenanceOverride = &val
+		writeErr = enrollment.WriteMaintenanceOverride(cfg.BaseDir, &val)
 		fmt.Println("Maintenance mode: forced ON")
 	case "false", "0", "no", "off":
 		val := false
-		maintenanceOverride = &val
+		writeErr = enrollment.WriteMaintenanceOverride(cfg.BaseDir, &val)
 		fmt.Println("Maintenance mode: forced OFF")
 	case "auto", "clear":
-		maintenanceOverride = nil
+		writeErr = enrollment.WriteMaintenanceOverride(cfg.BaseDir, nil)
 		fmt.Println("Maintenance mode: auto (time-based)")
 	default:
 		fmt.Fprintf(os.Stderr, "Invalid value: %s (use true, false, or auto)\n", os.Args[2])
 		os.Exit(1)
 	}
+	if writeErr != nil {
+		fmt.Fprintf(os.Stderr, "Failed to persist maintenance override: %v\n", writeErr)
+		os.Exit(1)
+	}
 }
 
-func getMaintenanceOverrideStatus() string {
-	if maintenanceOverride == nil {
+func maintenanceOverrideStatus(override *bool) string {
+	if override == nil {
 		return "auto"
 	}
-	if *maintenanceOverride {
+	if *override {
 		return "forced on"
 	}
 	return "forced off"
@@ -233,8 +249,8 @@ func handleStatus() {
 
 	inWindow := enrollment.IsInMaintenanceWindow(settings.MaintenanceWindowStart, settings.MaintenanceWindowEnd)
 	maintStatus := fmt.Sprintf("%v", inWindow)
-	if maintenanceOverride != nil {
-		maintStatus = fmt.Sprintf("%v (override)", *maintenanceOverride)
+	if override := enrollment.ReadMaintenanceOverride(cfg.BaseDir); override != nil {
+		maintStatus = fmt.Sprintf("%v (override)", *override)
 	}
 
 	fmt.Printf("Server:       connected\n")
