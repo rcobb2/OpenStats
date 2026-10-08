@@ -597,18 +597,6 @@ func (s *Store) GetIgnoredExeNames(ctx context.Context) ([]string, error) {
 	return names, rows.Err()
 }
 
-// AutoInsertMapping inserts an exe name with placeholder values if not already present.
-// Called when the server sees an unknown exe in a metrics push.
-func (s *Store) AutoInsertMapping(ctx context.Context, exeName string) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO software_mappings (exe_name, display_name, category, publisher, family, source, ignored)
-		VALUES ($1, $1, 'Unknown', '', '', 'auto', false)
-		ON CONFLICT (exe_name) DO NOTHING`,
-		exeName,
-	)
-	return err
-}
-
 // DiscoveredApp carries the app/category labels an agent already attached to a
 // metric line for an exe the server hasn't catalogued yet. The agent has
 // already run its own software-map.json/PE-metadata resolution by the time a

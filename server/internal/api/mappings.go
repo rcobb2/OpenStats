@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -132,19 +133,8 @@ func (s *Server) CreateMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// exe names are matched case-insensitively everywhere a mapping is applied
-	// (GetMappingsMap lowercases its keys), but the DB's uniqueness constraint
-	// on exe_name is case-sensitive. Without this check, adding "excel.exe"
-	// alongside an auto-discovered "EXCEL.EXE" creates two rows that silently
-	// collide at match time, with whichever sorts last in exe_name order
-	// winning unpredictably and the other's edits having no visible effect.
-	if existing, err := s.store.GetMappingsMap(r.Context()); err == nil {
-		if m, found := existing[strings.ToLower(req.ExeName)]; found && m.ExeName != req.ExeName {
-			writeError(w, http.StatusConflict, fmt.Sprintf(
-				"a mapping for %q already exists as %q (exe names are matched case-insensitively) — edit that entry instead",
-				req.ExeName, m.ExeName))
-			return
-		}
+	if err := s.checkMappingCaseCollision(r.Context(), w, req.ExeName); err != nil {
+		return
 	}
 
 	m := &store.SoftwareMapping{
@@ -161,6 +151,45 @@ func (s *Server) CreateMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+}
+
+// checkMappingCaseCollision writes a 409 and returns a non-nil error if
+// exeName collides case-insensitively with a different-cased mapping that
+// already exists.
+//
+// exe names are matched case-insensitively everywhere a mapping is applied
+// (GetMappingsMap lowercases its keys), but the DB's uniqueness constraint on
+// exe_name is case-sensitive. Without this check, adding "excel.exe" alongside
+// an auto-discovered "EXCEL.EXE" creates two rows that silently collide at
+// match time, with whichever sorts last in exe_name order winning
+// unpredictably and the other's edits having no visible effect. Shared by
+// CreateMapping and UpdateMapping — both upsert by exeName via the same
+// UpsertMapping call, and openstatsctl's `mappings set <exe-name>` (an
+// operator typing an arbitrary exe name) reaches UpdateMapping just as
+// directly as it does CreateMapping.
+func (s *Server) checkMappingCaseCollision(ctx context.Context, w http.ResponseWriter, exeName string) error {
+	existing, err := s.store.GetMappingsMap(ctx)
+	if err != nil {
+		return nil // best-effort check; don't block the write on a lookup failure
+	}
+	if m := findCaseCollision(existing, exeName); m != nil {
+		err := fmt.Errorf("a mapping for %q already exists as %q", exeName, m.ExeName)
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"a mapping for %q already exists as %q (exe names are matched case-insensitively) — edit that entry instead",
+			exeName, m.ExeName))
+		return err
+	}
+	return nil
+}
+
+// findCaseCollision returns the existing mapping that collides with exeName
+// under case-insensitive matching but differs in case, or nil if exeName is
+// new or matches an existing entry exactly (the normal update-in-place case).
+func findCaseCollision(existing map[string]*store.SoftwareMapping, exeName string) *store.SoftwareMapping {
+	if m, found := existing[strings.ToLower(exeName)]; found && m.ExeName != exeName {
+		return m
+	}
+	return nil
 }
 
 // UpdateMapping godoc
@@ -185,6 +214,9 @@ func (s *Server) UpdateMapping(w http.ResponseWriter, r *http.Request) {
 	if !validCategories[req.Category] {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid category %q; must be one of: %s",
 			req.Category, strings.Join(validCategoryNames(), ", ")))
+		return
+	}
+	if err := s.checkMappingCaseCollision(r.Context(), w, req.ExeName); err != nil {
 		return
 	}
 
