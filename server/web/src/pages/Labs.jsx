@@ -49,7 +49,11 @@ export default function Labs() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('Delete this lab?')) return;
+    // Deleting a lab doesn't touch its agents (lab_id is ON DELETE SET
+    // NULL, not CASCADE) — but with no warning here, an admin deleting a
+    // lab with machines still assigned to it would silently unassign all
+    // of them with no indication anything but the lab row itself changed.
+    if (!confirm('Delete this lab? Any agents currently assigned to it will become Unassigned, not deleted.')) return;
     setError('');
     try {
       await deleteLab(id);
