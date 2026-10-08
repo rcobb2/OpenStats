@@ -32,6 +32,9 @@ jobs:
         with:
           context: ./server
           push: true
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
           tags: |
             ghcr.io/rcobb2/openstats-server:${{ github.sha }}
             ghcr.io/rcobb2/openstats-server:latest
