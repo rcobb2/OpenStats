@@ -1375,6 +1375,26 @@ func (s *Server) ReportAvgSessionTime(w http.ResponseWriter, r *http.Request) {
 	s.respondUserTotals(w, avgMinutes, q.Get("format"), limit)
 }
 
+// topAppsUsageQuery builds the PromQL behind "Top Apps by Usage" (process
+// uptime per app, intentionally not foreground time — this report answers
+// "how many hours was this app open", not "how many hours was a user looking
+// at it").
+//
+// It reads the openlabstats:app_usage_seconds:rate15m recording rule via
+// sum_over_time(), not increase() on the raw counter directly. This site was
+// missed when every other range-based report (openlabstats_report_rollups,
+// prometheus/alerts.yml) was cut over from raw increase() to the 15m rollups
+// — a 30d `?range=` here still walked 500M+ raw samples from scratch per
+// request, the exact cost (and ~45s client-timeout risk) that migration
+// existed to remove. See usageByLabQuery above for why the underlying metric
+// stays app_usage_seconds_total (not foreground) for this particular report.
+func topAppsUsageQuery(labelFilters, timeRange string) string {
+	return fmt.Sprintf(
+		`sum by (app, category) (sum_over_time(openlabstats:app_usage_seconds:rate15m%s[%s])) / 3600 > 0`,
+		labelFilters, timeRange,
+	)
+}
+
 // ReportTopAppsUsage godoc
 // @Summary      Top applications by usage time
 // @Description  Returns the top applications by total usage seconds over the given time range.
@@ -1397,10 +1417,7 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 	limit := parseReportLimit(q, 20)
 
 	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
-	query := fmt.Sprintf(
-		`sum by (app, category) (increase(openlabstats_app_usage_seconds_total%s[%s])) / 3600 > 0`,
-		lf, timeRange,
-	)
+	query := topAppsUsageQuery(lf, timeRange)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
 }
 

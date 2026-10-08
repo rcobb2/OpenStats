@@ -86,6 +86,14 @@ groups:
       - record: openlabstats:app_foreground_seconds:rate15m
         expr: sum by (hostname, app, category, user) (increase(openlabstats_app_foreground_seconds_total[15m]))
 
+      # Backs topAppsUsageQuery ("Top Apps by Usage" / openstatsctl's
+      # `top-apps`) — process uptime per app, deliberately not foreground
+      # time (see that report's own comment for why). Added after the fact:
+      # this site was missed when this group was first created and kept
+      # reading the raw counter via increase() for arbitrary ranges.
+      - record: openlabstats:app_usage_seconds:rate15m
+        expr: sum by (hostname, app, category, user) (increase(openlabstats_app_usage_seconds_total[15m]))
+
       - record: openlabstats:app_launches:rate15m
         expr: sum by (hostname, app, category, user) (increase(openlabstats_app_launches_total[15m]))
 

@@ -131,6 +131,32 @@ func TestUsageByLabQueryUsesForegroundSeconds(t *testing.T) {
 	}
 }
 
+// Regression: when every other range-based report was cut over from raw
+// increase() to the openlabstats_report_rollups 15m rollups (see
+// prometheus/alerts.yml), "Top Apps by Usage" was missed and kept running
+// increase() on the raw app_usage_seconds_total counter for whatever range
+// the caller asked for — a 30d query walks the same 500M+ raw samples from
+// scratch that the rollup migration exists to avoid. Unlike
+// TestUsageByLabQueryUsesForegroundSeconds, the metric here is deliberately
+// process uptime, not foreground time — only the increase()->sum_over_time()
+// migration is being checked.
+func TestTopAppsUsageQueryUsesRollup(t *testing.T) {
+	got := topAppsUsageQuery(`{user!=""}`, "30d")
+
+	if strings.Contains(got, "increase(openlabstats_app_usage_seconds_total") {
+		t.Errorf("query must not run increase() on the raw counter for an arbitrary range: %s", got)
+	}
+	if !strings.Contains(got, "openlabstats:app_usage_seconds:rate15m") {
+		t.Errorf("query must read the app_usage_seconds rollup, got: %s", got)
+	}
+	if !strings.Contains(got, "sum_over_time") {
+		t.Errorf("query must read the recording rule via sum_over_time, not increase(): %s", got)
+	}
+	if !strings.Contains(got, `{user!=""}`) || !strings.Contains(got, "[30d]") {
+		t.Errorf("query must apply the label filters and time range, got: %s", got)
+	}
+}
+
 // This is the regression the per-lab selector was silently missing: session
 // and login metrics have no lab label in Prometheus, so filtering must happen
 // in Go against the DB-based hostname->lab map *before* the per-user merge —
