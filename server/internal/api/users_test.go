@@ -3,6 +3,8 @@ package api
 import (
 	"strings"
 	"testing"
+
+	"github.com/rcobb/openlabstats-server/internal/store"
 )
 
 // Regression: ListDiscoveredUsers' session-hours column was missed when
@@ -26,5 +28,32 @@ func TestSessionHoursByUserQueryUsesRollup(t *testing.T) {
 	}
 	if !strings.Contains(got, `{user!=""}`) || !strings.Contains(got, "[30d]") {
 		t.Errorf("query must apply the user filter and time range, got: %s", got)
+	}
+}
+
+// Regression: ListDiscoveredUsers used to call s.store.ListUserMappings twice
+// per request — once inside userPolicy(), again directly for ruleByPattern —
+// on a page loaded on every Users page visit. policyFromMappings lets both
+// consumers share one fetch; this confirms it builds the same policy userPolicy
+// used to build inline, from the mapping rows alone.
+func TestPolicyFromMappings(t *testing.T) {
+	mappings := []store.UserMapping{
+		{Pattern: "svc-*", Ignored: true},
+		{Pattern: "jdoe2", CanonicalUser: "jdoe"},
+	}
+
+	policy := policyFromMappings(false, mappings)
+
+	if policy.StripDomain {
+		t.Error("StripDomain should carry through the passed-in value, got true")
+	}
+	if len(policy.Rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(policy.Rules))
+	}
+	if policy.Rules[0].Pattern != "svc-*" || !policy.Rules[0].Ignored {
+		t.Errorf("ignore rule not carried through: %+v", policy.Rules[0])
+	}
+	if policy.Rules[1].Pattern != "jdoe2" || policy.Rules[1].Canonical != "jdoe" {
+		t.Errorf("alias rule not carried through: %+v", policy.Rules[1])
 	}
 }

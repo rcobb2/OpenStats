@@ -55,20 +55,30 @@ type DiscoveredUser struct {
 // defaults so that a database hiccup degrades to built-in filtering rather than
 // leaking service accounts into reports.
 func (s *Server) userPolicy(ctx context.Context) *userid.Policy {
-	policy := userid.NewPolicy()
-
 	strip, err := s.store.GetUserStripDomain(ctx)
 	if err != nil {
 		s.logger.Warn("failed to read user strip-domain setting", "error", err)
-	} else {
-		policy.StripDomain = strip
 	}
 
 	mappings, err := s.store.ListUserMappings(ctx)
 	if err != nil {
 		s.logger.Warn("failed to load user mappings", "error", err)
+		policy := userid.NewPolicy()
+		policy.StripDomain = strip
 		return policy
 	}
+	return policyFromMappings(strip, mappings)
+}
+
+// policyFromMappings builds a *userid.Policy from an already-fetched
+// strip-domain setting and mapping list — split out of userPolicy so a
+// caller that also needs the raw store.UserMapping rows (ListDiscoveredUsers,
+// for its ruleByPattern lookup) can fetch ListUserMappings once and build
+// both from that single result, instead of userPolicy() re-querying the same
+// table a second time within the same request.
+func policyFromMappings(stripDomain bool, mappings []store.UserMapping) *userid.Policy {
+	policy := userid.NewPolicy()
+	policy.StripDomain = stripDomain
 	policy.Rules = make([]userid.Rule, 0, len(mappings))
 	for _, m := range mappings {
 		policy.Rules = append(policy.Rules, userid.Rule{
@@ -346,7 +356,23 @@ func (s *Server) ListDiscoveredUsers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	timeRange := safeTimeRange(r.URL.Query().Get("range"), "30d")
 
-	policy := s.userPolicy(ctx)
+	// Fetched once and reused for both the policy (ignore/alias matching) and
+	// ruleByPattern below (which needs the raw store.UserMapping rows —
+	// ID/DisplayName — that policyFromMappings' trimmed-down userid.Rule
+	// doesn't carry) — this page is loaded on every Users page visit, so a
+	// second independent ListUserMappings call here would double that query
+	// every time.
+	strip, err := s.store.GetUserStripDomain(ctx)
+	if err != nil {
+		s.logger.Warn("failed to read user strip-domain setting", "error", err)
+	}
+	mappings, err := s.store.ListUserMappings(ctx)
+	if err != nil {
+		s.logger.Error("failed to load user mappings", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load user rules")
+		return
+	}
+	policy := policyFromMappings(strip, mappings)
 
 	// These three Prometheus calls are independent — run them concurrently
 	// (bounded by the shared promClient's concurrency-limited transport)
@@ -390,12 +416,7 @@ func (s *Server) ListDiscoveredUsers(w http.ResponseWriter, r *http.Request) {
 
 	// Rules whose pattern names a user Prometheus has never seen (typed ahead of
 	// time, or whose series has expired) should still be visible and editable.
-	mappings, err := s.store.ListUserMappings(ctx)
-	if err != nil {
-		s.logger.Error("failed to load user mappings", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to load user rules")
-		return
-	}
+	// mappings was already fetched above, alongside the policy.
 	ruleByPattern := make(map[string]store.UserMapping, len(mappings))
 	for _, m := range mappings {
 		ruleByPattern[strings.ToLower(m.Pattern)] = m
