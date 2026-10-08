@@ -3,11 +3,12 @@
 package inventory
 
 import (
+	"bytes"
 	"encoding/xml"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -72,9 +73,18 @@ func (s *Scanner) Scan() []InstalledApp {
 	return result
 }
 
-// readInfoPlist opens path and parses it as an Apple XML property list,
-// returning the top-level dictionary as a flat string map.
-// Binary plists (magic "bplist") are not supported and return an error.
+// readInfoPlist opens path and parses it as an Apple property list (XML or
+// binary), returning the top-level dictionary as a flat string map.
+//
+// Binary-encoded Info.plist (magic "bplist") isn't a rare edge case — it's
+// Xcode's standard output for most Release/Archive builds, so treating it as
+// unsupported silently dropped a significant, unpredictable fraction of real
+// installed apps from inventory (the caller skips the whole bundle on any
+// read error, with no per-bundle warning — only an aggregate scan count).
+// There's no plist-binary support in the standard library, but every real
+// macOS machine ships /usr/bin/plutil, which converts in place; shelling out
+// to it is simpler and more reliable than reimplementing Apple's bplist00
+// binary format from scratch.
 func readInfoPlist(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -85,14 +95,20 @@ func readInfoPlist(path string) (map[string]string, error) {
 	// Detect binary plist by checking the magic bytes.
 	var magic [6]byte
 	n, _ := f.Read(magic[:])
-	if n >= 6 && string(magic[:6]) == "bplist" {
-		return nil, fmt.Errorf("binary plist not supported")
-	}
+	isBinary := n >= 6 && string(magic[:6]) == "bplist"
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
 
-	return parseXMLPlistDict(f)
+	if !isBinary {
+		return parseXMLPlistDict(f)
+	}
+
+	out, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", path).Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseXMLPlistDict(bytes.NewReader(out))
 }
 
 // parseXMLPlistDict parses the top-level <dict> of an Apple XML plist,

@@ -27,7 +27,7 @@ import (
 // constant and passes -d Version=... to WiX, which Package.wxs consumes as
 // $(var.Version). No second edit is needed. (The file this comment used to name,
 // openlabstats.wxs, does not exist — the manifest is Package.wxs.)
-const AgentVersion = "0.5.2"
+const AgentVersion = "0.5.3"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
