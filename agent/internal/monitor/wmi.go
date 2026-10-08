@@ -255,6 +255,13 @@ func getStringProp(dispatch *ole.IDispatch, name string) string {
 	if err != nil {
 		return ""
 	}
+	// VARIANT.ToString() copies the string out but doesn't free the
+	// underlying COM-allocated BSTR — that's what Clear() (VariantClear) is
+	// for. Without it, every call leaks one BSTR; called per process-start
+	// event for the agent's entire service uptime (plus once per running
+	// process at startup via ScanExistingProcesses), that's a slow, steady
+	// native-memory leak over a potentially weeks-long run.
+	defer val.Clear()
 	return val.ToString()
 }
 
@@ -263,6 +270,7 @@ func getUint32Prop(dispatch *ole.IDispatch, name string) uint32 {
 	if err != nil {
 		return 0
 	}
+	defer val.Clear()
 	return uint32(val.Val)
 }
 
@@ -282,7 +290,11 @@ func getProcessExePath(svc *ole.IDispatch, pid uint32) string {
 	defer result.Release()
 
 	countVar, err := oleutil.GetProperty(result, "Count")
-	if err != nil || countVar.Val == 0 {
+	if err != nil {
+		return ""
+	}
+	defer countVar.Clear()
+	if countVar.Val == 0 {
 		return ""
 	}
 
@@ -347,6 +359,9 @@ func ScanExistingProcesses(logger *slog.Logger, familyResolver func(string, stri
 
 	countVar, _ := oleutil.GetProperty(result, "Count")
 	count := int(countVar.Val)
+	if countVar != nil {
+		countVar.Clear()
+	}
 	logger.Debug("scanning existing processes", "count", count)
 
 	for i := 0; i < count; i++ {
