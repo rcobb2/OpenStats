@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import {
   getSummary, getTopAppsByLaunches, getActiveUsers, getUsageByLab,
-  getTopAppsByElevations, getAgents, getLabs, parsePromVector,
+  getTopUsersBySessionTime, getAgents, getLabs, parsePromVector,
 } from '../api';
 import { useGlobalFilters } from '../hooks/useGlobalFilters';
 import GlobalFilterBar from '../components/GlobalFilterBar';
@@ -151,15 +151,23 @@ function LabUsageChart({ range, filters, labs }) {
   );
 }
 
-function RecentElevationsPanel({ range, filters }) {
+// Elevations used to have this slot, but they're a genuinely rare event on
+// this fleet (locked-down lab machines, standard non-admin accounts) — the
+// panel rendered "No privilege elevations" on effectively every load,
+// permanently empty real estate on the single highest-traffic page. Session
+// time is the opposite: populated on every load, and "who's using this the
+// most" is a more natural first-glance fleet-health signal anyway. Elevations
+// are still fully visible via their own Reports tab — this only moves them
+// out of the Dashboard's prime panel grid, it doesn't remove them from the app.
+function TopUsersPanel({ range, filters }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     setData(null);
     setError(false);
-    getTopAppsByElevations(range, 6, filters)
-      .then(res => setData(parsePromVector(res)))
+    getTopUsersBySessionTime(range, 6, filters)
+      .then(res => setData(parsePromVector(res, 'user')))
       .catch(() => setError(true));
   }, [range, filters]);
 
@@ -168,7 +176,8 @@ function RecentElevationsPanel({ range, filters }) {
       data={data}
       error={error}
       colors={CHART_COLORS}
-      emptyMessage="No privilege elevations in this period."
+      formatValue={(v) => `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })}h`}
+      emptyMessage="No session activity in this period."
     />
   );
 }
@@ -328,8 +337,8 @@ export default function Dashboard() {
             <LabUsageChart range={effectiveRange} filters={filters} labs={labs} />
           </div>
           <div className="chart-card">
-            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Recent Privilege Elevations</h3>
-            <RecentElevationsPanel range={effectiveRange} filters={filters} />
+            <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Top Users by Session Time</h3>
+            <TopUsersPanel range={effectiveRange} filters={filters} />
           </div>
         </div>
       )}

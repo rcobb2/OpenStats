@@ -105,13 +105,20 @@ Base URL: `/api/v1` (proxied by server)
 - Uses `useGlobalFilters` + `GlobalFilterBar` (range + lab, no machine scope) —
   same URL-persisted state Reports uses, so a Dashboard link with `?range=`/
   `&lab=` is shareable and survives a refresh
-- Top Applications by Launch Count, Usage by Lab, Recent Privilege Elevations
+- Top Applications by Launch Count, Usage by Lab, Top Users by Session Time
   — one `panel-grid` (previously two, with Fleet Health as a fourth panel;
   removed now that it's `TriageBanner` instead). Usage by Lab's bars are
   clickable — navigates to that lab's `LabDetail` page (no-op for the
   synthetic "Unassigned" bucket, which isn't a real entity)
-- Recent Privilege Elevations (top apps by elevation count) — uses the shared
-  `MiniBarList` component
+- Top Users by Session Time (`TopUsersPanel`) replaced a Recent Privilege
+  Elevations panel here — elevations are a genuinely rare event on this
+  fleet (locked-down lab machines, standard non-admin accounts), so that
+  panel rendered its empty state on effectively every load, permanently
+  empty real estate on the highest-traffic page. Session time is populated
+  every load and a more natural "who's using this most" signal for a
+  first-glance dashboard. Elevations remain fully visible via their own
+  Reports tab, `LabDetail`, and `AgentDetail` — only removed from this one
+  panel slot. Uses the shared `MiniBarList` component
 
 ### Labs (`pages/Labs.jsx`)
 - List all labs
@@ -272,7 +279,7 @@ same as before.
 ### MiniBarList (`components/MiniBarList.jsx`)
 - Compact horizontal bar list for small top-N panels — no axes/gridlines/
   tooltip, unlike the Recharts-based charts elsewhere
-- Used by Dashboard's Recent Privilege Elevations panel and both
+- Used by Dashboard's Top Users by Session Time panel and both
   `AgentDetail`/`LabDetail`'s four usage panels (extracted once a third
   usage appeared — see the comment at the top of the file)
 - Props: `data`/`error` (same null/false/array convention as every other
