@@ -200,7 +200,26 @@ function TriageBanner() {
 
   if (error) return <div className="error">Failed to load fleet status.</div>;
   if (!agents) return <div className="loading">Loading fleet status…</div>;
-  if (agents.length === 0) return <div className="empty">No agents registered yet.</div>;
+
+  // A brand-new deployment's very first screen — before this, "No agents
+  // registered yet" with no next step just looked unfinished, not like a
+  // deliberately empty state waiting for setup.
+  if (agents.length === 0) {
+    return (
+      <div className="triage-banner setup">
+        <span className="triage-icon">⚙</span>
+        <div>
+          <strong>No agents registered yet.</strong>
+          <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem', marginTop: '0.15rem' }}>
+            Generate an installer and run it on a lab machine to start seeing data here.
+          </div>
+        </div>
+        <Link to="/agents/installers" className="btn-primary" style={{ marginLeft: 'auto', fontSize: 13, padding: '0.45rem 0.9rem' }}>
+          Get the installer →
+        </Link>
+      </div>
+    );
+  }
 
   const byStatus = { online: 0, offline: 0, outdated: 0 };
   for (const a of agents) {

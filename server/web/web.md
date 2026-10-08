@@ -109,7 +109,11 @@ Base URL: `/api/v1` (proxied by server)
   Datadog put "what's Critical right now" ahead of routine metrics rather
   than burying it in a chart grid. Deliberately **not** scoped by the lab
   filter (see the comment on `TriageBanner` — a triage panel shouldn't let a
-  lab filter hide an offline machine elsewhere)
+  lab filter hide an offline machine elsewhere). A third state, `.setup`
+  (zero agents registered — a brand-new deployment's very first screen),
+  used to be a bare "No agents registered yet." with no next step; now shows
+  a dedicated info-toned banner ("Get the installer →" to `/agents/installers`)
+  so the landing page reads as "waiting for setup," not "something's broken"
 - Stat cards: total/online agents, labs, mappings, active users — each links
   to the corresponding page (`/agents`, `/labs`, `/mappings`, `/users`)
 - Uses `useGlobalFilters` + `GlobalFilterBar` (range + lab, no machine scope) —

@@ -304,6 +304,17 @@ body::before {
   border: 1px solid rgba(61, 220, 151, 0.25);
   color: var(--success);
 }
+/* First-run state (zero agents registered) — informational, not an alert:
+   distinct from .ok/.alert so a brand-new deployment's landing screen reads
+   as "waiting for setup" rather than "something's wrong" or "all clear". */
+.triage-banner.setup {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1rem 1.25rem;
+  background: var(--accent-soft);
+  border: 1px solid rgba(91, 140, 255, 0.3);
+}
 .triage-banner.alert {
   padding: 1rem 1.25rem;
   background: var(--danger-soft);
