@@ -315,7 +315,37 @@ store:
 logging:
   level: info
   filePath: logs/agent.log
+  maxSizeMB: 50   # rotate once the log exceeds this size (default 50)
+  maxBackups: 3   # rotated generations kept: path.1 (newest) .. path.N (default 3)
 ```
+
+**Log rotation.** `agent/internal/logrotate` wraps the log file so it can't
+grow without bound over a long agent uptime — append-only logging with no cap
+is how `agent.log` reached 100+ GB on some lab Macs (v0.5.4 and earlier): a
+per-tick debug line in `proc_darwin.go`'s `currentSnapshot` fired for every
+already-seen root-owned process on every one-second poll, forever, compounded
+by the shipped configs defaulting to `level: debug` instead of the documented
+`info`. Both are fixed (the darwin per-pid log is now gated on `isNewRoot`,
+the "snapshot pass complete" summary only logs on change, and the shipped
+configs default to `info`), but rotation exists as a backstop regardless of
+level or future logging additions. If an existing log file is already over
+`maxSizeMB` when the agent starts, it's truncated in place rather than
+preserved as a `.1` backup — a file that large at startup is leftover runaway
+growth, not a normal rotation boundary, and keeping it as a multi-gigabyte
+backup would just relocate the disk problem instead of fixing it.
+
+**macOS also had a second, unrotated copy of the same spam.** The launchd
+plist's `StandardOutPath` captured the process's raw stdout to
+`/var/log/openlabstats/agent-stdout.log` — and since `setupLogger` also wrote
+every log line to `os.Stdout`, that file silently duplicated everything
+landing in `agent.log`, with no cap of its own. Fixed two ways:
+`setupLogger` now only echoes to stdout when it's a real terminal (checked
+via `os.ModeCharDevice`), so a launchd-run agent — which has no one watching
+stdout — no longer writes there at all; and `internal/service/darwin.go`'s
+`Run()` calls `logrotate.TruncateIfOversized` on both
+`agent-stdout.log`/`agent-stderr.log` at every start, so an already-bloated
+copy from an older agent version self-heals on the next restart instead of
+needing manual cleanup on each machine.
 
 ## Building
 

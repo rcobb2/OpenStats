@@ -12,10 +12,27 @@ import (
 	"path/filepath"
 	"syscall"
 	"text/template"
+
+	"github.com/rcobb/openlabstats-agent/internal/logrotate"
 )
 
 const ServiceLabel = "com.openlabstats.agent"
 const plistPath = "/Library/LaunchDaemons/com.openlabstats.agent.plist"
+
+// stdoutLogPath/stderrLogPath are what the launchd plist's
+// StandardOutPath/StandardErrorPath point at. launchd itself opens and
+// appends to these — our own logger no longer echoes to stdout outside a
+// real terminal (see cmd/agent's setupLogger), so in normal operation these
+// should now stay small (crash output only). maxRedirectLogBytes bounds
+// them anyway: truncateRedirectedLogs runs on every start, so a file that
+// somehow grew past the cap self-heals on the next restart instead of
+// accumulating forever, the same failure mode that let agent.log itself
+// reach 100+ GB before rotation existed.
+const (
+	stdoutLogPath       = "/var/log/openlabstats/agent-stdout.log"
+	stderrLogPath       = "/var/log/openlabstats/agent-stderr.log"
+	maxRedirectLogBytes = 50 * 1024 * 1024
+)
 
 const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -42,10 +59,10 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <integer>30</integer>
 
     <key>StandardOutPath</key>
-    <string>/var/log/openlabstats/agent-stdout.log</string>
+    <string>{{.StdoutLogPath}}</string>
 
     <key>StandardErrorPath</key>
-    <string>/var/log/openlabstats/agent-stderr.log</string>
+    <string>{{.StderrLogPath}}</string>
 
     <key>WorkingDirectory</key>
     <string>{{.WorkDir}}</string>
@@ -59,14 +76,34 @@ func Run(runner AgentRunner, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
+	truncateRedirectedLogs(logger)
+
 	logger.Info("running as macOS process (launchd manages service lifecycle)")
 	return runner(ctx)
+}
+
+// truncateRedirectedLogs reclaims space from launchd's stdout/stderr
+// redirect files if either has already grown past the cap — most relevantly
+// on upgrade from an agent version that still echoed debug logging to
+// stdout unconditionally (see cmd/agent's setupLogger), which duplicated
+// everything into agent-stdout.log with no cap of its own.
+func truncateRedirectedLogs(logger *slog.Logger) {
+	for _, path := range []string{stdoutLogPath, stderrLogPath} {
+		truncated, err := logrotate.TruncateIfOversized(path, maxRedirectLogBytes)
+		if err != nil {
+			logger.Warn("failed to check launchd-redirected log size", "path", path, "error", err)
+			continue
+		}
+		if truncated {
+			logger.Info("truncated oversized launchd-redirected log", "path", path)
+		}
+	}
 }
 
 // Install writes the launchd plist to /Library/LaunchDaemons/ and loads it.
 func Install(exePath string) error {
 	// Ensure log directory exists.
-	if err := os.MkdirAll("/var/log/openlabstats", 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(stdoutLogPath), 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -86,13 +123,17 @@ func Install(exePath string) error {
 	defer f.Close()
 
 	data := struct {
-		ExePath    string
-		ConfigPath string
-		WorkDir    string
+		ExePath       string
+		ConfigPath    string
+		WorkDir       string
+		StdoutLogPath string
+		StderrLogPath string
 	}{
-		ExePath:    exePath,
-		ConfigPath: configPath,
-		WorkDir:    exeDir,
+		ExePath:       exePath,
+		ConfigPath:    configPath,
+		WorkDir:       exeDir,
+		StdoutLogPath: stdoutLogPath,
+		StderrLogPath: stderrLogPath,
 	}
 
 	if err := tmpl.Execute(f, data); err != nil {

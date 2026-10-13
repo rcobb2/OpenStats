@@ -97,6 +97,10 @@ store:
 # Logging
 logging:
   # Log level: debug, info, warn, error
-  level: debug
+  level: info
   # Log to file (in addition to Windows Event Log when running as service)
   filePath: logs/agent.log
+  # Rotate the log file once it exceeds this size; keep at most maxBackups
+  # rotated generations (defaults: 50, 3, if omitted).
+  maxSizeMB: 50
+  maxBackups: 3

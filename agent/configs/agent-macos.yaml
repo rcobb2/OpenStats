@@ -26,5 +26,7 @@ store:
   dbPath: data/openlabstats.db
 
 logging:
-  level: debug
+  level: info
+  maxSizeMB: 50
+  maxBackups: 3
   filePath: logs/agent.log

@@ -76,6 +76,15 @@ type PollWatcher struct {
 	// process look new on every single poll for its entire lifetime,
 	// re-firing OnElevated once per second instead of once at genuine start.
 	elevatedSeen map[uint32]uint64
+	// snapshotLogged/lastRoot0Seen/lastInfoFailures gate the per-poll
+	// "snapshot pass complete" diagnostic so it only writes when the counts
+	// actually change, instead of once per second forever (see
+	// currentSnapshot) — unrotated per-tick logging at this cadence is what
+	// let agent.log reach 100+ GB on machines with many long-lived
+	// root-owned processes.
+	snapshotLogged   bool
+	lastRoot0Seen    int
+	lastInfoFailures int
 }
 
 // NewPollWatcher creates a new macOS process watcher.
@@ -287,11 +296,15 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 		// Field-diagnostic breadcrumb: if this never fires despite real
 		// elevation activity on a machine, it means the agent isn't running
 		// privileged enough to see root-owned processes at all (see
-		// root0Seen above). Unconditional — not gated by detectElevations —
-		// so it also fires during the startup seed; cheap, since uid-0
-		// processes are a small fraction of the process table.
-		if info.uid == 0 {
-			w.logger.Debug("observed root-owned process", "pid", pid, "exe", exeName, "ppid", info.ppid, "pathUnreadable", pathUnreadable, "isNewRoot", isNewRoot)
+		// root0Seen above). Gated on isNewRoot — not detectElevations — so
+		// it still fires during the startup seed (every root pid is "new"
+		// the first time) but, unlike that gate, drops to only genuinely new
+		// root processes afterward. Logging every already-seen root process
+		// on every one-second tick forever (the previous behavior) is what
+		// let agent.log reach 100+ GB on lab Macs with many persistent
+		// root-owned daemons (MDM, security agents, etc.).
+		if info.uid == 0 && isNewRoot {
+			w.logger.Debug("observed root-owned process", "pid", pid, "exe", exeName, "ppid", info.ppid, "pathUnreadable", pathUnreadable)
 		}
 
 		// Elevation detection runs before the exclude/system-path filtering
@@ -336,7 +349,18 @@ func (w *PollWatcher) currentSnapshot(detectElevations bool) map[uint32]procSnap
 	// exist so the first real poll correctly treats them as already-seen
 	// rather than firing a spurious elevation for each one.
 	w.elevatedSeen = newElevatedSeen
-	w.logger.Debug("snapshot pass complete", "totalPIDs", len(pids), "infoFailures", infoFailures, "root0Seen", root0Seen)
+
+	// Only log the pass summary when root0Seen/infoFailures actually change
+	// (plus once on the very first pass) rather than on every one-second
+	// tick forever — the diagnostic value is in noticing a transition (e.g.
+	// root0Seen dropping to 0), not in repeating the same steady-state
+	// numbers 86400 times a day.
+	if !w.snapshotLogged || root0Seen != w.lastRoot0Seen || infoFailures != w.lastInfoFailures {
+		w.logger.Debug("snapshot pass complete", "totalPIDs", len(pids), "infoFailures", infoFailures, "root0Seen", root0Seen)
+		w.snapshotLogged = true
+		w.lastRoot0Seen = root0Seen
+		w.lastInfoFailures = infoFailures
+	}
 	return snap
 }
 

@@ -20,6 +20,12 @@ func RunForegroundPoller(ctx context.Context, tracker *Tracker, interval time.Du
 	// scheduling delay, or sleep/wake gap would otherwise still credit a flat
 	// `interval` regardless of how much real time passed.
 	last := time.Now()
+	// lastLoggedPID/haveLoggedPID gate the per-tick debug line to foreground
+	// transitions only. Logging the polled PID (or "no window active") on
+	// every tick, forever, at this interval is the same unbounded-growth
+	// pattern as the darwin process snapshot logging — see proc_darwin.go.
+	var lastLoggedPID uint32
+	haveLoggedPID := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -36,10 +42,16 @@ func RunForegroundPoller(ctx context.Context, tracker *Tracker, interval time.Du
 			}
 			pid := getForegroundPID()
 			if pid != 0 {
-				logger.Debug("foreground window PID", "pid", pid)
 				tracker.IncrementForeground(pid, elapsed)
-			} else {
-				logger.Debug("no foreground window active")
+			}
+			if !haveLoggedPID || pid != lastLoggedPID {
+				if pid != 0 {
+					logger.Debug("foreground window PID", "pid", pid)
+				} else {
+					logger.Debug("no foreground window active")
+				}
+				lastLoggedPID = pid
+				haveLoggedPID = true
 			}
 		}
 	}

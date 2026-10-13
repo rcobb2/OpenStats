@@ -60,6 +60,14 @@ type StoreConfig struct {
 type LoggingConfig struct {
 	Level    string `yaml:"level"`
 	FilePath string `yaml:"filePath"`
+	// MaxSizeMB caps the log file's size before it's rotated; MaxBackups
+	// bounds how many rotated generations are kept. Without a cap, an
+	// append-only log file over a long agent uptime has no ceiling — this
+	// is what let agent.log reach 100+ GB on some machines (see
+	// agent/internal/monitor/proc_darwin.go and foreground_poller.go for
+	// the per-tick debug-logging bugs that drove the growth rate itself).
+	MaxSizeMB  int `yaml:"maxSizeMB"`
+	MaxBackups int `yaml:"maxBackups"`
 }
 
 // Load reads and parses the config file at the given path.
@@ -152,6 +160,12 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Logging.FilePath == "" {
 		cfg.Logging.FilePath = "logs/agent.log"
+	}
+	if cfg.Logging.MaxSizeMB == 0 {
+		cfg.Logging.MaxSizeMB = 50
+	}
+	if cfg.Logging.MaxBackups == 0 {
+		cfg.Logging.MaxBackups = 3
 	}
 	setPlatformDefaults(cfg)
 }

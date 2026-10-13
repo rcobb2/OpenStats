@@ -11,6 +11,7 @@ import (
 
 	"github.com/rcobb/openlabstats-agent/internal/config"
 	"github.com/rcobb/openlabstats-agent/internal/enrollment"
+	"github.com/rcobb/openlabstats-agent/internal/logrotate"
 	"github.com/rcobb/openlabstats-agent/internal/service"
 )
 
@@ -297,14 +298,23 @@ func setupLogger(cfg *config.Config) *slog.Logger {
 		level = slog.LevelInfo
 	}
 
-	// Create log file if configured.
+	// Only echo to stdout when it's an actual terminal. When the agent runs
+	// under a service supervisor (launchd on macOS redirects StandardOutPath
+	// to a plain file; a Windows service has no console at all), nothing is
+	// watching stdout live — but on macOS it was still getting captured into
+	// /var/log/openlabstats/agent-stdout.log, duplicating every line already
+	// going to the rotated file into a second, unrotated one with no cap of
+	// its own. Console/test runs (a real terminal) keep live output.
 	var writers []io.Writer
-	writers = append(writers, os.Stdout)
+	if info, err := os.Stdout.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		writers = append(writers, os.Stdout)
+	}
 
 	if cfg.Logging.FilePath != "" {
 		dir := filepath.Dir(cfg.Logging.FilePath)
 		os.MkdirAll(dir, 0755)
-		f, err := os.OpenFile(cfg.Logging.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		maxBytes := int64(cfg.Logging.MaxSizeMB) * 1024 * 1024
+		f, err := logrotate.New(cfg.Logging.FilePath, maxBytes, cfg.Logging.MaxBackups)
 		if err == nil {
 			writers = append(writers, f)
 		}
