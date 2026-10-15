@@ -27,7 +27,7 @@ import (
 // constant and passes -d Version=... to WiX, which Package.wxs consumes as
 // $(var.Version). No second edit is needed. (The file this comment used to name,
 // openlabstats.wxs, does not exist — the manifest is Package.wxs.)
-const AgentVersion = "0.5.6"
+const AgentVersion = "0.6.0"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
@@ -69,6 +69,9 @@ type SystemSettings struct {
 	MinAgentVersion          string `json:"minAgentVersion"`
 	MaintenanceWindowStart   string `json:"maintenanceWindowStart"`
 	MaintenanceWindowEnd     string `json:"maintenanceWindowEnd"`
+	// IdleThresholdSeconds is a pointer so "absent" (older server: keep the
+	// local config value) is distinguishable from 0 (idle exclusion disabled).
+	IdleThresholdSeconds *int `json:"idleThresholdSeconds,omitempty"`
 }
 
 // Client handles agent registration with the central server.
@@ -93,6 +96,10 @@ type Client struct {
 	// onUserPolicy, when set, receives the policy from every successful
 	// registration so the agent can apply changes without restarting.
 	onUserPolicy func(*UserPolicy)
+
+	// onSettings, when set, receives the fleet settings from every successful
+	// registration (startup and each heartbeat).
+	onSettings func(*SystemSettings)
 
 	// maintenanceOverrideDir, when set, is where inMaintenanceWindow looks for
 	// a marker file written by the `setmaintenance` CLI command (see
@@ -182,6 +189,13 @@ func (c *Client) WithUserPolicyHandler(fn func(*UserPolicy)) *Client {
 	return c
 }
 
+// WithSettingsHandler registers a callback invoked with the server's fleet
+// settings on each successful registration.
+func (c *Client) WithSettingsHandler(fn func(*SystemSettings)) *Client {
+	c.onSettings = fn
+	return c
+}
+
 // NormalizeServerURL is retained here as the enrollment-facing entry point;
 // the implementation lives in internal/urlutil so internal/config can apply the
 // same rules to installer-supplied registry values.
@@ -227,6 +241,9 @@ func (c *Client) Register(ctx context.Context) (*SystemSettings, string, string)
 	}
 	if res.UserPolicy != nil && c.onUserPolicy != nil {
 		c.onUserPolicy(res.UserPolicy)
+	}
+	if res.Settings != nil && c.onSettings != nil {
+		c.onSettings(res.Settings)
 	}
 	return res.Settings, res.UpdateURL, res.UpdateChecksum
 }

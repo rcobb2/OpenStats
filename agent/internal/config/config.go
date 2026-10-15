@@ -38,9 +38,13 @@ type ServerConfig struct {
 type MonitorConfig struct {
 	ReconcileInterval time.Duration `yaml:"reconcileInterval"`
 	MinLifetime       time.Duration `yaml:"minLifetime"`
-	ExcludePatterns   []string      `yaml:"excludePatterns"`
-	Building          string        `yaml:"building"`
-	Room              string        `yaml:"room"`
+	// IdleThreshold is how long without keyboard/mouse input before a focused
+	// window stops being credited as foreground time. The server can override it
+	// (idleThresholdSeconds); 0 from the server disables it.
+	IdleThreshold   time.Duration `yaml:"idleThreshold"`
+	ExcludePatterns []string      `yaml:"excludePatterns"`
+	Building        string        `yaml:"building"`
+	Room            string        `yaml:"room"`
 }
 
 type NormalizerConfig struct {
@@ -142,6 +146,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Monitor.MinLifetime == 0 {
 		cfg.Monitor.MinLifetime = 2 * time.Second
+	}
+	if cfg.Monitor.IdleThreshold == 0 {
+		cfg.Monitor.IdleThreshold = 15 * time.Minute
 	}
 	if cfg.Normalizer.MappingFile == "" {
 		cfg.Normalizer.MappingFile = "configs/software-map.json"

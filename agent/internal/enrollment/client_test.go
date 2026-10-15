@@ -1,10 +1,13 @@
 package enrollment
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -120,3 +123,43 @@ func TestVerifyDownloadChecksumMismatchErrors(t *testing.T) {
 		t.Fatal("expected an error for a checksum mismatch")
 	}
 }
+
+// idleThresholdSeconds must decode to nil when absent (older server: keep the
+// local config), and 0 must stay distinguishable from absent (disabled).
+func TestRegisterDecodesIdleThresholdAndInvokesHandler(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want *int
+	}{
+		{"absent", `{"settings":{"heartbeatIntervalSeconds":60}}`, nil},
+		{"zero", `{"settings":{"idleThresholdSeconds":0}}`, intPtr(0)},
+		{"600", `{"settings":{"idleThresholdSeconds":600}}`, intPtr(600)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				io.WriteString(w, tc.json)
+			}))
+			defer srv.Close()
+
+			var got *SystemSettings
+			calls := 0
+			c := NewClient(srv.URL, 9183, "", "", testLogger()).
+				WithSettingsHandler(func(s *SystemSettings) { got = s; calls++ })
+			c.Register(context.Background())
+
+			if calls != 1 || got == nil {
+				t.Fatalf("handler calls=%d settings=%v, want 1 call with settings", calls, got)
+			}
+			switch {
+			case tc.want == nil && got.IdleThresholdSeconds != nil:
+				t.Errorf("want nil, got %d", *got.IdleThresholdSeconds)
+			case tc.want != nil && (got.IdleThresholdSeconds == nil || *got.IdleThresholdSeconds != *tc.want):
+				t.Errorf("want %d, got %v", *tc.want, got.IdleThresholdSeconds)
+			}
+		})
+	}
+}
+
+func intPtr(v int) *int { return &v }
