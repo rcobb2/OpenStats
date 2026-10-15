@@ -87,6 +87,8 @@ func policyFromMappings(stripDomain bool, mappings []store.UserMapping) *userid.
 			Ignored:   m.Ignored,
 		})
 	}
+	// SQL orders by ignored/pattern; alias specificity is decided in Go.
+	userid.SortAliasRules(policy.Rules)
 	return policy
 }
 

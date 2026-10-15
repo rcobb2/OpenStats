@@ -8,6 +8,7 @@
 package userid
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -82,10 +83,11 @@ type Policy struct {
 	// StripDomain removes a "DOMAIN\" prefix and an "@domain" suffix so that
 	// COLGATE\jdoe (Windows) and jdoe (macOS) resolve to the same identity.
 	StripDomain bool
-	// Rules are admin-configured, evaluated in order; the first match wins.
+	// Rules are admin-configured. Ignored rules always win over aliases; among
+	// aliases the most specific match wins (see Resolve). Slice order is irrelevant.
 	Rules []Rule
 	// ExtraIgnored are ignore-only patterns beyond DefaultIgnorePatterns.
-	// Rules with Ignored=true are folded in here by NewPolicy callers.
+	// Evaluated together with Rules that have Ignored=true.
 	ExtraIgnored []string
 }
 
@@ -130,20 +132,14 @@ func (p *Policy) Resolve(raw string) (canonical string, ignored bool) {
 		return "", true
 	}
 
-	// Admin rules first so an explicit rule can rescue an account that the
-	// built-in heuristics would otherwise drop.
-	for _, rule := range p.Rules {
-		if !matchesEither(rule.Pattern, rawLower, canonical) {
-			continue
-		}
-		if rule.Ignored {
-			return canonical, true
-		}
-		if c := Canonicalize(rule.Canonical, p.StripDomain); c != "" {
-			canonical = c
-		}
-		return canonical, false
-	}
+	// Precedence, identical in the agent and server copies:
+	//  1. Built-in checks (structural, DefaultIgnorePatterns) -> ignored. An
+	//     alias can never rescue a built-in-ignored name.
+	//  2. Admin ignore rules (ExtraIgnored and Rules with Ignored) -> ignored.
+	//     An admin ignore beats any alias.
+	//  3. Alias rules, most specific first (see aliasLess) -> that canonical.
+	//  4. Otherwise tracked under its derived canonical form.
+	// Rule order in p.Rules is irrelevant; specificity decides.
 
 	// The structural check runs against the raw name as well: stripping the
 	// domain from "NT SERVICE\WdiServiceHost" would otherwise hide what it is.
@@ -155,12 +151,66 @@ func (p *Policy) Resolve(raw string) (canonical string, ignored bool) {
 			return canonical, true
 		}
 	}
+
 	for _, pat := range p.ExtraIgnored {
 		if matchesEither(pat, rawLower, canonical) {
 			return canonical, true
 		}
 	}
+	for _, rule := range p.Rules {
+		if rule.Ignored && matchesEither(rule.Pattern, rawLower, canonical) {
+			return canonical, true
+		}
+	}
+
+	var best *Rule
+	for i := range p.Rules {
+		rule := &p.Rules[i]
+		if rule.Ignored || !matchesEither(rule.Pattern, rawLower, canonical) {
+			continue
+		}
+		if best == nil || aliasLess(rule.Pattern, best.Pattern) {
+			best = rule
+		}
+	}
+	if best != nil {
+		if c := Canonicalize(best.Canonical, p.StripDomain); c != "" {
+			canonical = c
+		}
+	}
 	return canonical, false
+}
+
+// aliasLess reports whether alias pattern a is more specific than b and so
+// should be tried first: exact patterns (no "*") before wildcards, then longer
+// before shorter, then lexical order as a deterministic tiebreak. Shared by
+// Resolve and by callers that need a stable ordering (Holder, FromServer).
+func aliasLess(a, b string) bool {
+	wa := strings.Contains(a, "*")
+	wb := strings.Contains(b, "*")
+	if wa != wb {
+		return !wa
+	}
+	if len(a) != len(b) {
+		return len(a) > len(b)
+	}
+	return a < b
+}
+
+// SortAliasRules orders rules in precedence order: ignored rules first (their
+// relative order kept), then aliases most-specific-first using aliasLess. The
+// sort is stable and in place. Resolve does not depend on slice order; this
+// exists so the serialized order is deterministic and readable.
+func SortAliasRules(rules []Rule) {
+	sort.SliceStable(rules, func(i, j int) bool {
+		if rules[i].Ignored != rules[j].Ignored {
+			return rules[i].Ignored
+		}
+		if rules[i].Ignored {
+			return false
+		}
+		return aliasLess(rules[i].Pattern, rules[j].Pattern)
+	})
 }
 
 // plausibleUsername rejects strings that are structurally not human accounts:

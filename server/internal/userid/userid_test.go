@@ -110,13 +110,68 @@ func TestResolveAliasMergesIdentities(t *testing.T) {
 	}
 }
 
-func TestResolveRuleRescuesDefaultIgnoredAccount(t *testing.T) {
-	// An explicit rule outranks the built-in ignore list, so a lab whose real
-	// account name collides with a service-account name can still be tracked.
+func TestResolveAliasCannotRescueBuiltInIgnored(t *testing.T) {
+	// Built-in ignores run first; no alias can bring a service account back.
 	p := NewPolicy()
-	p.Rules = []Rule{{Pattern: "installer", Canonical: "installer"}}
-	if canonical, ignored := p.Resolve("installer"); ignored || canonical != "installer" {
-		t.Errorf(`Resolve("installer") = (%q, %v), want ("installer", false)`, canonical, ignored)
+	p.Rules = []Rule{
+		{Pattern: "www", Canonical: "web-admin"},
+		{Pattern: "installer", Canonical: "installer"},
+		{Pattern: "_spotlight", Canonical: "spot"},
+	}
+	for _, raw := range []string{"www", "installer", "_spotlight"} {
+		if _, ignored := p.Resolve(raw); !ignored {
+			t.Errorf("Resolve(%q): built-in ignore must not be rescued by an alias", raw)
+		}
+	}
+}
+
+func TestResolveAdminIgnoreBeatsAlias(t *testing.T) {
+	for name, rules := range map[string][]Rule{
+		"ignore first": {{Pattern: "jdo*", Ignored: true}, {Pattern: "jdoe", Canonical: "jdoe.smith"}},
+		"alias first":  {{Pattern: "jdoe", Canonical: "jdoe.smith"}, {Pattern: "jdo*", Ignored: true}},
+	} {
+		p := NewPolicy()
+		p.Rules = rules
+		if _, ignored := p.Resolve("jdoe"); !ignored {
+			t.Errorf("%s: jdoe should be ignored by the admin ignore rule", name)
+		}
+	}
+	p := NewPolicy()
+	p.ExtraIgnored = []string{"jdo*"}
+	p.Rules = []Rule{{Pattern: "jdoe", Canonical: "jdoe.smith"}}
+	if _, ignored := p.Resolve("jdoe"); !ignored {
+		t.Error("ExtraIgnored should beat an alias")
+	}
+}
+
+func TestResolveAliasSpecificityIndependentOfOrder(t *testing.T) {
+	wild := Rule{Pattern: "jdo*", Canonical: "wildtarget"}
+	exact := Rule{Pattern: "jdoe", Canonical: "exacttarget"}
+	for name, rules := range map[string][]Rule{
+		"wildcard first": {wild, exact},
+		"exact first":    {exact, wild},
+	} {
+		p := NewPolicy()
+		p.Rules = rules
+		if got, ignored := p.Resolve("jdoe"); ignored || got != "exacttarget" {
+			t.Errorf("%s: Resolve(jdoe) = (%q, %v), want (exacttarget, false)", name, got, ignored)
+		}
+		if got, _ := p.Resolve("jdoo"); got != "wildtarget" {
+			t.Errorf("%s: Resolve(jdoo) = %q, want wildtarget", name, got)
+		}
+	}
+}
+
+func TestResolveLongerWildcardWins(t *testing.T) {
+	for _, rules := range [][]Rule{
+		{{Pattern: "j*", Canonical: "short"}, {Pattern: "jdo*", Canonical: "long"}},
+		{{Pattern: "jdo*", Canonical: "long"}, {Pattern: "j*", Canonical: "short"}},
+	} {
+		p := NewPolicy()
+		p.Rules = rules
+		if got, _ := p.Resolve("jdoe"); got != "long" {
+			t.Errorf("Resolve(jdoe) = %q, want long", got)
+		}
 	}
 }
 
@@ -162,6 +217,13 @@ func TestIgnoreMatcherAgreesWithResolve(t *testing.T) {
 		{Pattern: "zabbix", Ignored: true},
 		{Pattern: "svc-*", Ignored: true},
 		{Pattern: "jdoe2", Canonical: "jdoe"},
+		// Aliased built-in name: stays ignored, matcher must agree.
+		{Pattern: "www", Canonical: "web-admin"},
+		// Ignore/alias overlap: the ignore wins for ghost1, the alias applies to ghost2.
+		{Pattern: "ghost*", Ignored: true},
+		{Pattern: "ghost1", Canonical: "ghost.one"},
+		{Pattern: "tmp1", Canonical: "tmp.one"},
+		{Pattern: "tmp*", Ignored: true},
 	}
 
 	matcher := p.IgnoreMatcher()
@@ -182,6 +244,7 @@ func TestIgnoreMatcherAgreesWithResolve(t *testing.T) {
 		"jdoe", `COLGATE\jdoe`, "jdoe2", "alice", "bob.smith", "zabbixadmin",
 		"root", "_spotlight", "SYSTEM", `NT AUTHORITY\SYSTEM`, "MACHINE$",
 		"UMFD-3", "panopto_upload", "Font Driver Host",
+		"www", `COLGATE\www`, "ghost1", "ghost2", "tmp1", "tmp2", "tmp.one",
 		`Window Manager\DWM-1`, `Font Driver Host\UMFD-0`, `COLGATE\jdoe`,
 	}
 	for _, raw := range samples {

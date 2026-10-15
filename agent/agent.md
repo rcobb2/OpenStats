@@ -246,8 +246,14 @@ collection time and what reports filter at query time agree. Keep them in sync.
 
 In `cmd/agent/helpers.go`, `resolveUser` is the only function collection code
 should call: it returns the canonical name to label with, or false to skip.
-`isValidUser` applies the built-in rules only and exists for the startup path
-and tests.
+`isValidUser` applies the built-in rules only; it has no production callers
+and is kept for tests.
+
+`Policy.Resolve` precedence (identical to the server copy):
+  1. Built-in checks (structural, default ignore list): ignored. An alias cannot rescue these.
+  2. Admin ignore rules: ignored. An admin ignore beats any alias.
+  3. Aliases, most specific first (exact before wildcard, then longer pattern, then lexical): tracked under the alias's canonical.
+  4. Otherwise tracked under its canonical form.
 
 ### `internal/monitor/foreground.go`
 
