@@ -34,14 +34,13 @@ func RunForegroundPoller(ctx context.Context, tracker *Tracker, interval time.Du
 		case now := <-ticker.C:
 			elapsed := now.Sub(last)
 			last = now
-			// Cap at a small multiple of the nominal interval so a long
-			// suspend/resume gap doesn't credit hours of foreground time to
-			// whatever happened to be focused right before the machine slept.
-			if elapsed > interval*4 {
-				elapsed = interval
-			}
+			// A gap far beyond the nominal interval means the machine slept
+			// or the process was suspended. Credit nothing for it: nobody was
+			// using whatever happened to be focused before the machine slept,
+			// and crediting even one interval would be a guess.
+			plausible := elapsed <= interval*4
 			pid := getForegroundPID()
-			if pid != 0 {
+			if pid != 0 && plausible {
 				tracker.IncrementForeground(pid, elapsed)
 			}
 			if !haveLoggedPID || pid != lastLoggedPID {

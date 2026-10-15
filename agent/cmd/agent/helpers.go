@@ -11,39 +11,8 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/metrics"
 	"github.com/rcobb/openlabstats-agent/internal/monitor"
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
-	"github.com/rcobb/openlabstats-agent/internal/store"
 	"github.com/rcobb/openlabstats-agent/internal/userid"
 )
-
-func restoreMetrics(db *store.Store, m *metrics.Metrics, logger *slog.Logger) error {
-	totals, err := db.GetUsageTotals()
-	if err != nil {
-		return err
-	}
-
-	for _, t := range totals {
-		// Skip system/service accounts — they produce user="" series that waste
-		// Prometheus cardinality and never appear in user-facing reports. Restored
-		// rows are canonicalized too, so history merges with live data even when
-		// it was persisted under a domain-qualified name.
-		user, ok := resolveUser(t.User)
-		if !ok {
-			continue
-		}
-		labels := []string{t.DisplayName, t.ExeName, t.Category, user, t.Hostname}
-		m.AppUsageSeconds.WithLabelValues(labels...).Add(t.TotalSeconds)
-		m.AppForegroundSeconds.WithLabelValues(labels...).Add(t.TotalForegroundSeconds)
-		m.AppLaunches.WithLabelValues(labels...).Add(float64(t.TotalLaunches))
-		// Guarded so restore doesn't materialize zero-valued elevation series
-		// for every app/user pair.
-		if t.TotalElevations > 0 {
-			m.PrivilegeElevations.WithLabelValues(labels...).Add(float64(t.TotalElevations))
-		}
-	}
-
-	logger.Info("restored metrics from store", "entries", len(totals))
-	return nil
-}
 
 func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *normalizer.Normalizer, m *metrics.Metrics, interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)

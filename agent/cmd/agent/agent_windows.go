@@ -22,7 +22,6 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/monitor"
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
 	"github.com/rcobb/openlabstats-agent/internal/service"
-	"github.com/rcobb/openlabstats-agent/internal/store"
 )
 
 // runAgent returns a function that runs the full agent lifecycle on Windows.
@@ -52,17 +51,8 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				"send heartbeats, or self-update; reinstall with SERVERADDRESS=<url> or set server.reportURL in agent.yaml")
 		}
 
-		// Initialize local store.
-		db, err := store.New(cfg.Store.DBPath, logger)
-		if err != nil {
-			return fmt.Errorf("failed to initialize store: %w", err)
-		}
-		defer db.Close()
-
-		// Restore metrics from persisted totals.
-		if err := restoreMetrics(db, m, logger); err != nil {
-			logger.Warn("failed to restore metrics from store", "error", err)
-		}
+		// No metric restore at startup — see the matching comment in
+		// agent_darwin.go for why restoring lifetime totals inflated reports.
 
 		// Initialize normalizer.
 		mapping, err := normalizer.NewMappingFile(cfg.Normalizer.MappingFile, logger)
@@ -87,11 +77,6 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				if user, ok := resolveUser(rawUser); ok {
 					m.PrivilegeElevations.WithLabelValues(info.DisplayName, exeName, info.Category, user, metrics.Hostname()).Inc()
 				}
-				// Persist the raw user (like RecordSession); canonicalization
-				// happens on restore.
-				if err := db.RecordElevation(exeName, info.DisplayName, info.Category, rawUser, metrics.Hostname()); err != nil {
-					logger.Error("failed to record elevation", "error", err)
-				}
 				logger.Info("privilege elevation detected", "pid", pid, "exe", exeName, "user", rawUser)
 			},
 			OnStop: func(session *monitor.ProcessSession) {
@@ -105,16 +90,6 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 					m.AppUsageSeconds.WithLabelValues(labels...).Add(session.CheckpointDelta.Seconds())
 					m.AppForegroundSeconds.WithLabelValues(labels...).Add(session.ForegroundDelta.Seconds())
 					m.AppLaunches.WithLabelValues(labels...).Inc()
-				}
-
-				// Persist to local store.
-				if err := db.RecordSession(
-					session.PID, session.ExeName, session.ExePath,
-					info.DisplayName, info.Category, info.Publisher,
-					session.User, hostname,
-					session.StartTime, session.StopTime, session.ForegroundDelta.Seconds(),
-				); err != nil {
-					logger.Error("failed to record session", "error", err)
 				}
 			},
 		})
