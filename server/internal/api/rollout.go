@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -191,10 +192,18 @@ func parseHHMM(s string) (int, bool) {
 	return h*60 + m, true
 }
 
+// validHHMM is stricter than parseHHMM: Sscanf accepts a valid prefix, so
+// "10:00PM" or "22:00:30" would otherwise be stored and read back as 10:00 and
+// 22:00. Only exact H:MM / HH:MM is accepted for persisting.
 func validHHMM(s string) bool {
+	if !hhmmPattern.MatchString(s) {
+		return false
+	}
 	_, ok := parseHHMM(s)
 	return ok
 }
+
+var hhmmPattern = regexp.MustCompile(`^\d{1,2}:\d{2}$`)
 
 // isInMaintenanceWindow reports whether `now` falls inside the HH:mm..HH:mm
 // window. It mirrors the agent's IsInMaintenanceWindow

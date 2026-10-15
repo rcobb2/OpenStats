@@ -81,6 +81,13 @@ func policyFromMappings(stripDomain bool, mappings []store.UserMapping) *userid.
 	policy.StripDomain = stripDomain
 	policy.Rules = make([]userid.Rule, 0, len(mappings))
 	for _, m := range mappings {
+		// A non-ignored row with no target (left behind by unignoring a
+		// quick-ignore) is inert. buildAgentUserPolicy drops it, so drop it here
+		// too, or the server would pick it as the most specific alias and
+		// disagree with the agent.
+		if !m.Ignored && m.CanonicalUser == "" {
+			continue
+		}
 		policy.Rules = append(policy.Rules, userid.Rule{
 			Pattern:   m.Pattern,
 			Canonical: m.CanonicalUser,

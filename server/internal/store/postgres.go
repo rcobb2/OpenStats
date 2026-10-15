@@ -129,6 +129,10 @@ func (s *Store) migrate(ctx context.Context) error {
 	INSERT INTO settings (key, value) VALUES ('auto_update_enabled', 'false') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('rollout_max_concurrent', '20') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('rollout_grace_seconds', '900') ON CONFLICT DO NOTHING;
+	-- Grace < 60 used to be accepted (0 disabled the concurrency cap) and is now
+	-- rejected on save; reset stored values so the Settings page, which has no
+	-- grace input and resubmits what it loaded, can still save.
+	UPDATE settings SET value = '900' WHERE key = 'rollout_grace_seconds' AND CASE WHEN value ~ '^[0-9]{1,9}$' THEN value::int < 60 ELSE true END;
 	INSERT INTO settings (key, value) VALUES ('target_agent_version', '') ON CONFLICT DO NOTHING;
 
 	-- Migration: add pending_update column if it doesn't exist

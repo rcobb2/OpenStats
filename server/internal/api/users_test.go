@@ -57,3 +57,19 @@ func TestPolicyFromMappings(t *testing.T) {
 		t.Errorf("alias rule not carried through: %+v", policy.Rules[1])
 	}
 }
+
+// An unignored quick-ignore row (ignored=false, no target) must not reach the
+// server policy: the agent payload drops it, and keeping it would make the
+// server pick it over a wildcard alias the agent applies.
+func TestPolicyFromMappingsDropsInertRows(t *testing.T) {
+	policy := policyFromMappings(true, []store.UserMapping{
+		{Pattern: "jdo*", CanonicalUser: "mergeduser"},
+		{Pattern: "jdoe"},
+	})
+	if len(policy.Rules) != 1 || policy.Rules[0].Pattern != "jdo*" {
+		t.Fatalf("expected only the jdo* alias, got %+v", policy.Rules)
+	}
+	if got, ignored := policy.Resolve("jdoe"); ignored || got != "mergeduser" {
+		t.Errorf("Resolve(jdoe) = %q, ignored=%v; want mergeduser (as the agent resolves it)", got, ignored)
+	}
+}
