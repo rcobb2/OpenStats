@@ -51,6 +51,11 @@ Main HTTP router using chi:
 | `/api/v1/settings` | GET | System settings |
 | `/health` | GET | Health check |
 
+Fleet settings (`PUT /api/v1/settings`, returned to agents in the register response's `settings`) include
+`idleThresholdSeconds` (default 900): seconds without keyboard/mouse input before an agent stops counting
+foreground time. `0` disables; otherwise 60..86400 (else 400). The PUT body is decoded onto the stored
+settings, so an omitted field keeps its stored value (an old client can't silently reset it to 0).
+
 ### `internal/store/postgres.go`
 
 PostgreSQL connection and migrations:

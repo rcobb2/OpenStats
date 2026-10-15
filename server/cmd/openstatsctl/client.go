@@ -202,6 +202,7 @@ type settings struct {
 	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds"`
 	UpdateIntervalSeconds    int    `json:"updateIntervalSeconds"`
 	StaleTimeoutDays         int    `json:"staleTimeoutDays"`
+	IdleThresholdSeconds     int    `json:"idleThresholdSeconds"`
 	MinAgentVersion          string `json:"minAgentVersion"`
 	MaintenanceWindowStart   string `json:"maintenanceWindowStart"`
 	MaintenanceWindowEnd     string `json:"maintenanceWindowEnd"`

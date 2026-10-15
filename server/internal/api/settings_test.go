@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rcobb/openlabstats-server/internal/store"
@@ -39,8 +40,53 @@ func baseValidSettings() store.SystemSettings {
 		HeartbeatIntervalSeconds: 120,
 		UpdateIntervalSeconds:    3600,
 		StaleTimeoutDays:         90,
+		IdleThresholdSeconds:     900,
 		MinAgentVersion:          "0.1.0",
 		RolloutMaxConcurrent:     20,
 		RolloutGraceSeconds:      900,
+	}
+}
+
+func TestValidateSettingsIdleThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		v  int
+		ok bool
+	}{{0, true}, {60, true}, {600, true}, {86400, true}, {30, false}, {59, false}, {86401, false}, {-1, false}} {
+		s := baseValidSettings()
+		s.IdleThresholdSeconds = tc.v
+		if msg := validateSettings(&s); (msg == "") != tc.ok {
+			t.Errorf("IdleThresholdSeconds=%d: ok=%v, got msg %q", tc.v, tc.ok, msg)
+		}
+	}
+}
+
+// An absent idleThresholdSeconds must be reported as absent (handler then keeps
+// the stored value); an explicit 0 must be honored (disable).
+func TestDecodeSettingsUpdateIdleThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		present    bool
+		want       int
+		valid      bool
+	}{
+		{"absent", `{"heartbeatIntervalSeconds":120}`, false, 0, true},
+		{"zero", `{"idleThresholdSeconds":0}`, true, 0, true},
+		{"600", `{"idleThresholdSeconds":600}`, true, 600, true},
+		{"30 rejected", `{"idleThresholdSeconds":30}`, true, 30, false},
+	} {
+		got, present, err := decodeSettingsUpdate(strings.NewReader(tc.body))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if present != tc.present || got.IdleThresholdSeconds != tc.want {
+			t.Errorf("%s: present=%v value=%d, want %v/%d", tc.name, present, got.IdleThresholdSeconds, tc.present, tc.want)
+		}
+		if tc.present {
+			full := baseValidSettings()
+			full.IdleThresholdSeconds = got.IdleThresholdSeconds
+			if ok := validateSettings(&full) == ""; ok != tc.valid {
+				t.Errorf("%s: valid=%v, want %v", tc.name, ok, tc.valid)
+			}
+		}
 	}
 }

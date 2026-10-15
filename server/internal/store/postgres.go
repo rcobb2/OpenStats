@@ -121,6 +121,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	INSERT INTO settings (key, value) VALUES ('heartbeat_interval_seconds', '120') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('update_interval_seconds', '3600') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('stale_timeout_days', '90') ON CONFLICT DO NOTHING;
+	INSERT INTO settings (key, value) VALUES ('idle_threshold_seconds', '900') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('min_agent_version', '0.1.7') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_start', '') ON CONFLICT DO NOTHING;
 	INSERT INTO settings (key, value) VALUES ('maintenance_window_end', '') ON CONFLICT DO NOTHING;
@@ -777,12 +778,15 @@ func (s *Store) GetAgentLabInfo(ctx context.Context, agentID string) (labName, b
 // --- System settings ---
 
 type SystemSettings struct {
-	HeartbeatIntervalSeconds int    `json:"heartbeatIntervalSeconds"`
-	UpdateIntervalSeconds    int    `json:"updateIntervalSeconds"`
-	StaleTimeoutDays         int    `json:"staleTimeoutDays"`
-	MinAgentVersion          string `json:"minAgentVersion"`
-	MaintenanceWindowStart   string `json:"maintenanceWindowStart"` // HH:mm
-	MaintenanceWindowEnd     string `json:"maintenanceWindowEnd"`   // HH:mm
+	HeartbeatIntervalSeconds int `json:"heartbeatIntervalSeconds"`
+	UpdateIntervalSeconds    int `json:"updateIntervalSeconds"`
+	StaleTimeoutDays         int `json:"staleTimeoutDays"`
+	// IdleThresholdSeconds: seconds without keyboard/mouse input before an agent
+	// stops counting foreground (active) time. 0 disables idle exclusion.
+	IdleThresholdSeconds   int    `json:"idleThresholdSeconds"`
+	MinAgentVersion        string `json:"minAgentVersion"`
+	MaintenanceWindowStart string `json:"maintenanceWindowStart"` // HH:mm
+	MaintenanceWindowEnd   string `json:"maintenanceWindowEnd"`   // HH:mm
 
 	// Staggered auto-update rollout. AutoUpdateEnabled is the master switch;
 	// RolloutMaxConcurrent bounds how many agents may be installing at once
@@ -807,6 +811,7 @@ func (s *Store) GetSettings(ctx context.Context) (*SystemSettings, error) {
 		HeartbeatIntervalSeconds: 120,
 		UpdateIntervalSeconds:    3600,
 		StaleTimeoutDays:         90,
+		IdleThresholdSeconds:     900,
 		MinAgentVersion:          "0.1.0",
 		MaintenanceWindowStart:   "22:00",
 		MaintenanceWindowEnd:     "04:00",
@@ -828,6 +833,8 @@ func (s *Store) GetSettings(ctx context.Context) (*SystemSettings, error) {
 			fmt.Sscanf(value, "%d", &settings.UpdateIntervalSeconds)
 		case "stale_timeout_days":
 			fmt.Sscanf(value, "%d", &settings.StaleTimeoutDays)
+		case "idle_threshold_seconds":
+			fmt.Sscanf(value, "%d", &settings.IdleThresholdSeconds)
 		case "min_agent_version":
 			settings.MinAgentVersion = value
 		case "maintenance_window_start":
@@ -860,6 +867,7 @@ func (s *Store) UpdateSettings(ctx context.Context, settings *SystemSettings) er
 		"heartbeat_interval_seconds": fmt.Sprintf("%d", settings.HeartbeatIntervalSeconds),
 		"update_interval_seconds":    fmt.Sprintf("%d", settings.UpdateIntervalSeconds),
 		"stale_timeout_days":         fmt.Sprintf("%d", settings.StaleTimeoutDays),
+		"idle_threshold_seconds":     fmt.Sprintf("%d", settings.IdleThresholdSeconds),
 		"min_agent_version":          settings.MinAgentVersion,
 		"maintenance_window_start":   settings.MaintenanceWindowStart,
 		"maintenance_window_end":     settings.MaintenanceWindowEnd,

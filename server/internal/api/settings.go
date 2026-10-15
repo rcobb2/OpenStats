@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"regexp"
 
@@ -66,7 +68,32 @@ func validateSettings(settings *store.SystemSettings) string {
 	if settings.MinAgentVersion != "" && !minAgentVersionPattern.MatchString(settings.MinAgentVersion) {
 		return `minAgentVersion must look like "0.1.10" (dotted numeric segments)`
 	}
+	// 0 disables idle exclusion; otherwise bounded to 1 minute .. 24 hours.
+	if s := settings.IdleThresholdSeconds; s != 0 && (s < 60 || s > 86400) {
+		return "idleThresholdSeconds must be 0 (disabled) or between 60 and 86400"
+	}
 	return ""
+}
+
+// decodeSettingsUpdate decodes a PUT body and reports whether
+// idleThresholdSeconds was present. An absent field must keep its stored value:
+// a client that predates it (or a stale page resubmitting an old object) would
+// otherwise decode it as 0, silently disabling idle exclusion.
+func decodeSettingsUpdate(body io.Reader) (settings store.SystemSettings, idlePresent bool, err error) {
+	raw, err := io.ReadAll(io.LimitReader(body, 1<<20))
+	if err != nil {
+		return settings, false, err
+	}
+	if err = json.Unmarshal(raw, &settings); err != nil {
+		return settings, false, err
+	}
+	var probe struct {
+		Idle *int `json:"idleThresholdSeconds"`
+	}
+	if err = json.Unmarshal(raw, &probe); err != nil {
+		return settings, false, err
+	}
+	return settings, probe.Idle != nil, nil
 }
 
 // UpdateSettings godoc
@@ -81,14 +108,33 @@ func validateSettings(settings *store.SystemSettings) string {
 // @Failure      500   {object}  map[string]string
 // @Router       /api/v1/settings [put]
 func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
-	var settings store.SystemSettings
-	if err := readJSON(r, &settings); err != nil {
+	defer r.Body.Close()
+	settings, idlePresent, err := decodeSettingsUpdate(r.Body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if msg := validateSettings(&settings); msg != "" {
-		writeError(w, http.StatusBadRequest, msg)
-		return
+	if idlePresent {
+		// Validate the supplied value; other fields are validated below.
+		if msg := validateSettings(&settings); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+	} else {
+		// Absent: validate everything else with a valid placeholder, then keep
+		// the stored value.
+		settings.IdleThresholdSeconds = 900
+		if msg := validateSettings(&settings); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		current, err := s.store.GetSettings(r.Context())
+		if err != nil {
+			s.logger.Error("failed to get settings", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to get settings")
+			return
+		}
+		settings.IdleThresholdSeconds = current.IdleThresholdSeconds
 	}
 
 	if err := s.store.UpdateSettings(r.Context(), &settings); err != nil {

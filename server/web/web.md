@@ -191,6 +191,9 @@ Base URL: `/api/v1` (proxied by server)
 #### Settings (`pages/agents/Settings.jsx`)
 - Fleet-wide configuration
 - Heartbeat interval
+- Idle threshold (minutes; stored as `idleThresholdSeconds`) — foreground time
+  stops counting after this long without input; `0` disables; valid 0 or 1..1440
+  min; needs agent 0.6.0+. `0` is honored (no `|| default` coercion)
 - Force agent version updates
 - Stale agent cleanup threshold — `0` is a valid, documented value meaning
   "never auto-delete" (see `runStaleChecker` in `cmd/server/main.go`); the
