@@ -15,6 +15,9 @@ export default function Settings() {
     targetAgentVersion: '',
   });
   const [loading, setLoading] = useState(true);
+  // Only true once getSettings() succeeded. Save PUTs the whole object, so the
+  // form must never be savable while it holds the hard-coded defaults.
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
@@ -26,9 +29,12 @@ export default function Settings() {
   }, []);
 
   const fetchSettings = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await getSettings();
       setSettings(data);
+      setLoaded(true);
     } catch (err) {
       setError("Failed to load settings: " + err.message);
     } finally {
@@ -38,6 +44,7 @@ export default function Settings() {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (!loaded) return;
     setSaving(true);
     setMessage(null);
     setError(null);
@@ -52,6 +59,16 @@ export default function Settings() {
   };
 
   if (loading) return <div className="loading">Loading settings…</div>;
+
+  if (!loaded) {
+    return (
+      <div className="settings-page">
+        <h2>Agent & Fleet Settings</h2>
+        {error && <div className="error-banner">{error}</div>}
+        <button type="button" onClick={fetchSettings}>Retry</button>
+      </div>
+    );
+  }
 
   return (
     <div className="settings-page">
