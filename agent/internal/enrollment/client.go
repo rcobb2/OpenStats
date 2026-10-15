@@ -101,6 +101,11 @@ type Client struct {
 	// registration (startup and each heartbeat).
 	onSettings func(*SystemSettings)
 
+	// beginDelivery/delivered let the metrics layer tie zero-baseline release
+	// to pushes the server actually accepted (see metrics.BaselineCounterVec).
+	beginDelivery func() uint64
+	delivered     func(token uint64)
+
 	// maintenanceOverrideDir, when set, is where inMaintenanceWindow looks for
 	// a marker file written by the `setmaintenance` CLI command (see
 	// ReadMaintenanceOverride). Empty disables the override entirely — the
@@ -215,6 +220,16 @@ func NewClient(serverURL string, agentPort int, building, room string, logger *s
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+// WithMetricsDeliveryHooks registers callbacks around PushMetrics. begin runs
+// before the local /metrics GET so its token marks what the pushed body can
+// contain; delivered runs with that token only after the server answered 2xx.
+// Hooks (rather than a metrics import) keep this package free of an import cycle.
+func (c *Client) WithMetricsDeliveryHooks(begin func() uint64, delivered func(token uint64)) *Client {
+	c.beginDelivery = begin
+	c.delivered = delivered
+	return c
 }
 
 // WithOSVersion sets the OS version string included in registration payloads.
@@ -454,6 +469,10 @@ func (c *Client) isTrustedUpdateHost(host string) bool {
 // to the server. This lets the server aggregate metrics from all agents and
 // expose them to Prometheus, bypassing any network firewall blocking port 9183.
 func (c *Client) PushMetrics(ctx context.Context) error {
+	var token uint64
+	if c.beginDelivery != nil {
+		token = c.beginDelivery()
+	}
 	localURL := fmt.Sprintf("http://localhost:%d/metrics", c.port)
 	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, localURL, nil)
 	if err != nil {
@@ -485,6 +504,9 @@ func (c *Client) PushMetrics(ctx context.Context) error {
 	defer pushResp.Body.Close()
 	if pushResp.StatusCode != http.StatusNoContent && pushResp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned %d", pushResp.StatusCode)
+	}
+	if c.delivered != nil {
+		c.delivered(token)
 	}
 	return nil
 }

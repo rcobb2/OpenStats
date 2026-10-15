@@ -4,6 +4,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -39,6 +42,14 @@ type Metrics struct {
 
 	baselines []*BaselineCounterVec
 	handler   http.Handler
+
+	// Push-mode release state (see baseline.go).
+	pushMode      atomic.Bool
+	deliveryMu    sync.Mutex
+	hold          time.Duration
+	deliveryID    uint64
+	deliverySnaps map[uint64][]uint64
+	now           func() time.Time // test clock; nil means time.Now
 }
 
 // New creates and registers all Prometheus metrics with the default (global) registry.

@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -163,3 +165,63 @@ func TestRegisterDecodesIdleThresholdAndInvokesHandler(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+// pushHarness stands up a fake local /metrics endpoint and a fake server and
+// returns a client wired to both, plus the ordered event log the hooks and
+// handlers append to.
+func pushHarness(t *testing.T, serverStatus int, serverDown bool) (*Client, *[]string) {
+	t.Helper()
+	var events []string
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		events = append(events, "get")
+		w.Write([]byte("m 0\n"))
+	}))
+	t.Cleanup(local.Close)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		events = append(events, "post")
+		w.WriteHeader(serverStatus)
+	}))
+	t.Cleanup(srv.Close)
+	serverURL := srv.URL
+	if serverDown {
+		srv.Close()
+	}
+	u, _ := url.Parse(local.URL)
+	port, _ := strconv.Atoi(u.Port())
+	c := NewClient(serverURL, port, "", "", testLogger()).
+		WithMetricsDeliveryHooks(
+			func() uint64 { events = append(events, "begin"); return 42 },
+			func(tok uint64) { events = append(events, "delivered:"+strconv.FormatUint(tok, 10)) },
+		)
+	return c, &events
+}
+
+func TestPushMetricsDeliveryHooksOnSuccess(t *testing.T) {
+	for _, status := range []int{http.StatusNoContent, http.StatusOK} {
+		c, events := pushHarness(t, status, false)
+		if err := c.PushMetrics(context.Background()); err != nil {
+			t.Fatalf("status %d: %v", status, err)
+		}
+		if got := strings.Join(*events, ","); got != "begin,get,post,delivered:42" {
+			t.Errorf("status %d: events = %s", status, got)
+		}
+	}
+}
+
+func TestPushMetricsNoDeliveryOnFailure(t *testing.T) {
+	c, events := pushHarness(t, http.StatusInternalServerError, false)
+	if err := c.PushMetrics(context.Background()); err == nil {
+		t.Fatal("expected error on non-2xx")
+	}
+	if got := strings.Join(*events, ","); got != "begin,get,post" {
+		t.Errorf("non-2xx events = %s (delivered must not fire)", got)
+	}
+
+	c, events = pushHarness(t, http.StatusNoContent, true)
+	if err := c.PushMetrics(context.Background()); err == nil {
+		t.Fatal("expected error when POST fails")
+	}
+	if got := strings.Join(*events, ","); got != "begin,get" {
+		t.Errorf("POST error events = %s (delivered must not fire)", got)
+	}
+}
