@@ -122,6 +122,11 @@ func (w *PollWatcher) isExcluded(exeName, exePath string) bool {
 			return true
 		}
 	}
+	// The session helper is our own binary running as the user (via
+	// launchctl asuser); it is not application usage (see selfexclude.go).
+	if isAgentProcess(exeName, exePath) {
+		return true
+	}
 	return isSystemPath(exePath)
 }
 

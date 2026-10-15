@@ -39,9 +39,11 @@ func newTestTracker(t *testing.T) (*Tracker, *metrics.Metrics) {
 	return tr, m
 }
 
-func counter(t *testing.T, cv *prometheus.CounterVec, labels ...string) float64 {
+func counter(t *testing.T, cv *metrics.BaselineCounterVec, labels ...string) float64 {
 	t.Helper()
-	c, err := cv.GetMetricWithLabelValues(labels...)
+	// Pending amounts sit behind a zero baseline until a scrape releases them.
+	cv.ReleasePending()
+	c, err := cv.Vec().GetMetricWithLabelValues(labels...)
 	if err != nil {
 		t.Fatalf("GetMetricWithLabelValues(%v): %v", labels, err)
 	}

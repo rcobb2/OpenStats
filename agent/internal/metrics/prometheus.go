@@ -2,9 +2,11 @@ package metrics
 
 import (
 	"log/slog"
+	"net/http"
 	"os"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const namespace = "openlabstats"
@@ -21,69 +23,73 @@ func init() {
 
 // Metrics holds all Prometheus metric collectors for the agent.
 type Metrics struct {
-	AppUsageSeconds         *prometheus.CounterVec
-	AppForegroundSeconds    *prometheus.CounterVec
-	AppLaunches             *prometheus.CounterVec
+	AppUsageSeconds         *BaselineCounterVec
+	AppForegroundSeconds    *BaselineCounterVec
+	AppLaunches             *BaselineCounterVec
 	AppActive               *prometheus.GaugeVec
-	PrivilegeElevations     *prometheus.CounterVec
+	PrivilegeElevations     *BaselineCounterVec
 	UserSessionActive       *prometheus.GaugeVec
 	UserSessionDuration     *prometheus.GaugeVec
-	UserSessionLogins       *prometheus.CounterVec
-	UserSessionSecondsTotal *prometheus.CounterVec
+	UserSessionLogins       *BaselineCounterVec
+	UserSessionSecondsTotal *BaselineCounterVec
 	DeviceInfo              *prometheus.GaugeVec
 	InstalledSoftware       *prometheus.GaugeVec
-	ForegroundIdleSeconds   *prometheus.CounterVec
+	ForegroundIdleSeconds   *BaselineCounterVec
 	SessionHelpersConnected *prometheus.GaugeVec
+
+	baselines []*BaselineCounterVec
+	handler   http.Handler
 }
 
 // New creates and registers all Prometheus metrics with the default (global) registry.
 func New() *Metrics {
-	return newMetrics(prometheus.DefaultRegisterer)
+	return newMetrics(prometheus.DefaultRegisterer, prometheus.DefaultGatherer)
 }
 
 // NewForTest creates metrics backed by a fresh private registry so that
 // concurrent test runs don't collide with the global registry.
 func NewForTest() *Metrics {
-	return newMetrics(prometheus.NewRegistry())
+	reg := prometheus.NewRegistry()
+	return newMetrics(reg, reg)
 }
 
-func newMetrics(reg prometheus.Registerer) *Metrics {
+func newMetrics(reg prometheus.Registerer, gatherer prometheus.Gatherer) *Metrics {
 	// Note: app+user+hostname label combination creates series proportional to
 	// (apps × users × machines). For typical lab deployments (50 apps, 500 users,
 	// 100 machines) this stays under 2.5M series. Monitor Prometheus heap if scaling beyond that.
 	m := &Metrics{
-		AppUsageSeconds: prometheus.NewCounterVec(
+		AppUsageSeconds: NewBaselineCounterVec(prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "app_usage_seconds_total",
 				Help:      "Total seconds an application has been running.",
 			},
 			[]string{"app", "exe", "category", "user", "hostname"},
-		),
-		AppForegroundSeconds: prometheus.NewCounterVec(
+		)),
+		AppForegroundSeconds: NewBaselineCounterVec(prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "app_foreground_seconds_total",
 				Help:      "Total seconds an application has been actively in the foreground.",
 			},
 			[]string{"app", "exe", "category", "user", "hostname"},
-		),
-		AppLaunches: prometheus.NewCounterVec(
+		)),
+		AppLaunches: NewBaselineCounterVec(prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "app_launches_total",
 				Help:      "Total number of times an application has been launched.",
 			},
 			[]string{"app", "exe", "category", "user", "hostname"},
-		),
-		PrivilegeElevations: prometheus.NewCounterVec(
+		)),
+		PrivilegeElevations: NewBaselineCounterVec(prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "privilege_elevations_total",
 				Help:      "Total number of privilege-elevation launches: UAC-elevated processes on Windows, root escalations (sudo, admin authorization) on macOS.",
 			},
 			[]string{"app", "exe", "category", "user", "hostname"},
-		),
+		)),
 		AppActive: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
@@ -108,22 +114,22 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 			},
 			[]string{"user", "hostname"},
 		),
-		UserSessionLogins: prometheus.NewCounterVec(
+		UserSessionLogins: NewBaselineCounterVec(prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "user_session_logins_total",
 				Help:      "Total number of user login sessions.",
 			},
 			[]string{"user", "hostname"},
-		),
-		UserSessionSecondsTotal: prometheus.NewCounterVec(
+		)),
+		UserSessionSecondsTotal: NewBaselineCounterVec(prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "user_session_seconds_total",
 				Help:      "Total seconds users have been signed in.",
 			},
 			[]string{"user", "hostname"},
-		),
+		)),
 		DeviceInfo: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
@@ -140,14 +146,14 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 			},
 			[]string{"name", "version", "publisher", "hostname"},
 		),
-		ForegroundIdleSeconds: prometheus.NewCounterVec(
+		ForegroundIdleSeconds: NewBaselineCounterVec(prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "foreground_idle_seconds_total",
 				Help:      "Seconds a foreground window was present but the user had been idle past the idle threshold (not credited as foreground time).",
 			},
 			[]string{"hostname"},
-		),
+		)),
 		SessionHelpersConnected: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
@@ -159,20 +165,31 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 	}
 
 	reg.MustRegister(
+		m.AppUsageSeconds.Vec(),
+		m.AppForegroundSeconds.Vec(),
+		m.AppLaunches.Vec(),
+		m.AppActive,
+		m.PrivilegeElevations.Vec(),
+		m.UserSessionActive,
+		m.UserSessionDuration,
+		m.UserSessionLogins.Vec(),
+		m.UserSessionSecondsTotal.Vec(),
+		m.DeviceInfo,
+		m.InstalledSoftware,
+		m.ForegroundIdleSeconds.Vec(),
+		m.SessionHelpersConnected,
+	)
+
+	m.baselines = []*BaselineCounterVec{
 		m.AppUsageSeconds,
 		m.AppForegroundSeconds,
 		m.AppLaunches,
-		m.AppActive,
 		m.PrivilegeElevations,
-		m.UserSessionActive,
-		m.UserSessionDuration,
 		m.UserSessionLogins,
 		m.UserSessionSecondsTotal,
-		m.DeviceInfo,
-		m.InstalledSoftware,
 		m.ForegroundIdleSeconds,
-		m.SessionHelpersConnected,
-	)
+	}
+	m.handler = promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
 
 	return m
 }

@@ -180,7 +180,7 @@ func (t *Tracker) apply(current map[SessionKey]Session, now time.Time) {
 		// Sessions already open at startup are adopted, not counted: they are not
 		// new logons, and counting them would resurrect the restart-inflation bug.
 		if t.seeded {
-			t.metrics.UserSessionLogins.WithLabelValues(canonical, t.hostname).Inc()
+			t.metrics.UserSessionLogins.Inc(canonical, t.hostname)
 			t.logger.Info("user session started", "user", canonical, "session", s.ID)
 		} else {
 			t.logger.Info("adopted existing user session", "user", canonical, "session", s.ID,
@@ -215,7 +215,7 @@ func (t *Tracker) accrueLocked(now time.Time) {
 			continue
 		}
 		elapsed := gap.Seconds()
-		t.metrics.UserSessionSecondsTotal.WithLabelValues(canonical, t.hostname).Add(elapsed)
+		t.metrics.UserSessionSecondsTotal.Add(elapsed, canonical, t.hostname)
 	}
 }
 

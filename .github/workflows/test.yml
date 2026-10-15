@@ -267,21 +267,26 @@ jobs:
         run: |
           source /tmp/agent-smoke/lib.sh
           # sudo sleep 60 (previous step) is still alive here. Restart the
-          # agent and confirm the counter comes back at the same value —
-          # ScanExistingProcesses / the startup snapshot must adopt it, not
+          # agent: counters are deliberately not restored at startup, so the
+          # series starts from zero, and ScanExistingProcesses / the startup
+          # snapshot must adopt the still-running elevated process, not
           # recount it (see the "adopt, don't count" fix in this branch).
           before=$(cat /tmp/agent-smoke/count-before-restart.txt)
           kill_agent_and_wait
           launch_agent
-          sleep 3
-          after=$(get_elevation_count)
-          echo "before restart: $before, after restart: $after"
-          # sudo sleep 60 is still running (only ~10-20s elapsed) and must be
-          # adopted, not recounted — restored from SQLite, so exactly equal.
-          if [ "$after" != "$before" ]; then
-            echo "restart must not have re-counted the already-elevated process"
-            exit 1
-          fi
+          # Poll across several scrape cycles: new label sets are held at a
+          # zero baseline until a scrape has served the 0, so a wrongly
+          # recounted process would show up as a non-zero value within a few
+          # scrapes. It must stay 0 (or absent) the whole time.
+          for i in $(seq 1 8); do
+            sleep 1
+            after=$(get_elevation_count)
+            echo "before restart: $before, after restart (poll $i): $after"
+            if [ "$after" != "0" ]; then
+              echo "restart must not have re-counted the already-elevated process"
+              exit 1
+            fi
+          done
 
       - name: Dump logs on failure
         if: failure()

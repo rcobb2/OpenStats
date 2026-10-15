@@ -70,11 +70,11 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 			}
 
 			for key, seconds := range usageSeconds {
-				m.AppUsageSeconds.WithLabelValues(key.DisplayName, key.ExeName, key.Category, key.User, hostname).Add(seconds)
+				m.AppUsageSeconds.Add(seconds, key.DisplayName, key.ExeName, key.Category, key.User, hostname)
 			}
 			for key, seconds := range foregroundSeconds {
 				if seconds > 0 {
-					m.AppForegroundSeconds.WithLabelValues(key.DisplayName, key.ExeName, key.Category, key.User, hostname).Add(seconds)
+					m.AppForegroundSeconds.Add(seconds, key.DisplayName, key.ExeName, key.Category, key.User, hostname)
 				}
 			}
 		}
@@ -250,11 +250,10 @@ func startForegroundTracking(ctx context.Context, tracker *monitor.Tracker, m *m
 		}
 	}()
 
-	idleCounter := m.ForegroundIdleSeconds.WithLabelValues(hostname)
 	go monitor.RunForegroundPoller(ctx, tracker, monitor.ForegroundPollerConfig{
 		Interval:      1 * time.Second,
 		Source:        hub.Fresh,
 		IdleThreshold: idle.Get,
-		OnIdle:        func(d time.Duration) { idleCounter.Add(d.Seconds()) },
+		OnIdle:        func(d time.Duration) { m.ForegroundIdleSeconds.Add(d.Seconds(), hostname) },
 	}, logger)
 }
