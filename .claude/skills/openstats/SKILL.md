@@ -158,7 +158,7 @@ merged under `SEEN AS`.
 Agent versions appear in `agents list` and lag the server: agents self-update
 only inside the fleet maintenance window, so a freshly deployed server routinely
 sits alongside agents on an older release. A `version` field of `0.1.3` is a
-known cosmetic artifact of the deploy playbook not passing `VERSION`; trust the
+known cosmetic artifact of the image build (`build.yml`) not passing `VERSION`; trust the
 commit hash instead.
 
 ## Where things live

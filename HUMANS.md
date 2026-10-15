@@ -130,9 +130,10 @@ cd server && docker-compose up -d
 
 ### Production
 
-Production runs on **podman02**. Deploys go through the **Ansible playbook in the separate
-infra repo** — don't build or restart containers on the host by hand. The configs the
-playbook consumes live in `deploy/podman02/`.
+Production runs on **podman02**. Deploys go through the GitHub Action in the private
+`rcobb2/OpenStats-deploy` repo: merging to `master` builds an image tagged with the commit
+SHA, and bumping `Image=` in that repo's `units/openstats-server.container` and pushing to
+`main` deploys it. Don't build or restart containers on the host by hand.
 
 ## Metrics Reference
 

@@ -205,8 +205,9 @@ cd server
 docker-compose up -d
 ```
 
-Production runs on **podman02** and is deployed by the **Ansible playbook in the separate
-infra repo** — not by running compose on the host. See the Deployment section in
+Production runs on **podman02** and is deployed by the GitHub Action in the private
+`rcobb2/OpenStats-deploy` repo (image tag bump pushed to `main`) — not by running compose
+on the host. See the Deployment section in
 `CLAUDE.md`/`AGENTS.md`.
 
 ## Database Schema

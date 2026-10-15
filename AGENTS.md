@@ -217,24 +217,23 @@ hand-run `podman-compose`/`--build` command, against the production host.
 
 ### Deploying to Production
 
-Production runs on **podman02**. Deployment is owned by the **Ansible playbook in the
-separate infra repo** — do not build, pull, or restart containers on the host directly.
+Production runs on **podman02**. Deployment is owned by the **GitHub Action in the private
+`rcobb2/OpenStats-deploy` repo** — do not build, pull, or restart containers on the host directly.
 
-```
-# Run the OpenStats playbook from the Ansible control node.
-# TODO: replace with the exact invocation from the infra repo.
-ansible-playbook <infra-repo>/<playbook>.yml --limit podman02
-```
+1. Merge to `master`; `build.yml` publishes `ghcr.io/rcobb2/openstats-server:<full commit SHA>`.
+2. In `OpenStats-deploy`, set `Image=` in `units/openstats-server.container` to that SHA.
+3. Push to `main` — that push triggers the deploy (restarts `openstats-server` and
+   `openstats-prometheus`).
+4. Confirm with `openstatsctl version` (`commit` field).
 
 Rules for agents:
-- **Never** ssh to podman02 to run `git pull`, `podman-compose up --build`, or
-  `systemctl restart openstats-compose`. The playbook does all of it.
-- Do not instruct the user to rebuild on the host. Point them at the playbook.
-- `deploy/podman02/` holds the compose file, `server.yaml`, nginx block, systemd unit
-  and Bitwarden secret map that the playbook consumes. Change these in git; the
-  playbook is what puts them on the host.
-- After merging a server change, the deploy is a separate step the operator runs — say
-  so explicitly rather than implying the change is live.
+- **Never** ssh to podman02 to pull, build or restart anything.
+- Pushing to `OpenStats-deploy` `main` restarts production — confirm with the user first.
+- Prometheus config changes (`server/prometheus/*.yml`) must also be copied into
+  `OpenStats-deploy/prometheus/` to go live.
+- `deploy/podman02/` is not read by the deploy workflow.
+- After merging a server change, the deploy is a separate step — say so explicitly
+  rather than implying the change is live.
 
 ### Running Tests
 
