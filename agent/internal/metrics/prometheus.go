@@ -32,6 +32,8 @@ type Metrics struct {
 	UserSessionSecondsTotal *prometheus.CounterVec
 	DeviceInfo              *prometheus.GaugeVec
 	InstalledSoftware       *prometheus.GaugeVec
+	ForegroundIdleSeconds   *prometheus.CounterVec
+	SessionHelpersConnected *prometheus.GaugeVec
 }
 
 // New creates and registers all Prometheus metrics with the default (global) registry.
@@ -138,6 +140,22 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 			},
 			[]string{"name", "version", "publisher", "hostname"},
 		),
+		ForegroundIdleSeconds: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "foreground_idle_seconds_total",
+				Help:      "Seconds a foreground window was present but the user had been idle past the idle threshold (not credited as foreground time).",
+			},
+			[]string{"hostname"},
+		),
+		SessionHelpersConnected: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: namespace,
+				Name:      "session_helpers_connected",
+				Help:      "Number of per-session helper processes currently delivering fresh foreground/idle samples.",
+			},
+			[]string{"hostname"},
+		),
 	}
 
 	reg.MustRegister(
@@ -152,6 +170,8 @@ func newMetrics(reg prometheus.Registerer) *Metrics {
 		m.UserSessionSecondsTotal,
 		m.DeviceInfo,
 		m.InstalledSoftware,
+		m.ForegroundIdleSeconds,
+		m.SessionHelpersConnected,
 	)
 
 	return m

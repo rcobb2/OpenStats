@@ -31,6 +31,14 @@ Defines all Prometheus metrics exposed by the agent:
 | `openlabstats_user_session_seconds_total` | Counter | user, hostname |
 | `openlabstats_device_info` | Gauge | hostname, os_version, os_build, domain |
 | `openlabstats_installed_software_info` | Gauge | name, version, publisher, hostname |
+| `openlabstats_foreground_idle_seconds_total` | Counter | hostname |
+| `openlabstats_session_helpers_connected` | Gauge | hostname |
+
+`foreground_idle_seconds_total` is time a foreground window was present but the
+user had been idle past the idle threshold (not credited to any app).
+`session_helpers_connected` is the number of session helpers delivering fresh
+samples; 0 on a Windows machine with someone signed in means foreground time is
+not being measured.
 
 ### `internal/monitor/wmi.go`
 
@@ -164,8 +172,7 @@ Both platforms share these properties:
 - Processes already elevated when the agent starts are adopted, not counted
   (`ScanExistingProcesses` doesn't run the check), so a restart never
   manufactures elevation events.
-- Persisted in SQLite (`app_usage_totals.total_elevations`) and restored across
-  restarts like the other app counters.
+- Not persisted: like every other counter it restarts from 0 with the agent.
 
 **Known limitation (Windows):** `OpenProcess` intermittently fails with
 "The parameter is incorrect" for some short-lived or MSIX-packaged
@@ -255,12 +262,49 @@ and is kept for tests.
   3. Aliases, most specific first (exact before wildcard, then longer pattern, then lexical): tracked under the alias's canonical.
   4. Otherwise tracked under its canonical form.
 
-### `internal/monitor/foreground.go`
+### Foreground time, idle detection and the session helper
 
-Foreground window polling:
-- Polls `GetForegroundWindow` Win32 API
-- Maps window handle to process
-- Reports foreground delta per process group
+`internal/session/` (samples, hub, supervisor, helper) and
+`internal/monitor/foreground_poller.go` (crediting).
+
+**Why a helper.** The Windows service runs in session 0, whose
+`GetForegroundWindow` cannot see a user's desktop; a macOS root LaunchDaemon is
+outside the console user's GUI session, so `CGWindowListCopyWindowInfo` badly
+undercounts. Neither can read input idle time either. So the service launches a
+copy of its own binary as `openlabstats-agent session-helper [--uid N]` inside
+each user session. Every 5s the helper writes one JSON line to stdout,
+`{"pid":<foreground pid>,"idleMs":<ms since last input>}`, and exits when a
+write fails. It never reads `agent.yaml` or opens the agent log.
+
+- **Windows**: foreground via `GetForegroundWindow`; idle via `GetLastInputInfo`
+  vs `GetTickCount` (uint32 subtraction, so tick wraparound is safe). The
+  supervisor reconciles every 30s: each `WTSActive` session with a user gets a
+  helper started via `WTSQueryUserToken` + `CreateProcessAsUser` on
+  `winsta0\default`. stdout is an anonymous pipe inherited only by that child
+  (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), so the pipe's identity is the session
+  it was launched into. Helpers are assigned to a kill-on-close job object,
+  so they die with the service and never lock the exe during an MSI upgrade.
+  A sample's PID must belong to the helper's session (`ProcessIdToSessionId`).
+- **macOS**: only the console user (`/dev/console` owner; uid 0 = login
+  window = none). Spawned as `launchctl asuser <uid> <exe> session-helper --uid
+  <uid>`, then the helper drops root to that user (WindowServer rejects other
+  uids). Idle via IOKit `IOHIDSystem` `HIDIdleTime`. A sample's PID must be
+  owned by the helper's uid.
+- **Restarts**: at most one spawn per session per 30s; 5 consecutive exits
+  within 10s back off to 10 minutes (one Warn). If the agent lacks privilege
+  (console/test mode) it logs one Warn and stops trying.
+- **Fallback**: when no helper has delivered a sample in the last 15s the poller
+  uses the old in-process lookup, with no idle information.
+
+**Crediting.** Each 1s tick, every fresh sample (one per session, so several RDP
+sessions each credit their own foreground app) is credited the elapsed time,
+unless its idle time is at or above the threshold, in which case the time goes
+to `openlabstats_foreground_idle_seconds_total` instead. A tick gap over 4x the
+interval (sleep/suspend) credits nothing.
+
+**Idle threshold.** `monitor.idleThreshold` (default 15m); the server's
+`idleThresholdSeconds` in the registration settings overrides it (absent =
+keep config, 0 = disabled).
 
 ### `internal/normalizer/`
 
@@ -288,11 +332,11 @@ Server communication:
 - `FetchUserPolicy()` - GET `/api/v1/users/policy`, called once at startup so
   already-running processes are attributed correctly before the first heartbeat
 
-### `internal/store/sqlite.go`
+### No local persistence
 
-Local persistence:
-- Stores completed sessions for metric restoration on restart
-- Schema: sessions table with app, user, timestamps, foreground time
+Counters are not restored at startup. Prometheus treats a counter that restarts
+from 0 as a normal reset; restoring a lower persisted total made it look like a
+reset and counted the whole restored value as new usage.
 
 ## Configuration (`configs/agent.yaml`)
 
@@ -305,6 +349,7 @@ server:
 monitor:
   reconcileInterval: 30s  # Checkpoint interval
   minLifetime: 2s         # Ignore processes shorter than this
+  idleThreshold: 15m      # No input for this long = foreground time not credited (server can override; 0 from server disables)
   excludePatterns:        # Regex patterns to skip
 
 normalizer:
@@ -314,9 +359,6 @@ normalizer:
 
 inventory:
   scanInterval: 1h
-
-store:
-  dbPath: data/openlabstats.db
 
 logging:
   level: info

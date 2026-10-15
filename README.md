@@ -175,6 +175,8 @@ The central server (future) can push AI-informed mappings down to agents.
 | `openlabstats_user_session_duration_seconds` | Gauge | Current session duration |
 | `openlabstats_device_info` | Gauge | Device metadata labels |
 | `openlabstats_installed_software_info` | Gauge | Installed software inventory |
+| `openlabstats_foreground_idle_seconds_total` | Counter | Seconds a window was focused but the user was idle past the idle threshold (not counted as foreground time) |
+| `openlabstats_session_helpers_connected` | Gauge | Per-session helpers currently delivering foreground/idle samples |
 
 ## Grafana Dashboard
 

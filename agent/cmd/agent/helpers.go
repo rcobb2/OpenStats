@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/rcobb/openlabstats-agent/internal/enrollment"
@@ -11,6 +12,7 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/metrics"
 	"github.com/rcobb/openlabstats-agent/internal/monitor"
 	"github.com/rcobb/openlabstats-agent/internal/normalizer"
+	"github.com/rcobb/openlabstats-agent/internal/session"
 	"github.com/rcobb/openlabstats-agent/internal/userid"
 )
 
@@ -191,4 +193,68 @@ func resolveUser(raw string) (string, bool) {
 func isValidUser(user string) bool {
 	_, ignored := builtinUserPolicy.Resolve(user)
 	return !ignored
+}
+
+// idleThreshold is the live idle cutoff. It starts at the configured value and
+// is overridden by the server's idleThresholdSeconds on every registration, so
+// an admin change applies without restarting agents.
+type idleThreshold struct {
+	configured time.Duration
+	current    atomic.Int64 // time.Duration
+	logger     *slog.Logger
+}
+
+func newIdleThreshold(configured time.Duration, logger *slog.Logger) *idleThreshold {
+	t := &idleThreshold{configured: configured, logger: logger}
+	t.current.Store(int64(configured))
+	return t
+}
+
+// Get returns the current threshold; 0 means idle exclusion is disabled.
+func (t *idleThreshold) Get() time.Duration { return time.Duration(t.current.Load()) }
+
+// Apply folds the server's settings in. An absent value (older server) means
+// the local config value; 0 disables idle exclusion.
+func (t *idleThreshold) Apply(s *enrollment.SystemSettings) {
+	next := t.configured
+	if s.IdleThresholdSeconds != nil {
+		next = time.Duration(*s.IdleThresholdSeconds) * time.Second
+	}
+	if next < 0 {
+		next = 0
+	}
+	if old := time.Duration(t.current.Swap(int64(next))); old != next {
+		t.logger.Info("idle threshold changed", "old", old, "new", next)
+	}
+}
+
+// startForegroundTracking starts the session-helper supervisor, the helper
+// health gauge, and the foreground poller that consumes the helpers' samples.
+func startForegroundTracking(ctx context.Context, tracker *monitor.Tracker, m *metrics.Metrics, idle *idleThreshold, logger *slog.Logger) {
+	hub := session.NewHub()
+	go session.NewSupervisor(hub, logger).Run(ctx)
+
+	hostname := metrics.Hostname()
+	connected := m.SessionHelpersConnected.WithLabelValues(hostname)
+	connected.Set(0)
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				connected.Set(float64(hub.Connected()))
+			}
+		}
+	}()
+
+	idleCounter := m.ForegroundIdleSeconds.WithLabelValues(hostname)
+	go monitor.RunForegroundPoller(ctx, tracker, monitor.ForegroundPollerConfig{
+		Interval:      1 * time.Second,
+		Source:        hub.Fresh,
+		IdleThreshold: idle.Get,
+		OnIdle:        func(d time.Duration) { idleCounter.Add(d.Seconds()) },
+	}, logger)
 }

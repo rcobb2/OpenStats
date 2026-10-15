@@ -6,13 +6,18 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/rcobb/openlabstats-agent/internal/config"
 	"github.com/rcobb/openlabstats-agent/internal/enrollment"
 	"github.com/rcobb/openlabstats-agent/internal/logrotate"
 	"github.com/rcobb/openlabstats-agent/internal/service"
+	"github.com/rcobb/openlabstats-agent/internal/session"
 )
 
 func main() {
@@ -70,6 +75,12 @@ func main() {
 		case "help":
 			printUsage()
 			return
+
+		case "session-helper":
+			// Handled before config loading and logging on purpose: the
+			// helper runs as an ordinary user, which can't read the agent's
+			// config or write its log, and stdout is a data channel.
+			os.Exit(runSessionHelper(os.Args[2:]))
 		}
 	}
 
@@ -276,6 +287,7 @@ Commands:
   maintenancewindow    Print maintenance window status
   setmaintenance <val> Set maintenance override (true/false/auto)
   status               Print full agent status
+  session-helper       (internal) report foreground/idle samples for one user session
   help                 Show this help message
 
 Options:
@@ -324,4 +336,49 @@ func setupLogger(cfg *config.Config) *slog.Logger {
 		Level: level,
 	})
 	return slog.New(handler)
+}
+
+// runSessionHelper is `session-helper [--uid N]`: it runs inside a user's
+// session and writes one JSON sample line to stdout every 5s until the pipe to
+// the service breaks. It returns the process exit status.
+func runSessionHelper(args []string) int {
+	uid := -1
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--uid" && i+1 < len(args) {
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n <= 0 {
+				fmt.Fprintf(os.Stderr, "session-helper: invalid --uid %q\n", args[i+1])
+				return 2
+			}
+			uid = n
+			i++
+		}
+	}
+	if uid > 0 {
+		// Must happen before the first WindowServer call; aborts rather than
+		// continuing as root if any step fails.
+		if err := session.DropToUID(uid); err != nil {
+			fmt.Fprintf(os.Stderr, "session-helper: dropping privileges: %v\n", err)
+			return 1
+		}
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// Exit once orphaned. A failed write already ends the helper, but if the
+	// service died and something else still held the pipe open, nothing would
+	// ever fail. On macOS an orphan is re-parented to launchd, changing its
+	// ppid; on Windows the service's kill-on-close job object covers this.
+	parent := os.Getppid()
+	go func() {
+		t := time.NewTicker(session.HelperInterval)
+		defer t.Stop()
+		for range t.C {
+			if os.Getppid() != parent {
+				stop()
+				return
+			}
+		}
+	}()
+	_ = session.RunHelper(ctx, os.Stdout, session.HelperInterval, session.ForegroundPID, session.IdleTime)
+	return 0
 }

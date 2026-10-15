@@ -32,11 +32,13 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Create the enrollment client first and pull the user policy before any
 		// metrics are restored or processes are scanned, so nothing is ever
 		// recorded under an ignored or non-canonical username.
+		idle := newIdleThreshold(cfg.Monitor.IdleThreshold, logger)
 		var enrollClient *enrollment.Client
 		if cfg.Server.ReportURL != "" {
 			enrollClient = enrollment.NewClient(cfg.Server.ReportURL, cfg.Server.Port, cfg.Monitor.Building, cfg.Monitor.Room, logger).
 				WithOSVersion("macOS " + getOSVersionDarwin()).
 				WithUserPolicyHandler(func(p *enrollment.UserPolicy) { applyUserPolicy(p, logger) }).
+				WithSettingsHandler(idle.Apply).
 				WithMaintenanceOverrideDir(cfg.BaseDir)
 			bootstrapUserPolicy(ctx, enrollClient, logger)
 		} else {
@@ -118,8 +120,9 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// edges tight without polling the session APIs hard.
 		go newLogonTracker(m, logger).Run(ctx, 15*time.Second)
 
-		// Start foreground window poller.
-		go monitor.RunForegroundPoller(ctx, tracker, 1*time.Second, logger)
+		// Start foreground tracking: per-session helpers (which can see the
+		// user's desktop and input idle time) plus the poller that credits them.
+		startForegroundTracking(ctx, tracker, m, idle, logger)
 
 		// Start inventory scanner in background.
 		invScanner := inventory.NewScanner(logger)
