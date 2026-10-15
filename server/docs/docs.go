@@ -2276,6 +2276,10 @@ const docTemplate = `{
                 "heartbeatIntervalSeconds": {
                     "type": "integer"
                 },
+                "idleThresholdSeconds": {
+                    "description": "IdleThresholdSeconds: seconds without keyboard/mouse input before an agent\nstops counting foreground (active) time. 0 disables idle exclusion.",
+                    "type": "integer"
+                },
                 "maintenanceWindowEnd": {
                     "description": "HH:mm",
                     "type": "string"

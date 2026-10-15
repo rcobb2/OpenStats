@@ -6,6 +6,7 @@ export default function Settings() {
     heartbeatIntervalSeconds: 120,
     updateIntervalSeconds: 3600,
     staleTimeoutDays: 90,
+    idleThresholdSeconds: 900,
     minAgentVersion: '0.1.0',
     maintenanceWindowStart: '',
     maintenanceWindowEnd: '',
@@ -88,6 +89,26 @@ export default function Settings() {
               type="number" 
               value={settings.heartbeatIntervalSeconds} 
               onChange={e => setSettings({...settings, heartbeatIntervalSeconds: parseInt(e.target.value) || 120})} 
+            />
+          </label>
+        </section>
+
+        <section>
+          <h3>Activity</h3>
+          <label>
+            Idle threshold (minutes)
+            <p className="hint">Foreground (active) time stops counting after this long without keyboard or mouse input. 0 disables. Requires agent 0.6.0+.</p>
+            <input
+              type="number"
+              min="0"
+              max="1440"
+              step="1"
+              value={Math.round((settings.idleThresholdSeconds ?? 900) / 60)}
+              onChange={e => {
+                // 0 is valid (disables idle exclusion), so don't use `|| default`.
+                const n = parseInt(e.target.value, 10);
+                setSettings({...settings, idleThresholdSeconds: isNaN(n) ? 900 : n * 60});
+              }}
             />
           </label>
         </section>
