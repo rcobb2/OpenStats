@@ -211,10 +211,19 @@ func (s *Store) UpsertAgent(ctx context.Context, a *Agent) error {
 				Building: a.Building,
 				Room:     a.Room,
 			}); err != nil {
+				// The derived ID may belong to a lab whose building/room were
+				// edited; joining it would silently misassign the agent. Fall
+				// back to a building+room match (lost creation race), else
+				// leave the lab unassigned.
 				slog.Warn("failed to auto-create lab during agent upsert", "labID", labID, "error", err)
+				if err := s.pool.QueryRow(ctx, `SELECT id FROM labs WHERE building = $1 AND room = $2`, a.Building, a.Room).Scan(&labID); err != nil {
+					labID = ""
+				}
 			}
 		}
-		a.LabID = &labID
+		if labID != "" {
+			a.LabID = &labID
+		}
 	}
 
 	_, err = s.pool.Exec(ctx, `

@@ -179,6 +179,23 @@ func (s *Server) RolloutStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// parseHHMM parses "HH:MM" into minutes since midnight.
+func parseHHMM(s string) (int, bool) {
+	var h, m int
+	if n, _ := fmt.Sscanf(s, "%d:%d", &h, &m); n != 2 {
+		return 0, false
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, false
+	}
+	return h*60 + m, true
+}
+
+func validHHMM(s string) bool {
+	_, ok := parseHHMM(s)
+	return ok
+}
+
 // isInMaintenanceWindow reports whether `now` falls inside the HH:mm..HH:mm
 // window. It mirrors the agent's IsInMaintenanceWindow
 // (agent/internal/enrollment/client.go) so the server and agent agree on the
@@ -192,16 +209,6 @@ func (s *Server) RolloutStatus(w http.ResponseWriter, r *http.Request) {
 func isInMaintenanceWindow(startStr, endStr string, now time.Time) bool {
 	if startStr == "" || endStr == "" {
 		return true
-	}
-	parseHHMM := func(s string) (int, bool) {
-		var h, m int
-		if n, _ := fmt.Sscanf(s, "%d:%d", &h, &m); n != 2 {
-			return 0, false
-		}
-		if h < 0 || h > 23 || m < 0 || m > 59 {
-			return 0, false
-		}
-		return h*60 + m, true
 	}
 	startMinutes, ok1 := parseHHMM(startStr)
 	endMinutes, ok2 := parseHHMM(endStr)

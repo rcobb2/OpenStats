@@ -522,20 +522,9 @@ func (s *Server) fetchUserLabelValues(ctx context.Context) ([]string, error) {
 // the session-hours column.
 func (s *Server) instantQueryByUser(ctx context.Context, query string) map[string]float64 {
 	promURL := fmt.Sprintf("%s/api/v1/query?query=%s", s.cfg.Prom.URL, url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, promURL, nil)
-	if err != nil {
-		return map[string]float64{}
-	}
-	resp, err := s.promClient.Do(req)
-	if err != nil {
-		s.logger.Warn("prometheus query failed", "error", err, "query", query)
-		return map[string]float64{}
-	}
-	defer resp.Body.Close()
-
 	var result promQueryInstantResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		s.logger.Warn("failed to decode prometheus response", "error", err)
+	if err := s.promGetJSON(ctx, promURL, &result); err != nil {
+		s.logger.Warn("prometheus query failed", "error", err, "query", query)
 		return map[string]float64{}
 	}
 
