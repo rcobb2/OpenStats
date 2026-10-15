@@ -49,8 +49,16 @@ func validateSettings(settings *store.SystemSettings) string {
 	if settings.RolloutMaxConcurrent < 0 {
 		return "rolloutMaxConcurrent must be >= 0 (0 = unlimited)"
 	}
-	if settings.RolloutGraceSeconds != 0 && settings.RolloutGraceSeconds < 60 {
+	// No 0 sentinel here: a grace of 0 makes ClaimUpdateSlot's in-flight count
+	// always zero, so rolloutMaxConcurrent would never bind.
+	if settings.RolloutGraceSeconds < 60 {
 		return "rolloutGraceSeconds must be >= 60"
+	}
+	// Both empty = no restriction; otherwise both must parse, since an
+	// unparseable window silently falls back to "always in window" at runtime.
+	if (settings.MaintenanceWindowStart != "" || settings.MaintenanceWindowEnd != "") &&
+		(!validHHMM(settings.MaintenanceWindowStart) || !validHHMM(settings.MaintenanceWindowEnd)) {
+		return "maintenanceWindowStart/End must both be empty or both HH:MM"
 	}
 	if settings.UpdateIntervalSeconds != 0 && settings.UpdateIntervalSeconds < 60 {
 		return "updateIntervalSeconds must be >= 60"

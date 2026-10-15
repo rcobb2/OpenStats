@@ -94,16 +94,10 @@ func (s *Server) ReportUsageByLab(w http.ResponseWriter, r *http.Request) {
 	if atTime > 0 {
 		promURL += fmt.Sprintf("&time=%d", atTime)
 	}
-	resp, err := s.promClient.Get(promURL)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
-		return
-	}
-	defer resp.Body.Close()
-
 	var raw promQueryInstantResult
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Prometheus response")
+	if err := s.promGetJSON(r.Context(), promURL, &raw); err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to query Prometheus")
 		return
 	}
 
@@ -421,18 +415,10 @@ func (s *Server) queryAndRespondFiltered(w http.ResponseWriter, query, format st
 		promURL += fmt.Sprintf("&time=%d", atTime)
 	}
 
-	resp, err := s.promClient.Get(promURL)
-	if err != nil {
-		s.logger.Error("prometheus query failed", "error", err, "query", query)
-		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
-		return
-	}
-	defer resp.Body.Close()
-
 	var result promQueryInstantResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		s.logger.Error("failed to decode prometheus response", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to parse Prometheus response")
+	if err := s.promGetJSON(context.Background(), promURL, &result); err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to query Prometheus")
 		return
 	}
 
@@ -856,18 +842,10 @@ func (s *Server) queryAndRespondAt(w http.ResponseWriter, query, format string, 
 		promURL += fmt.Sprintf("&time=%d", atTime)
 	}
 
-	resp, err := s.promClient.Get(promURL)
-	if err != nil {
-		s.logger.Error("prometheus query failed", "error", err, "query", query)
-		writeError(w, http.StatusBadGateway, "failed to reach Prometheus")
-		return
-	}
-	defer resp.Body.Close()
-
 	var result promQueryInstantResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		s.logger.Error("failed to decode prometheus response", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to parse Prometheus response")
+	if err := s.promGetJSON(context.Background(), promURL, &result); err != nil {
+		s.logger.Error("prometheus query failed", "error", err, "query", query)
+		writeError(w, http.StatusBadGateway, "failed to query Prometheus")
 		return
 	}
 
@@ -979,19 +957,8 @@ func (s *Server) fetchInstantVector(ctx context.Context, query string, atTime in
 	if atTime > 0 {
 		promURL += fmt.Sprintf("&time=%d", atTime)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, promURL, nil)
-	if err != nil {
-		return result, err
-	}
-	resp, err := s.promClient.Do(req)
-	if err != nil {
-		return result, err
-	}
-	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return result, err
-	}
-	return result, nil
+	err := s.promGetJSON(ctx, promURL, &result)
+	return result, err
 }
 
 // sumByCanonicalUser runs a `sum by (user, hostname)` query and folds the result
@@ -1525,14 +1492,8 @@ func (s *Server) buildUtilizationData(ctx context.Context, startUnix, endUnix, s
 		s.cfg.Prom.URL, url.QueryEscape(promQuery), startUnix, endUnix, step,
 	)
 
-	resp, err := s.promClient.Get(promURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
 	var raw promQueryRangeResult
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := s.promGetJSON(ctx, promURL, &raw); err != nil {
 		return nil, err
 	}
 
@@ -1772,4 +1733,24 @@ func (s *Server) ReportTopLabsByUtilization(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// promGetJSON GETs a Prometheus API URL and decodes the JSON body into out.
+// A non-2xx status is an error (with a truncated body) so callers can answer
+// 502 instead of decoding an error payload into an empty result.
+func (s *Server) promGetJSON(ctx context.Context, promURL string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, promURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := s.promClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("prometheus returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
