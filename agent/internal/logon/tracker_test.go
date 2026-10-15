@@ -305,3 +305,21 @@ func TestLogoutAfterPolicyChangeReleasesSession(t *testing.T) {
 		t.Errorf("counted map not cleaned: %v", tr.counted)
 	}
 }
+
+// A poll gap far beyond the interval (sleep, suspend) must not be credited as
+// signed-in time once Run has set the cap; normal steps still accrue.
+func TestAccrualSkipsSleepGap(t *testing.T) {
+	tr, m := newTestTracker(t)
+	tr.maxAccrualGap = time.Minute
+	t0 := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s := Session{ID: "wts-1", RawUser: "jdoe", State: StateActive, LoginTime: t0}
+
+	tr.apply(sessionSet(s), t0)
+	tr.apply(sessionSet(s), t0.Add(30*time.Second))             // normal poll
+	tr.apply(sessionSet(s), t0.Add(30*time.Second+8*time.Hour)) // overnight sleep
+	tr.apply(sessionSet(s), t0.Add(45*time.Second+8*time.Hour)) // normal poll
+
+	if got := counter(t, m.UserSessionSecondsTotal, "jdoe", host); got != 45 {
+		t.Errorf("session seconds = %v, want 45 (sleep gap excluded)", got)
+	}
+}

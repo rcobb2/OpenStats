@@ -53,6 +53,13 @@ type Tracker struct {
 	// login. Logout uses it instead of re-resolving, because the user policy can
 	// change mid-session (ignore or alias) and a fresh lookup would miss.
 	counted map[SessionKey]string
+
+	// maxAccrualGap caps how much wall-clock time one accrual may credit.
+	// A gap far beyond the poll interval means the machine slept or the
+	// process was suspended, and a signed-in-but-asleep machine is not
+	// occupied. Run sets it from the poll interval; zero (tests driving apply
+	// directly) means uncapped.
+	maxAccrualGap time.Duration
 }
 
 // userState aggregates every OS session belonging to one canonical user on this
@@ -84,6 +91,10 @@ func NewTracker(enum Enumerator, m *metrics.Metrics, resolve ResolveFunc, hostna
 // Run polls until ctx is cancelled. The first poll happens immediately so that
 // active sessions appear without waiting out the interval.
 func (t *Tracker) Run(ctx context.Context, interval time.Duration) {
+	t.mu.Lock()
+	t.maxAccrualGap = 4 * interval
+	t.mu.Unlock()
+
 	if err := t.Poll(); err != nil {
 		t.logger.Warn("logon enumeration failed", "error", err)
 	}
@@ -196,8 +207,14 @@ func (t *Tracker) accrueLocked(now time.Time) {
 			state.lastAccrual = now
 			continue
 		}
-		elapsed := now.Sub(state.lastAccrual).Seconds()
+		gap := now.Sub(state.lastAccrual)
 		state.lastAccrual = now
+		if t.maxAccrualGap > 0 && gap > t.maxAccrualGap {
+			t.logger.Info("skipping session accrual across a gap (sleep or suspend)",
+				"user", canonical, "gap", gap.Round(time.Second))
+			continue
+		}
+		elapsed := gap.Seconds()
 		t.metrics.UserSessionSecondsTotal.WithLabelValues(canonical, t.hostname).Add(elapsed)
 	}
 }
