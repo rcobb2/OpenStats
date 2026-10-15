@@ -3,8 +3,6 @@
 package enrollment
 
 import (
-	"io"
-	"net/http"
 	neturl "net/url"
 	"os"
 	"os/exec"
@@ -40,21 +38,11 @@ func (c *Client) executeSelfUpdate(url, checksum string) {
 	defer os.Remove(tempFile)
 	defer out.Close() // covers error-path early returns
 
-	resp, err := c.client.Get(url)
-	if err != nil {
+	// downloadUpdate uses its own long-timeout client (the shared one's 10s
+	// covers the whole body read, so packages on slow links never finished),
+	// checks the status and fails instead of truncating an oversized package.
+	if err := c.downloadUpdate(url, out); err != nil {
 		c.logger.Error("failed to download update", "error", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		c.logger.Error("failed to download update: unexpected status", "status", resp.StatusCode)
-		return
-	}
-
-	_, err = io.Copy(out, io.LimitReader(resp.Body, 200<<20))
-	if err != nil {
-		c.logger.Error("failed to save update to disk", "error", err)
 		return
 	}
 	// Must close before passing to installer; defer will close again (harmless).

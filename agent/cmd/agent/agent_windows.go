@@ -76,15 +76,8 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Initialize process tracker.
 		tracker := monitor.NewTracker(logger)
 
-		// Scan for existing processes that started before the agent.
-		logger.Info("scanning for existing processes...")
-		existingProcs := monitor.ScanExistingProcesses(logger, norm.ResolveFamily)
-
-		for _, p := range existingProcs {
-			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
-		}
-
-		// Set up WMI watcher.
+		// Set up WMI watcher first so its FilterProcesses can be used on the
+		// startup scan below.
 		watcher, err := monitor.NewWMIWatcher(tracker, logger, monitor.WMIWatcherConfig{
 			ExcludePatterns: cfg.Monitor.ExcludePatterns,
 			MinLifetime:     cfg.Monitor.MinLifetime,
@@ -127,6 +120,15 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create WMI watcher: %w", err)
+		}
+
+		// Scan for existing processes that started before the agent and register
+		// them with the tracker, applying the same exclusion rules as the watcher.
+		logger.Info("scanning for existing processes...")
+		existingProcs := monitor.ScanExistingProcesses(logger, norm.ResolveFamily)
+		existingProcs = watcher.FilterProcesses(existingProcs)
+		for _, p := range existingProcs {
+			tracker.RegisterExistingProcess(p.PID, p.ParentPID, p.ExeName, p.ExePath, p.User, p.FamilyKey)
 		}
 
 		// Start WMI watcher in background.

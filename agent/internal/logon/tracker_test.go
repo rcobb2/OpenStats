@@ -276,3 +276,32 @@ func TestDiffAndIndex(t *testing.T) {
 		t.Errorf("Index key = %v, want normalized to carol", idx)
 	}
 }
+
+// TestLogoutAfterPolicyChangeReleasesSession guards against the session count
+// sticking when an admin ignores a user mid-session: logout must use the
+// canonical name recorded at login, not re-resolve under the new policy.
+func TestLogoutAfterPolicyChangeReleasesSession(t *testing.T) {
+	tr, m := newTestTracker(t)
+	t0 := time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
+	s := Session{ID: "1", RawUser: `COLGATE\jdoe`, LoginTime: t0}
+
+	tr.apply(sessionSet(), t0)
+	tr.apply(sessionSet(s), t0.Add(time.Minute))
+	if got := gauge(t, m.UserSessionActive, "jdoe", host); got != 1 {
+		t.Fatalf("active after login = %v, want 1", got)
+	}
+
+	// Policy now ignores the user.
+	tr.resolve = func(string) (string, bool) { return "", false }
+
+	tr.apply(sessionSet(), t0.Add(2*time.Minute))
+	if got := gauge(t, m.UserSessionActive, "jdoe", host); got != 0 {
+		t.Errorf("active after logout = %v, want 0", got)
+	}
+	if users := tr.ActiveUsers(); len(users) != 0 {
+		t.Errorf("ActiveUsers = %v, want none", users)
+	}
+	if len(tr.counted) != 0 {
+		t.Errorf("counted map not cleaned: %v", tr.counted)
+	}
+}
