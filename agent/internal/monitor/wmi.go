@@ -64,7 +64,7 @@ func (w *WMIWatcher) isExcluded(exeName string) bool {
 func (w *WMIWatcher) FilterProcesses(procs []RunningProcess) []RunningProcess {
 	filtered := make([]RunningProcess, 0, len(procs))
 	for _, p := range procs {
-		if !w.isExcluded(p.ExeName) {
+		if !w.isExcluded(p.ExeName) && !isAgentProcess(p.ExeName, p.ExePath) {
 			filtered = append(filtered, p)
 		}
 	}
@@ -206,6 +206,12 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 		// Reuse the shared WMI service connection to avoid opening a new COM
 		// connection per event, which is the dominant cost under load.
 		exePath := getProcessExePath(svc, processID)
+
+		// The session helper is our own binary running as the user; it is not
+		// application usage (see selfexclude.go).
+		if isAgentProcess(processName, exePath) {
+			continue
+		}
 
 		var familyKey string
 		if w.familyResolver != nil {

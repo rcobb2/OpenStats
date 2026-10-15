@@ -20,9 +20,11 @@ func discardSlogLogger() *slog.Logger {
 }
 
 // counterValue reads the current value of a prometheus.CounterVec for a label set.
-func counterValue(t *testing.T, cv *prometheus.CounterVec, labels ...string) float64 {
+func counterValue(t *testing.T, cv *metrics.BaselineCounterVec, labels ...string) float64 {
 	t.Helper()
-	c, err := cv.GetMetricWithLabelValues(labels...)
+	// Pending amounts sit behind a zero baseline until a scrape releases them.
+	cv.ReleasePending()
+	c, err := cv.Vec().GetMetricWithLabelValues(labels...)
 	if err != nil {
 		t.Fatalf("GetMetricWithLabelValues(%v): %v", labels, err)
 	}
@@ -164,7 +166,7 @@ func TestUsageAccumulatesAcrossCheckpoints(t *testing.T) {
 			if isValidUser(s.User) {
 				inf := norm.Resolve(s.ExeName, s.ExePath)
 				l := []string{inf.DisplayName, s.ExeName, inf.Category, s.User, host}
-				m.AppUsageSeconds.WithLabelValues(l...).Add(s.CheckpointDelta.Seconds())
+				m.AppUsageSeconds.Add(s.CheckpointDelta.Seconds(), l...)
 			}
 		}
 	}
@@ -206,7 +208,7 @@ func TestForegroundAccumulatesIntoMetrics(t *testing.T) {
 		if isValidUser(s.User) {
 			inf := norm.Resolve(s.ExeName, s.ExePath)
 			l := []string{inf.DisplayName, s.ExeName, inf.Category, s.User, host}
-			m.AppForegroundSeconds.WithLabelValues(l...).Add(s.ForegroundDelta.Seconds())
+			m.AppForegroundSeconds.Add(s.ForegroundDelta.Seconds(), l...)
 		}
 	}
 
@@ -235,8 +237,8 @@ func TestLaunchCounterIncrementsOnStop(t *testing.T) {
 
 	info := norm.Resolve(sess.ExeName, sess.ExePath)
 	labels := []string{info.DisplayName, sess.ExeName, info.Category, sess.User, host}
-	m.AppLaunches.WithLabelValues(labels...).Inc()
-	m.AppUsageSeconds.WithLabelValues(labels...).Add(sess.CheckpointDelta.Seconds())
+	m.AppLaunches.Inc(labels...)
+	m.AppUsageSeconds.Add(sess.CheckpointDelta.Seconds(), labels...)
 
 	if got := counterValue(t, m.AppLaunches, labels...); got != 1 {
 		t.Errorf("launches: got %v, want 1", got)

@@ -10,8 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"github.com/rcobb/openlabstats-agent/internal/config"
 	"github.com/rcobb/openlabstats-agent/internal/enrollment"
 	"github.com/rcobb/openlabstats-agent/internal/inventory"
@@ -76,7 +74,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 			OnElevated: func(pid uint32, exeName, exePath, rawUser string) {
 				info := norm.Resolve(exeName, exePath)
 				if user, ok := resolveUser(rawUser); ok {
-					m.PrivilegeElevations.WithLabelValues(info.DisplayName, exeName, info.Category, user, metrics.Hostname()).Inc()
+					m.PrivilegeElevations.Inc(info.DisplayName, exeName, info.Category, user, metrics.Hostname())
 				}
 				logger.Info("privilege elevation detected", "pid", pid, "exe", exeName, "user", rawUser)
 			},
@@ -86,9 +84,9 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 
 				if user, ok := resolveUser(session.User); ok {
 					labels := []string{info.DisplayName, session.ExeName, info.Category, user, hostname}
-					m.AppUsageSeconds.WithLabelValues(labels...).Add(session.CheckpointDelta.Seconds())
-					m.AppForegroundSeconds.WithLabelValues(labels...).Add(session.ForegroundDelta.Seconds())
-					m.AppLaunches.WithLabelValues(labels...).Inc()
+					m.AppUsageSeconds.Add(session.CheckpointDelta.Seconds(), labels...)
+					m.AppForegroundSeconds.Add(session.ForegroundDelta.Seconds(), labels...)
+					m.AppLaunches.Inc(labels...)
 				}
 			},
 		})
@@ -145,7 +143,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 
 		// Start Prometheus HTTP server.
 		mux := http.NewServeMux()
-		mux.Handle(cfg.Server.MetricsPath, promhttp.Handler())
+		mux.Handle(cfg.Server.MetricsPath, m.ScrapeHandler())
 		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("ok"))

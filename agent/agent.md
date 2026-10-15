@@ -338,6 +338,19 @@ Counters are not restored at startup. Prometheus treats a counter that restarts
 from 0 as a normal reset; restoring a lower persisted total made it look like a
 reset and counted the whole restored value as new usage.
 
+Because `increase()`/`rate()` cannot count the first sample of a series that
+first appears already non-zero, every counter (`metrics.BaselineCounterVec`) is
+exposed at a **zero baseline**: a new label set is created at 0 and its first
+amount is held back until a real scrape has served that 0. `Metrics.ScrapeHandler`
+wraps `/metrics` and, after each scrape, applies pending amounts for label sets
+created before that scrape started. Release is tied to scrapes, not a timer, so
+the first event after a restart (or for a brand-new label set) is never lost.
+Tests call `Metrics.ReleasePending()` instead of scraping.
+
+The agent's own executable (which includes the `session-helper` process, run as
+the signed-in user) is excluded from process tracking in code
+(`monitor/selfexclude.go`), on both the live path and the startup scan.
+
 ## Configuration (`configs/agent.yaml`)
 
 ```yaml
