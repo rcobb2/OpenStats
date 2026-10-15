@@ -45,21 +45,27 @@ cd server && go test ./...
 
 ## Deployment (Production)
 
-Production runs on **podman02**. Deploys are performed by the **Ansible playbook in the
-separate infra repo** — never by hand on the host.
+Production runs on **podman02**. Deploys go through the **GitHub Action in the private
+`rcobb2/OpenStats-deploy` repo** ("Deploy OpenStats to podman02") — never by hand on the host.
 
-```
-# Run the OpenStats playbook from the Ansible control node.
-# TODO: replace with the exact invocation from the infra repo.
-ansible-playbook <infra-repo>/<playbook>.yml --limit podman02
-```
+1. Merge to `master`. `.github/workflows/build.yml` publishes
+   `ghcr.io/rcobb2/openstats-server:<full commit SHA>` (plus `:latest`).
+2. In `OpenStats-deploy`, set `Image=` in `units/openstats-server.container` to that SHA
+   (never `:latest`) and commit as `deploy: bump openstats-server to <short sha>`.
+3. Push to `main`. The push triggers the workflow, which writes the unit file and the
+   vendored Prometheus config, pulls the image and restarts `openstats-server` and
+   `openstats-prometheus`. It can also be re-run with `workflow_dispatch`.
+4. Verify with `openstatsctl version` — the `commit` field should be the new SHA.
 
-- Do **not** ssh to podman02 to `git pull`, run `podman-compose up --build`, or
-  `systemctl restart openstats-compose`. The playbook handles pull, rebuild and restart.
-- `deploy/podman02/` holds the compose file, `server.yaml`, nginx block, systemd unit and
-  Bitwarden secret map. Edit them in git — the playbook is what deploys them.
-- Merging a server change does not make it live. The deploy is a separate operator step;
-  say so explicitly instead of implying the change is already in production.
+- Do **not** ssh to podman02 to pull, build or restart anything; podman02 holds no
+  checkout of the app.
+- Prometheus config (`server/prometheus/*.yml`) is vendored into `OpenStats-deploy/prometheus/`.
+  A change to those files needs the same copy there to go live.
+- The surrounding infra (network, Postgres, Prometheus, Caddy, TLS) is managed outside
+  this repo. `deploy/podman02/` is not read by the deploy workflow.
+- Merging a server change does not make it live. The deploy is a separate step (and it
+  restarts production, so confirm before pushing); say so explicitly instead of implying
+  the change is already in production.
 
 ## Architecture
 
