@@ -119,8 +119,11 @@ copies are deliberate — agent and server are separate Go modules; keep
 - `Canonicalize` strips a `DOMAIN\` prefix and an `@domain` suffix and lowercases,
   so `COLGATE\JDoe`, `jdoe@colgate.edu`, and `jdoe` resolve to one identity.
 - `Policy.Resolve` returns the canonical username and whether the account is
-  ignored. Admin rules are evaluated first (so a rule can rescue an account the
-  built-in list would drop), then the built-in defaults.
+  ignored, in this order (identical in the agent copy; rule slice order does not matter):
+  1. Built-in checks (structural, default ignore list): ignored. An alias cannot rescue these.
+  2. Admin ignore rules: ignored. An admin ignore beats any alias.
+  3. Aliases, most specific first (exact before wildcard, then longer pattern, then lexical): tracked under the alias's canonical.
+  4. Otherwise tracked under its canonical form.
 - `Policy.IgnoreMatcher` renders the ignore set as a PromQL `user!~` matcher.
   This is required for app-level reports, which aggregate the user label away and
   therefore cannot filter ignored accounts after the fact. Patterns with

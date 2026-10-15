@@ -1,8 +1,6 @@
 package userid
 
 import (
-	"sort"
-	"strings"
 	"sync"
 )
 
@@ -44,26 +42,12 @@ func (h *Holder) Resolve(raw string) (string, bool) {
 // the canonical username to merge into.
 func FromServer(stripDomain bool, ignorePatterns []string, aliases map[string]string) *Policy {
 	p := &Policy{StripDomain: stripDomain}
-	patterns := make([]string, 0, len(aliases))
-	for pattern := range aliases {
-		patterns = append(patterns, pattern)
+	for pattern, canonical := range aliases {
+		p.Rules = append(p.Rules, Rule{Pattern: pattern, Canonical: canonical})
 	}
-	// Rules are first-match-wins, so order has to be deterministic across
-	// heartbeats: exact patterns before wildcards, longer before shorter.
-	sort.Slice(patterns, func(i, j int) bool {
-		wi := strings.Contains(patterns[i], "*")
-		wj := strings.Contains(patterns[j], "*")
-		if wi != wj {
-			return !wi
-		}
-		if len(patterns[i]) != len(patterns[j]) {
-			return len(patterns[i]) > len(patterns[j])
-		}
-		return patterns[i] < patterns[j]
-	})
-	for _, pattern := range patterns {
-		p.Rules = append(p.Rules, Rule{Pattern: pattern, Canonical: aliases[pattern]})
-	}
+	// Resolve does not depend on order, but keep it deterministic across
+	// heartbeats (map iteration is random).
+	SortAliasRules(p.Rules)
 	p.ExtraIgnored = append(p.ExtraIgnored, ignorePatterns...)
 	return p
 }
