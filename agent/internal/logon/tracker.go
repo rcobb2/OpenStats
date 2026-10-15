@@ -48,6 +48,11 @@ type Tracker struct {
 	seeded   bool
 	sessions map[SessionKey]Session
 	users    map[string]*userState
+
+	// counted records the canonical name each OS session was counted under at
+	// login. Logout uses it instead of re-resolving, because the user policy can
+	// change mid-session (ignore or alias) and a fresh lookup would miss.
+	counted map[SessionKey]string
 }
 
 // userState aggregates every OS session belonging to one canonical user on this
@@ -72,6 +77,7 @@ func NewTracker(enum Enumerator, m *metrics.Metrics, resolve ResolveFunc, hostna
 		logger:   logger,
 		sessions: make(map[SessionKey]Session),
 		users:    make(map[string]*userState),
+		counted:  make(map[SessionKey]string),
 	}
 }
 
@@ -119,10 +125,12 @@ func (t *Tracker) apply(current map[SessionKey]Session, now time.Time) {
 	t.accrueLocked(now)
 
 	for _, s := range ended {
-		canonical, ok := t.resolve(s.RawUser)
+		key := s.Key()
+		canonical, ok := t.counted[key]
 		if !ok {
-			continue
+			continue // never counted (ignored at login)
 		}
+		delete(t.counted, key)
 		state := t.users[canonical]
 		if state == nil {
 			continue
@@ -141,6 +149,7 @@ func (t *Tracker) apply(current map[SessionKey]Session, now time.Time) {
 		if !ok {
 			continue
 		}
+		t.counted[s.Key()] = canonical
 		loginTime := s.LoginTime
 		if loginTime.IsZero() || loginTime.After(now) || now.Sub(loginTime) > maxPlausibleSessionAge {
 			loginTime = now

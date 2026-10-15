@@ -59,6 +59,18 @@ func (w *WMIWatcher) isExcluded(exeName string) bool {
 	return false
 }
 
+// FilterProcesses removes processes that would be excluded by this watcher's
+// patterns. Used to filter the results of ScanExistingProcesses at startup.
+func (w *WMIWatcher) FilterProcesses(procs []RunningProcess) []RunningProcess {
+	filtered := make([]RunningProcess, 0, len(procs))
+	for _, p := range procs {
+		if !w.isExcluded(p.ExeName) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
 // Run starts WMI event subscriptions. Blocks until ctx is cancelled.
 func (w *WMIWatcher) Run(ctx context.Context) error {
 	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
