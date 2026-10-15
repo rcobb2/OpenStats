@@ -139,6 +139,11 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Each heartbeat also refreshes the user policy via the handler above.
 		if enrollClient != nil {
 			go enrollClient.RunHeartbeat(ctx, 2*time.Minute)
+			// Prometheus scrapes the server's latest-snapshot store, not this
+			// agent, so zero-baseline release must follow delivered pushes
+			// rather than local /metrics reads.
+			m.EnablePushMode(0)
+			enrollClient.WithMetricsDeliveryHooks(m.BeginDelivery, m.Delivered)
 			go enrollClient.RunMetricsPush(ctx, 30*time.Second)
 		}
 

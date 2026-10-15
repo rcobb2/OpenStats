@@ -341,11 +341,22 @@ reset and counted the whole restored value as new usage.
 Because `increase()`/`rate()` cannot count the first sample of a series that
 first appears already non-zero, every counter (`metrics.BaselineCounterVec`) is
 exposed at a **zero baseline**: a new label set is created at 0 and its first
-amount is held back until a real scrape has served that 0. `Metrics.ScrapeHandler`
-wraps `/metrics` and, after each scrape, applies pending amounts for label sets
-created before that scrape started. Release is tied to scrapes, not a timer, so
-the first event after a restart (or for a brand-new label set) is never lost.
-Tests call `Metrics.ReleasePending()` instead of scraping.
+amount is held back until something downstream has seen that 0. Two release modes:
+
+- **Push mode (production, a `server.reportURL` is set):** Prometheus does not
+  scrape agents; the agent POSTs its snapshot every 30s, the server keeps only the
+  latest per agent, and Prometheus scrapes that store every 30s. So local `/metrics`
+  reads release nothing. `Metrics.BeginDelivery` runs before `PushMetrics` gathers
+  its body and `Metrics.Delivered` after a 2xx POST (wired via
+  `Client.WithMetricsDeliveryHooks`). A pending label set records its first
+  delivery whose body contained the zero and is released on a later successful
+  delivery once that zero has been in place >= 75s (`DefaultPushHold`, 2.5x the
+  scrape interval, since the next push can overwrite the zero before a scrape).
+- **Local-scrape mode (no server URL):** `Metrics.ScrapeHandler` releases after
+  each scrape for label sets created before it started.
+
+No timer fires on its own: release is evaluated only on deliveries/scrapes, so an
+outage never releases anything. Tests call `Metrics.ReleasePending()` instead of scraping.
 
 The agent's own executable (which includes the `session-helper` process, run as
 the signed-in user) is excluded from process tracking in code
