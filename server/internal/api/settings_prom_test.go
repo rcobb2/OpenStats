@@ -66,3 +66,16 @@ func TestPromGetJSON(t *testing.T) {
 		t.Errorf("error body not truncated: %d bytes", len(err.Error()))
 	}
 }
+
+func TestValidHHMMRejectsTrailingText(t *testing.T) {
+	for _, s := range []string{"10:00PM", "22:00junk", "22:00:30", " 22:00", "22:0"} {
+		if validHHMM(s) {
+			t.Errorf("validHHMM(%q) = true, want false", s)
+		}
+	}
+	for _, s := range []string{"9:30", "09:30", "22:00", "00:00", "23:59"} {
+		if !validHHMM(s) {
+			t.Errorf("validHHMM(%q) = false, want true", s)
+		}
+	}
+}
