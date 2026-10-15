@@ -42,15 +42,20 @@ export default function Users() {
   const [mergeFor, setMergeFor] = useState(null);
   const [mergeTarget, setMergeTarget] = useState('');
   const [error, setError] = useState('');
+  const [usersError, setUsersError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
+    setUsersError('');
     try {
       const [discovered, ruleList, pol] = await Promise.all([
-        getUsers().catch(() => []),
+        getUsers().catch((e) => {
+          setUsersError(`Couldn't load discovered users: ${e?.message || 'request failed'} — Prometheus may be unreachable.`);
+          return [];
+        }),
         getUserRules(),
         getUserPolicy(),
       ]);
@@ -216,6 +221,7 @@ export default function Users() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {usersError && <div className="error-banner">{usersError}</div>}
 
       {policy && (
         <div className="info-banner">

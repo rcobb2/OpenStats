@@ -4,7 +4,9 @@ import { useSearchParams } from 'react-router-dom';
 // Default custom-range bounds: last 24h, formatted for a datetime-local input.
 function defaultDatetime(offsetHours = 0) {
   const d = new Date(Date.now() - offsetHours * 3600 * 1000);
-  return d.toISOString().slice(0, 16);
+  // datetime-local is parsed as local time, so shift by the zone offset before
+  // toISOString (which always formats UTC).
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 // Time range + machine/lab scope, shared by every metrics page (Dashboard,
