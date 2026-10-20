@@ -155,14 +155,24 @@ func hasLabel(m *dto.Metric, name string) bool {
 	return false
 }
 
-// stampServerLabels strips agent-supplied hostname/lab/building/room labels and
-// sets the registered hostname plus any server-known lab info. It rejects the
-// push if two samples in a family collapse onto the same label set (which
-// would make the aggregated scrape page invalid).
-func stampServerLabels(fams map[string]*dto.MetricFamily, hostname string, extra map[string]string) error {
+// stampServerLabels strips agent-supplied lab/building/room labels and sets
+// the registered hostname plus any server-known lab info. A series whose own
+// hostname label names a different host is dropped rather than relabelled: a
+// Mac renamed while the agent runs still exposes series under its old name,
+// and forcing those onto the new name would collide with the current ones (and
+// a spoofing agent would get its foreign series silently re-homed). Any series
+// that still collapses onto an earlier label set is dropped too, so one odd
+// series never costs the agent its whole push. It returns how many were dropped.
+func stampServerLabels(fams map[string]*dto.MetricFamily, hostname string, extra map[string]string) int {
+	dropped := 0
 	for name, mf := range fams {
 		seen := make(map[string]struct{}, len(mf.Metric))
+		kept := mf.Metric[:0]
 		for _, m := range mf.Metric {
+			if h := getLabel(m, "hostname"); h != "" && !strings.EqualFold(h, hostname) {
+				dropped++
+				continue
+			}
 			deleteLabels(m, serverOwnedLabels...)
 			setLabel(m, "hostname", hostname)
 			for k, v := range extra {
@@ -171,12 +181,18 @@ func stampServerLabels(fams map[string]*dto.MetricFamily, hostname string, extra
 			sort.Slice(m.Label, func(i, j int) bool { return m.Label[i].GetName() < m.Label[j].GetName() })
 			sig := metricSignature(m)
 			if _, dup := seen[sig]; dup {
-				return fmt.Errorf("family %q: duplicate series %s", name, sig)
+				dropped++
+				continue
 			}
 			seen[sig] = struct{}{}
+			kept = append(kept, m)
+		}
+		mf.Metric = kept
+		if len(kept) == 0 {
+			delete(fams, name)
 		}
 	}
-	return nil
+	return dropped
 }
 
 func metricSignature(m *dto.Metric) string {

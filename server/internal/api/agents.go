@@ -416,10 +416,8 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 			extra["room"] = room
 		}
 	}
-	if err := stampServerLabels(fams, agent.Hostname, extra); err != nil {
-		s.logger.Warn("rejected agent metrics push", "id", agentID, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if n := stampServerLabels(fams, agent.Hostname, extra); n > 0 {
+		s.logger.Debug("dropped agent series with a foreign hostname or duplicate labels", "id", agentID, "dropped", n)
 	}
 
 	s.metricsStore.Set(agentID, fams)
