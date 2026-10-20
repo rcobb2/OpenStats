@@ -3,6 +3,8 @@ package api
 import (
 	"testing"
 	"time"
+
+	dto "github.com/prometheus/client_model/go"
 )
 
 // Regression: Set only ever added or overwrote entries; the only removal
@@ -17,8 +19,8 @@ func TestMetricsStorePruneRemovesOnlyStaleEntries(t *testing.T) {
 	ms := &MetricsStore{
 		staleness: 5 * time.Minute,
 		snapshots: map[string]agentSnapshot{
-			"stale-agent": {body: []byte("stale"), updatedAt: now.Add(-10 * time.Minute)},
-			"fresh-agent": {body: []byte("fresh"), updatedAt: now.Add(-1 * time.Minute)},
+			"stale-agent": {families: testFamilies("stale"), updatedAt: now.Add(-10 * time.Minute)},
+			"fresh-agent": {families: testFamilies("fresh"), updatedAt: now.Add(-1 * time.Minute)},
 		},
 	}
 
@@ -37,8 +39,8 @@ func TestMetricsStoreGetAllExcludesStaleEntries(t *testing.T) {
 	ms := &MetricsStore{
 		staleness: 5 * time.Minute,
 		snapshots: map[string]agentSnapshot{
-			"stale-agent": {body: []byte("stale"), updatedAt: now.Add(-10 * time.Minute)},
-			"fresh-agent": {body: []byte("fresh"), updatedAt: now.Add(-1 * time.Minute)},
+			"stale-agent": {families: testFamilies("stale"), updatedAt: now.Add(-10 * time.Minute)},
+			"fresh-agent": {families: testFamilies("fresh"), updatedAt: now.Add(-1 * time.Minute)},
 		},
 	}
 
@@ -46,7 +48,11 @@ func TestMetricsStoreGetAllExcludesStaleEntries(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 fresh snapshot, got %d: %v", len(got), got)
 	}
-	if string(got[0]) != "fresh" {
-		t.Errorf("expected the fresh snapshot's body, got %q", got[0])
+	if _, ok := got[0]["fresh"]; !ok {
+		t.Errorf("expected the fresh snapshot's families, got %v", got[0])
 	}
+}
+
+func testFamilies(name string) map[string]*dto.MetricFamily {
+	return map[string]*dto.MetricFamily{name: {Name: &name}}
 }

@@ -500,3 +500,29 @@ func ScanExistingProcesses(logger *slog.Logger, familyResolver func(string, stri
 	logger.Info("scanned existing processes", "count", len(result))
 	return result
 }
+
+// RunningPIDs enumerates every running PID via proc_listallpids. It returns an
+// error (never an empty map) if enumeration fails, so callers can skip a
+// reconcile instead of treating every tracked process as exited.
+func RunningPIDs() (map[uint32]bool, error) {
+	count := int(C.getAllPIDCount())
+	if count <= 0 {
+		return nil, fmt.Errorf("proc_listallpids size query returned %d", count)
+	}
+	count += 64 // headroom for processes started between the two calls
+	buf := make([]C.int, count)
+	n := int(C.getAllPIDs(&buf[0], C.int(count)))
+	if n <= 0 {
+		return nil, fmt.Errorf("proc_listallpids returned %d", n)
+	}
+	pids := make(map[uint32]bool, n)
+	for i := 0; i < n && i < count; i++ {
+		if buf[i] > 0 {
+			pids[uint32(buf[i])] = true
+		}
+	}
+	if len(pids) == 0 {
+		return nil, fmt.Errorf("proc_listallpids yielded no PIDs")
+	}
+	return pids, nil
+}

@@ -446,3 +446,35 @@ func TestUtilizationRateQueryUsesRollupOnlyForLongSteps(t *testing.T) {
 		t.Errorf("short step must not read the 15m rollup, it can't resolve finer than its own cadence: %s", shortStep)
 	}
 }
+
+func TestRollupHostnameMatcher(t *testing.T) {
+	got, ok := rollupHostnameMatcher([]string{"LAB-02.colgate.edu", "lab1", "bad\nname", "lab1"})
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	want := `hostname=~"^(LAB-02\\.colgate\\.edu|lab1)$"`
+	if got != want {
+		t.Errorf("got %s\nwant %s", got, want)
+	}
+	if _, ok := rollupHostnameMatcher(nil); ok {
+		t.Error("no hosts must report !ok")
+	}
+	if _, ok := rollupHostnameMatcher([]string{"bad\nname"}); ok {
+		t.Error("only-invalid hosts must report !ok")
+	}
+}
+
+func TestLabHostnames(t *testing.T) {
+	id := "l1"
+	agents := []store.Agent{{Hostname: "a", LabID: &id}, {Hostname: "b"}, {Hostname: "c", LabID: &id}}
+	labs := []store.Lab{{ID: "l1", Name: "Lab One"}}
+	if got := labHostnames(agents, labs, "lab one"); len(got) != 2 || got[0] != "a" || got[1] != "c" {
+		t.Errorf("got %v", got)
+	}
+	if got := labHostnames(agents, labs, "Unassigned"); len(got) != 1 || got[0] != "b" {
+		t.Errorf("got %v", got)
+	}
+	if got := labHostnames(agents, labs, "Nope"); len(got) != 0 {
+		t.Errorf("got %v", got)
+	}
+}

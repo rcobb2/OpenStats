@@ -247,3 +247,25 @@ func TestLaunchCounterIncrementsOnStop(t *testing.T) {
 		t.Errorf("usage: got %v, want >0", got)
 	}
 }
+
+func TestReconcileGhostsCreditsAndSkipsOnError(t *testing.T) {
+	logger := discardSlogLogger()
+	tr := monitor.NewTracker(logger)
+	tr.OnProcessStart(500, 0, "ghost.exe", "/ghost.exe", "u", "")
+	orig := runningPIDsFn
+	defer func() { runningPIDsFn = orig }()
+
+	var got []*monitor.ProcessSession
+	onStop := func(s *monitor.ProcessSession) { got = append(got, s) }
+
+	runningPIDsFn = func() (map[uint32]bool, error) { return nil, io.ErrUnexpectedEOF }
+	if n := reconcileGhosts(tr, onStop, logger); n != 0 || tr.ActiveCount() != 1 {
+		t.Fatalf("enumeration error must skip reconcile, n=%d active=%d", n, tr.ActiveCount())
+	}
+
+	time.Sleep(2 * time.Millisecond) // registration must predate the snapshot
+	runningPIDsFn = func() (map[uint32]bool, error) { return map[uint32]bool{1: true}, nil }
+	if n := reconcileGhosts(tr, onStop, logger); n != 1 || len(got) != 1 || tr.ActiveCount() != 0 {
+		t.Fatalf("expected ghost reaped and credited, n=%d got=%d", n, len(got))
+	}
+}

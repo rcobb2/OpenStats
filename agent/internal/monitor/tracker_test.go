@@ -244,7 +244,7 @@ func TestTrackerReconcileRemovesStaleGroups(t *testing.T) {
 
 	// Only PID 901 is still running.
 	running := map[uint32]bool{901: true}
-	stopped := tr.Reconcile(running)
+	stopped := tr.Reconcile(running, time.Now().Add(time.Second))
 
 	if len(stopped) != 1 {
 		t.Fatalf("expected 1 stopped session from reconcile, got %d", len(stopped))
@@ -254,6 +254,41 @@ func TestTrackerReconcileRemovesStaleGroups(t *testing.T) {
 	}
 	if tr.ActiveCount() != 1 {
 		t.Fatalf("expected 1 remaining group after reconcile, got %d", tr.ActiveCount())
+	}
+}
+
+// TestTrackerReconcileSparesPIDsRegisteredAfterSnapshot verifies the race guard:
+// a PID registered after the snapshot began must not be reaped, including a
+// child joining an older group.
+func TestTrackerReconcileSparesPIDsRegisteredAfterSnapshot(t *testing.T) {
+	tr := NewTracker(discardLogger())
+	tr.OnProcessStart(10, 0, "old.exe", "/old.exe", "u", "fam")
+	snapshotAt := time.Now().Add(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+	tr.OnProcessStart(20, 0, "new.exe", "/new.exe", "u", "")
+	tr.OnProcessStart(11, 0, "old.exe", "/old.exe", "u", "fam") // joins group 10 via family
+
+	stopped := tr.Reconcile(map[uint32]bool{}, snapshotAt)
+	if len(stopped) != 0 {
+		t.Fatalf("group 10 still has post-snapshot member 11; got %d stopped", len(stopped))
+	}
+	if tr.ActiveCount() != 2 {
+		t.Fatalf("expected 2 groups, got %d", tr.ActiveCount())
+	}
+	// A later snapshot with nothing running reaps everything.
+	if n := len(tr.Reconcile(map[uint32]bool{}, time.Now().Add(time.Second))); n != 2 {
+		t.Fatalf("expected 2 reaped, got %d", n)
+	}
+}
+
+// TestTrackerReconcileCarriesDeltas verifies reaped sessions include unflushed usage.
+func TestTrackerReconcileCarriesDeltas(t *testing.T) {
+	tr := NewTracker(discardLogger())
+	tr.OnProcessStart(30, 0, "a.exe", "/a.exe", "u", "")
+	tr.IncrementForeground(30, 3*time.Second)
+	s := tr.Reconcile(map[uint32]bool{}, time.Now().Add(time.Second))
+	if len(s) != 1 || s[0].ForegroundDelta != 3*time.Second || s[0].CheckpointDelta <= 0 {
+		t.Fatalf("unexpected session: %+v", s)
 	}
 }
 
@@ -281,7 +316,7 @@ func TestTrackerFamilyGroupsCleanedUpOnReconcile(t *testing.T) {
 	tr := NewTracker(discardLogger())
 
 	tr.OnProcessStart(900, 0, "word.exe", "/apps/word.exe", "ivan", "microsoft-word")
-	tr.Reconcile(map[uint32]bool{})
+	tr.Reconcile(map[uint32]bool{}, time.Now().Add(time.Second))
 
 	if len(tr.familyGroups) != 0 {
 		t.Fatalf("expected familyGroups to be empty after reconcile removes the group, got %d entries: %v", len(tr.familyGroups), tr.familyGroups)

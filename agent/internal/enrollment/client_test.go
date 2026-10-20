@@ -1,6 +1,7 @@
 package enrollment
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -39,25 +40,100 @@ func TestNewClientNormalizesServerURL(t *testing.T) {
 	}
 }
 
-// A scheme-less address used to make isTrustedUpdateHost compare against an
+// A scheme-less address used to make the trust check compare against an
 // empty hostname, so every server-directed self-update was silently rejected.
-func TestTrustedUpdateHostWorksForSchemelessConfig(t *testing.T) {
+func TestPrepareUpdateWorksForSchemelessConfig(t *testing.T) {
 	c := NewClient("openstats.colgate.edu", 9183, "", "", testLogger())
-	if !c.isTrustedUpdateHost("openstats.colgate.edu") {
+	if _, ok := c.prepareUpdate("https://openstats.colgate.edu/dl/a.msi", testSum); !ok {
 		t.Errorf("expected openstats.colgate.edu to be trusted, serverURL=%q", c.serverURL)
 	}
-	if c.isTrustedUpdateHost("evil.example.com") {
+	if _, ok := c.prepareUpdate("https://evil.example.com/a.msi", testSum); ok {
 		t.Error("unrelated host must not be trusted")
 	}
 }
 
-func TestVerifyDownloadChecksumEmptyExpectedAlwaysPasses(t *testing.T) {
+const testSum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+func TestPrepareUpdateEmptyChecksumRefused(t *testing.T) {
+	c := NewClient("https://openstats.colgate.edu", 9183, "", "", testLogger())
+	if _, ok := c.prepareUpdate("https://openstats.colgate.edu/a.msi", ""); ok {
+		t.Error("empty checksum must refuse the update")
+	}
+}
+
+func TestPrepareUpdateOriginChecks(t *testing.T) {
+	c := NewClient("https://OpenStats.Colgate.edu", 9183, "", "", testLogger())
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"https://openstats.colgate.edu/a.msi", true},
+		{"https://OPENSTATS.colgate.edu:443/a.msi", true},
+		{"/api/v1/update/a.msi", true},
+		{"http://openstats.colgate.edu/a.msi", false},
+		{"https://openstats.colgate.edu:8443/a.msi", false},
+		{"https://evil.example.com/a.msi", false},
+		{"//evil.example.com/a.msi", false},
+	}
+	for _, tc := range cases {
+		_, ok := c.prepareUpdate(tc.url, testSum)
+		if ok != tc.want {
+			t.Errorf("prepareUpdate(%q) = %v, want %v", tc.url, ok, tc.want)
+		}
+	}
+	got, _ := c.prepareUpdate("/x/a.msi", testSum)
+	if got != c.serverURL+"/x/a.msi" {
+		t.Errorf("relative URL resolved to %q", got)
+	}
+	c2 := NewClient("http://srv.local:8080", 9183, "", "", testLogger())
+	if _, ok := c2.prepareUpdate("http://srv.local:8080/a.msi", testSum); !ok {
+		t.Error("same host:port should be trusted")
+	}
+	if _, ok := c2.prepareUpdate("http://srv.local/a.msi", testSum); ok {
+		t.Error("different port should be rejected")
+	}
+}
+
+func TestDownloadUpdateRedirects(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("evil"))
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/same":
+			http.Redirect(w, r, "/file", http.StatusFound)
+		case "/cross":
+			http.Redirect(w, r, other.URL+"/file", http.StatusFound)
+		case "/loop":
+			http.Redirect(w, r, "/loop", http.StatusFound)
+		default:
+			w.Write([]byte("good"))
+		}
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, 9183, "", "", testLogger())
+
+	var buf bytes.Buffer
+	if err := c.downloadUpdate(srv.URL+"/same", &buf); err != nil || buf.String() != "good" {
+		t.Errorf("same-host redirect: err=%v body=%q", err, buf.String())
+	}
+	buf.Reset()
+	if err := c.downloadUpdate(srv.URL+"/cross", &buf); err == nil {
+		t.Error("cross-host redirect must be rejected")
+	}
+	if err := c.downloadUpdate(srv.URL+"/loop", &buf); err == nil {
+		t.Error("redirect loop must be capped")
+	}
+}
+
+func TestVerifyDownloadChecksumEmptyExpectedFails(t *testing.T) {
 	path := t.TempDir() + "/file.bin"
 	if err := os.WriteFile(path, []byte("anything"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyDownloadChecksum(path, ""); err != nil {
-		t.Errorf("expected nil error for empty expected checksum, got %v", err)
+	if err := verifyDownloadChecksum(path, ""); err == nil {
+		t.Error("expected error for empty expected checksum")
 	}
 }
 

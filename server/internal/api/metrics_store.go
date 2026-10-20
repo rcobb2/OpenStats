@@ -3,10 +3,13 @@ package api
 import (
 	"sync"
 	"time"
+
+	dto "github.com/prometheus/client_model/go"
 )
 
 type agentSnapshot struct {
-	body      []byte
+	// families is the parsed, sanitized exposition from one agent push.
+	families  map[string]*dto.MetricFamily
 	updatedAt time.Time
 }
 
@@ -42,10 +45,10 @@ func newMetricsStore() *MetricsStore {
 	return ms
 }
 
-func (ms *MetricsStore) Set(agentID string, body []byte) {
+func (ms *MetricsStore) Set(agentID string, families map[string]*dto.MetricFamily) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	ms.snapshots[agentID] = agentSnapshot{body: body, updatedAt: time.Now()}
+	ms.snapshots[agentID] = agentSnapshot{families: families, updatedAt: time.Now()}
 }
 
 // Delete removes a single agent's snapshot. Called when an agent is deleted.
@@ -55,15 +58,16 @@ func (ms *MetricsStore) Delete(agentID string) {
 	delete(ms.snapshots, agentID)
 }
 
-// GetAll returns the bodies of all non-stale snapshots.
-func (ms *MetricsStore) GetAll() [][]byte {
+// GetAll returns the families of all non-stale snapshots. Callers must treat
+// the returned families as read-only.
+func (ms *MetricsStore) GetAll() []map[string]*dto.MetricFamily {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	cutoff := time.Now().Add(-ms.staleness)
-	var result [][]byte
+	var result []map[string]*dto.MetricFamily
 	for _, snap := range ms.snapshots {
 		if snap.updatedAt.After(cutoff) {
-			result = append(result, snap.body)
+			result = append(result, snap.families)
 		}
 	}
 	return result

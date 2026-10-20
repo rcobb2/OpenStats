@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -324,6 +325,94 @@ func (s *Server) buildLabelFilters(ctx context.Context, hostname, lab string) st
 	return "{" + strings.Join(filters, ",") + "}"
 }
 
+// buildRollupLabelFilters is buildLabelFilters for queries over the
+// openlabstats:*:rate15m recording rules. Those series are aggregated
+// `by (hostname, app, category, user)` and carry no lab label, so a lab filter
+// is resolved to the lab's current member hostnames and emitted as a hostname
+// regexp matcher. ok=false means the lab has no (usable) hosts and the caller
+// must return an empty result without querying Prometheus.
+func (s *Server) buildRollupLabelFilters(ctx context.Context, hostname, lab string) (string, bool) {
+	if lab == "" {
+		return s.buildLabelFilters(ctx, hostname, ""), true
+	}
+	agents, err := s.store.ListAgents(ctx)
+	if err != nil {
+		s.logger.Error("failed to list agents for lab filter", "error", err)
+		return "", false
+	}
+	labs, err := s.store.ListLabs(ctx)
+	if err != nil {
+		s.logger.Error("failed to list labs for lab filter", "error", err)
+		return "", false
+	}
+	matcher, ok := rollupHostnameMatcher(labHostnames(agents, labs, lab))
+	if !ok {
+		return "", false
+	}
+	filters := []string{`user!=""`, s.userPolicy(ctx).IgnoreMatcher(), matcher}
+	if v, ok := safeLabelValue(hostname); ok {
+		filters = append(filters, fmt.Sprintf(`hostname="%s"`, v))
+	}
+	return "{" + strings.Join(filters, ",") + "}", true
+}
+
+// labHostnames returns the hostnames of agents currently assigned to the lab
+// named labName (case-insensitive; "Unassigned" matches agents with no lab),
+// mirroring hostnameMatchesLab / buildHostnameLabMap.
+func labHostnames(agents []store.Agent, labs []store.Lab, labName string) []string {
+	labByID := make(map[string]string, len(labs))
+	for _, l := range labs {
+		labByID[l.ID] = l.Name
+	}
+	var hosts []string
+	for _, a := range agents {
+		name := "Unassigned"
+		if a.LabID != nil && *a.LabID != "" {
+			if n, ok := labByID[*a.LabID]; ok {
+				name = n
+			}
+		}
+		if strings.EqualFold(name, labName) {
+			hosts = append(hosts, a.Hostname)
+		}
+	}
+	return hosts
+}
+
+// rollupHostnameMatcher builds hostname=~"^(a|b)$" with every name
+// regexp-quoted and label-escaped. Names safeLabelValue rejects are skipped;
+// ok=false when nothing usable remains.
+func rollupHostnameMatcher(hosts []string) (string, bool) {
+	seen := make(map[string]struct{}, len(hosts))
+	var parts []string
+	for _, h := range hosts {
+		v, ok := safeLabelValue(regexp.QuoteMeta(h))
+		if !ok {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		parts = append(parts, v)
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	sort.Strings(parts)
+	return fmt.Sprintf(`hostname=~"^(%s)$"`, strings.Join(parts, "|")), true
+}
+
+// respondEmptyVector answers a report whose lab filter matched no hosts.
+func (s *Server) respondEmptyVector(w http.ResponseWriter, format string) {
+	if format == "csv" {
+		s.writeCSV(w, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}` + "\n"))
+}
+
 // allowedAppSet returns a whitelist of lowercased app names (both display name and exe name)
 // that have an active (non-ignored) mapping entry. Only apps in this set appear in reports.
 // Returns nil if there are no mappings at all (fresh install), which lets queryAndRespondFiltered
@@ -584,7 +673,11 @@ func (s *Server) ReportTopAppsByLaunches(w http.ResponseWriter, r *http.Request)
 
 	limit := parseReportLimit(q, 10)
 
-	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	lf, ok := s.buildRollupLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	if !ok {
+		s.respondEmptyVector(w, q.Get("format"))
+		return
+	}
 	// topk is applied server-side after whitelist filtering.
 	query := fmt.Sprintf(
 		`sum by (app, category) (sum_over_time(openlabstats:app_launches:rate15m%s[%s])) > 0`,
@@ -616,7 +709,11 @@ func (s *Server) ReportTopAppsByElevations(w http.ResponseWriter, r *http.Reques
 
 	limit := parseReportLimit(q, 10)
 
-	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	lf, ok := s.buildRollupLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	if !ok {
+		s.respondEmptyVector(w, q.Get("format"))
+		return
+	}
 	query := fmt.Sprintf(
 		`sum by (app, category) (sum_over_time(openlabstats:privilege_elevations:rate15m%s[%s])) > 0`,
 		lf, timeRange,
@@ -648,7 +745,11 @@ func (s *Server) ReportTopAppsByForegroundTime(w http.ResponseWriter, r *http.Re
 
 	limit := parseReportLimit(q, 10)
 
-	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	lf, ok := s.buildRollupLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	if !ok {
+		s.respondEmptyVector(w, q.Get("format"))
+		return
+	}
 	query := fmt.Sprintf(
 		`sum by (app, category) (sum_over_time(openlabstats:app_foreground_seconds:rate15m%s[%s])) / 3600 > 0`,
 		lf, timeRange,
@@ -678,7 +779,11 @@ func (s *Server) ReportBottomAppsByLaunches(w http.ResponseWriter, r *http.Reque
 
 	limit := parseReportLimit(q, 10)
 
-	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	lf, ok := s.buildRollupLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	if !ok {
+		s.respondEmptyVector(w, q.Get("format"))
+		return
+	}
 
 	// includeZero surfaces the truly underutilized: known apps (non-ignored
 	// software mappings) that never launched in the window. The bar chart omits
@@ -821,7 +926,11 @@ func (s *Server) ReportBottomAppsByForegroundTime(w http.ResponseWriter, r *http
 
 	limit := parseReportLimit(q, 10)
 
-	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	lf, ok := s.buildRollupLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	if !ok {
+		s.respondEmptyVector(w, q.Get("format"))
+		return
+	}
 	query := fmt.Sprintf(
 		`sum by (app, category) (sum_over_time(openlabstats:app_foreground_seconds:rate15m%s[%s])) / 3600 > 0`,
 		lf, timeRange,
@@ -1383,7 +1492,11 @@ func (s *Server) ReportTopAppsUsage(w http.ResponseWriter, r *http.Request) {
 
 	limit := parseReportLimit(q, 20)
 
-	lf := s.buildLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	lf, ok := s.buildRollupLabelFilters(r.Context(), q.Get("hostname"), q.Get("lab"))
+	if !ok {
+		s.respondEmptyVector(w, q.Get("format"))
+		return
+	}
 	query := topAppsUsageQuery(lf, timeRange)
 	s.queryAndRespondFiltered(w, query, q.Get("format"), atTime, s.allowedAppSet(r.Context()), limit, false)
 }

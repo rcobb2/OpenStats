@@ -31,7 +31,7 @@ type processGroup struct {
 	StartTime       time.Time
 	LastCheckpoint  time.Time
 	ForegroundDelta time.Duration
-	MemberPIDs      map[uint32]bool
+	MemberPIDs      map[uint32]time.Time // member PID -> when the tracker registered it
 }
 
 // Tracker manages the state of all active process groups.
@@ -68,7 +68,7 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 		if rootPID, ok := t.pidToGroup[parentPID]; ok {
 			group := t.groups[rootPID]
 			if group != nil && group.FamilyKey != "" {
-				group.MemberPIDs[pid] = true
+				group.MemberPIDs[pid] = time.Now()
 				t.pidToGroup[pid] = rootPID
 				t.logger.Debug("process joined group via parent",
 					"pid", pid, "exe", exeName, "parentPID", parentPID, "rootPID", rootPID)
@@ -90,7 +90,7 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 		familyGroupKey = user + "\x00" + familyKey
 		if rootPID, ok := t.familyGroups[familyGroupKey]; ok {
 			if group, exists := t.groups[rootPID]; exists {
-				group.MemberPIDs[pid] = true
+				group.MemberPIDs[pid] = time.Now()
 				t.pidToGroup[pid] = rootPID
 				t.logger.Debug("process joined group via family",
 					"pid", pid, "exe", exeName, "family", familyKey, "rootPID", rootPID)
@@ -111,7 +111,7 @@ func (t *Tracker) OnProcessStart(pid, parentPID uint32, exeName, exePath, user, 
 		FamilyKey:      familyKey,
 		StartTime:      now,
 		LastCheckpoint: now,
-		MemberPIDs:     map[uint32]bool{pid: true},
+		MemberPIDs:     map[uint32]time.Time{pid: now},
 	}
 	t.groups[pid] = group
 	t.pidToGroup[pid] = pid
@@ -134,7 +134,7 @@ func (t *Tracker) RegisterExistingProcess(pid, parentPID uint32, exeName, exePat
 		if rootPID, ok := t.pidToGroup[parentPID]; ok {
 			group := t.groups[rootPID]
 			if group != nil && group.FamilyKey != "" {
-				group.MemberPIDs[pid] = true
+				group.MemberPIDs[pid] = time.Now()
 				t.pidToGroup[pid] = rootPID
 				t.logger.Debug("existing process joined group via parent",
 					"pid", pid, "exe", exeName, "parentPID", parentPID, "rootPID", rootPID)
@@ -148,7 +148,7 @@ func (t *Tracker) RegisterExistingProcess(pid, parentPID uint32, exeName, exePat
 		familyGroupKey = user + "\x00" + familyKey
 		if rootPID, ok := t.familyGroups[familyGroupKey]; ok {
 			if group, exists := t.groups[rootPID]; exists {
-				group.MemberPIDs[pid] = true
+				group.MemberPIDs[pid] = time.Now()
 				t.pidToGroup[pid] = rootPID
 				t.logger.Debug("existing process joined group via family",
 					"pid", pid, "exe", exeName, "family", familyKey, "rootPID", rootPID)
@@ -167,7 +167,7 @@ func (t *Tracker) RegisterExistingProcess(pid, parentPID uint32, exeName, exePat
 		FamilyKey:      familyKey,
 		StartTime:      now,
 		LastCheckpoint: now,
-		MemberPIDs:     map[uint32]bool{pid: true},
+		MemberPIDs:     map[uint32]time.Time{pid: now},
 	}
 	t.groups[pid] = group
 	t.pidToGroup[pid] = pid
@@ -324,22 +324,33 @@ func (t *Tracker) IncrementForeground(pid uint32, duration time.Duration) {
 	}
 }
 
-// Reconcile updates the tracker based on a snapshot of actually running PIDs.
-// Removes groups whose members are all gone.
-func (t *Tracker) Reconcile(runningPIDs map[uint32]bool) []*ProcessSession {
+// Reconcile updates the tracker based on a snapshot of actually running PIDs
+// that was taken at snapshotAt (callers must read the clock BEFORE enumerating).
+// Member PIDs missing from the snapshot are dropped, and groups left empty are
+// finalized and returned. A PID registered at or after snapshotAt is never
+// reaped: the enumeration may predate its start event, so its absence proves
+// nothing. Returned sessions carry the checkpoint/foreground deltas so they can
+// be credited exactly like OnProcessStop's result.
+func (t *Tracker) Reconcile(running map[uint32]bool, snapshotAt time.Time) []*ProcessSession {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// First pass: remove stale member PIDs from their owning groups.
-	// Use pidToGroup for an O(1) targeted delete instead of scanning all groups.
-	for pid := range t.pidToGroup {
-		if !runningPIDs[pid] {
-			rootPID := t.pidToGroup[pid]
-			delete(t.pidToGroup, pid)
-			if group := t.groups[rootPID]; group != nil {
-				delete(group.MemberPIDs, pid)
-			}
+	for pid, rootPID := range t.pidToGroup {
+		if running[pid] {
+			continue
 		}
+		group := t.groups[rootPID]
+		if group == nil {
+			delete(t.pidToGroup, pid)
+			continue
+		}
+		since, ok := group.MemberPIDs[pid]
+		if ok && !since.Before(snapshotAt) {
+			continue // registered after the snapshot began
+		}
+		delete(t.pidToGroup, pid)
+		delete(group.MemberPIDs, pid)
 	}
 
 	// Second pass: finalize any groups that are now empty.
@@ -352,13 +363,15 @@ func (t *Tracker) Reconcile(runningPIDs map[uint32]bool) []*ProcessSession {
 				delete(t.familyGroups, group.User+"\x00"+group.FamilyKey)
 			}
 			stopped = append(stopped, &ProcessSession{
-				PID:       group.RootPID,
-				ExeName:   group.ExeName,
-				ExePath:   group.ExePath,
-				User:      group.User,
-				StartTime: group.StartTime,
-				StopTime:  now,
-				Active:    false,
+				PID:             group.RootPID,
+				ExeName:         group.ExeName,
+				ExePath:         group.ExePath,
+				User:            group.User,
+				StartTime:       group.StartTime,
+				StopTime:        now,
+				Active:          false,
+				CheckpointDelta: now.Sub(group.LastCheckpoint),
+				ForegroundDelta: group.ForegroundDelta,
 			})
 			t.logger.Debug("reconciled stale process group",
 				"rootPID", rootPID, "exe", group.ExeName)

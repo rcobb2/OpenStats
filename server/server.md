@@ -16,7 +16,7 @@ The server:
 ### `internal/api/router.go`
 
 Main HTTP router using chi:
-- Sets up CORS (open for dev)
+- CORS is off by default (same-origin SPA); `cors.allowedOrigins` opts origins in. Cross-site POST/PUT/PATCH/DELETE (Sec-Fetch-Site / Origin) are rejected with 403; requests with neither header (agents, curl, openstatsctl) pass
 - Registers all API routes
 - Serves Swagger UI at `/api/docs`
 - Serves frontend SPA at `/*`

@@ -4,20 +4,15 @@ package enrollment
 
 import (
 	"fmt"
-	neturl "net/url"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 func (c *Client) executeSelfUpdate(url, checksum string) {
-	if !strings.HasPrefix(url, "http") {
-		url = c.serverURL + url
-	}
-
-	// Reject URLs that point to a different host than the configured server.
-	if parsed, err := neturl.Parse(url); err != nil || !c.isTrustedUpdateHost(parsed.Hostname()) {
-		c.logger.Error("untrusted update URL rejected", "url", url)
+	// Fail closed: no checksum, or an URL that is not the configured server
+	// (scheme, host and port), means nothing is downloaded or installed.
+	url, ok := c.prepareUpdate(url, checksum)
+	if !ok {
 		return
 	}
 

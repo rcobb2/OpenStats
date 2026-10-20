@@ -1,8 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"sort"
 	"strings"
 	"testing"
+
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 
 	"github.com/rcobb/openlabstats-server/internal/store"
 )
@@ -145,4 +151,28 @@ func TestApplyServerMappingsDropsBuiltInIgnoredExesWithoutAutoInsert(t *testing.
 	if _, ok := unknown["excel.exe"]; !ok {
 		t.Errorf("expected excel.exe in unknown, got %v", unknown)
 	}
+}
+
+// applyServerMappings is a test helper: parse, apply, re-encode.
+func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping) ([]byte, map[string]store.DiscoveredApp) {
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	fams, err := parser.TextToMetricFamilies(bytes.NewReader(append(append([]byte{}, body...), '\n')))
+	if err != nil {
+		panic(err)
+	}
+	unknown := applyMappingsToFamilies(fams, mappings)
+	names := make([]string, 0, len(fams))
+	for n := range fams {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var out []*dto.MetricFamily
+	for _, n := range names {
+		out = append(out, fams[n])
+	}
+	var buf bytes.Buffer
+	if err := encodeFamilies(&buf, out); err != nil {
+		panic(err)
+	}
+	return buf.Bytes(), unknown
 }

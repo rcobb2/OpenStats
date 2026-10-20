@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,7 +28,7 @@ import (
 // constant and passes -d Version=... to WiX, which Package.wxs consumes as
 // $(var.Version). No second edit is needed. (The file this comment used to name,
 // openlabstats.wxs, does not exist — the manifest is Package.wxs.)
-const AgentVersion = "0.6.1"
+const AgentVersion = "0.6.2"
 
 // RegisterRequest matches the server's RegisterAgentRequest.
 type RegisterRequest struct {
@@ -45,9 +46,9 @@ type RegisterAgentResponse struct {
 	Settings  *SystemSettings `json:"settings"`
 	UpdateURL string          `json:"updateUrl,omitempty"`
 	// UpdateChecksum is the server's lowercase hex SHA-256 of the file
-	// UpdateURL points to. May be empty (older server, or the server
-	// couldn't compute it) — executeSelfUpdate installs without verification
-	// in that case rather than refusing the update outright.
+	// UpdateURL points to. Required: if it is empty (older server, or the
+	// server couldn't compute it) the agent refuses the update (fail closed)
+	// and retries on a later heartbeat.
 	UpdateChecksum  string      `json:"updateChecksum,omitempty"`
 	IgnoredExeNames []string    `json:"ignoredExeNames,omitempty"`
 	UserPolicy      *UserPolicy `json:"userPolicy,omitempty"`
@@ -162,13 +163,12 @@ const selfUpdateJitterSeconds = 30
 
 // verifyDownloadChecksum compares the file at path against expected (the
 // server's lowercase hex SHA-256 for the URL it was downloaded from). An
-// empty expected always passes — the server may be older than this field, or
-// have failed to compute one — so this is a corruption/tamper check layered
-// on top of isTrustedUpdateHost, not a replacement requiring every server to
-// support it before updates can proceed at all.
+// empty expected is an error (fail closed); callers also refuse before
+// downloading via prepareUpdate. This is an integrity check layered on top of
+// isTrustedUpdateURL.
 func verifyDownloadChecksum(path, expected string) error {
 	if expected == "" {
-		return nil
+		return errors.New("no checksum supplied by server")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -454,15 +454,68 @@ func IsInMaintenanceWindow(startStr, endStr string) bool {
 	return currentMinutes >= startMinutes || currentMinutes <= endMinutes
 }
 
-// isTrustedUpdateHost returns true when host matches the host portion of
-// c.serverURL. This prevents a server from redirecting self-updates to an
-// arbitrary third-party host.
-func (c *Client) isTrustedUpdateHost(host string) bool {
-	parsed, err := neturl.Parse(c.serverURL)
+// originOf returns the lowercase scheme, lowercase hostname and effective
+// port (80/443 default applied) of u.
+func originOf(u *neturl.URL) (scheme, host, port string) {
+	scheme = strings.ToLower(u.Scheme)
+	host = strings.ToLower(u.Hostname())
+	port = u.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return
+}
+
+// sameOrigin reports whether a and b share scheme, hostname and effective port.
+func sameOrigin(a, b *neturl.URL) bool {
+	as, ah, ap := originOf(a)
+	bs, bh, bp := originOf(b)
+	return as != "" && ah != "" && as == bs && ah == bh && ap == bp
+}
+
+// isTrustedUpdateURL returns true when u has the same scheme, hostname
+// (case-insensitive) and effective port as c.serverURL. This prevents a server
+// from pointing self-updates at another host, a downgraded http:// URL, or a
+// different service on the same host.
+func (c *Client) isTrustedUpdateURL(u *neturl.URL) bool {
+	base, err := neturl.Parse(c.serverURL)
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(host, parsed.Hostname())
+	return sameOrigin(u, base)
+}
+
+// prepareUpdate resolves a (possibly relative) update URL against the server
+// URL and validates it. It returns false, after logging, when no checksum was
+// supplied or the URL is not same-origin with the server; the caller must then
+// not download or install anything.
+func (c *Client) prepareUpdate(rawURL, checksum string) (string, bool) {
+	if checksum == "" {
+		c.logger.Warn("update offered without a checksum, refusing (will retry on a later heartbeat)", "url", rawURL)
+		return "", false
+	}
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		c.logger.Error("invalid update URL rejected", "url", rawURL)
+		return "", false
+	}
+	if parsed.Scheme == "" && parsed.Host == "" {
+		rawURL = c.serverURL + rawURL
+		if parsed, err = neturl.Parse(rawURL); err != nil {
+			c.logger.Error("invalid update URL rejected", "url", rawURL)
+			return "", false
+		}
+	}
+	if !c.isTrustedUpdateURL(parsed) {
+		c.logger.Error("untrusted update URL rejected", "url", rawURL)
+		return "", false
+	}
+	return rawURL, true
 }
 
 // PushMetrics fetches the agent's local /metrics endpoint and pushes the body
