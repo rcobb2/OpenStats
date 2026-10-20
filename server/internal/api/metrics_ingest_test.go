@@ -67,9 +67,13 @@ func TestParseAgentMetricsDropsForeignFamilies(t *testing.T) {
 }
 
 func TestStampServerLabelsOverwritesSpoofedLabels(t *testing.T) {
-	f := mustParse(t, `openlabstats_x{hostname="victim",lab="Evil",building="B",room="R",app="a"} 1`+"\n")
-	if err := stampServerLabels(f, "REAL", map[string]string{"lab": "Lab1"}); err != nil {
-		t.Fatal(err)
+	f := mustParse(t, `openlabstats_x{hostname="real",lab="Evil",building="B",room="R",app="a"} 1`+"\n"+
+		`openlabstats_x{hostname="victim",app="a"} 5`+"\n")
+	if n := stampServerLabels(f, "REAL", map[string]string{"lab": "Lab1"}); n != 1 {
+		t.Fatalf("expected the victim-hostname series to be dropped, dropped=%d", n)
+	}
+	if len(f["openlabstats_x"].Metric) != 1 {
+		t.Fatalf("expected 1 series left, got %d", len(f["openlabstats_x"].Metric))
 	}
 	l := labelsOf(f["openlabstats_x"].Metric[0])
 	if l["hostname"] != "REAL" || l["lab"] != "Lab1" || l["app"] != "a" {
@@ -85,26 +89,32 @@ func TestStampServerLabelsOverwritesSpoofedLabels(t *testing.T) {
 
 func TestStampServerLabelsStripsLabWhenServerHasNone(t *testing.T) {
 	f := mustParse(t, `openlabstats_x{lab="Evil"} 1`+"\n")
-	if err := stampServerLabels(f, "H", nil); err != nil {
-		t.Fatal(err)
-	}
+	stampServerLabels(f, "H", nil)
 	if _, ok := labelsOf(f["openlabstats_x"].Metric[0])["lab"]; ok {
 		t.Error("lab should be stripped")
 	}
 }
 
-func TestStampServerLabelsRejectsCollidingSeries(t *testing.T) {
-	f := mustParse(t, "openlabstats_x{hostname=\"a\"} 1\nopenlabstats_x{hostname=\"b\"} 2\n")
-	if err := stampServerLabels(f, "H", nil); err == nil {
-		t.Error("expected duplicate series after hostname overwrite to be rejected")
+// A Mac renamed while the agent runs exposes series under both names; the
+// push must still be accepted, keeping only the current hostname's series.
+func TestStampServerLabelsDropsRenamedHostSeries(t *testing.T) {
+	f := mustParse(t, "openlabstats_x{hostname=\"Litt113\",user=\"u\"} 1\nopenlabstats_x{hostname=\"Ryan113\",user=\"u\"} 2\nopenlabstats_y{hostname=\"Ryan113\"} 3\n")
+	if n := stampServerLabels(f, "Litt113", nil); n != 2 {
+		t.Fatalf("dropped=%d, want 2", n)
+	}
+	if ms := f["openlabstats_x"].Metric; len(ms) != 1 || ms[0].GetCounter().GetValue()+ms[0].GetUntyped().GetValue()+ms[0].GetGauge().GetValue() != 1 {
+		t.Fatalf("expected only the current host's series, got %v", ms)
+	}
+	if _, ok := f["openlabstats_y"]; ok {
+		t.Error("a family left empty should be removed")
 	}
 }
 
 func TestMalformedPushKeepsPreviousSnapshot(t *testing.T) {
 	ms := &MetricsStore{staleness: 5 * time.Minute, snapshots: map[string]agentSnapshot{}}
 	good := mustParse(t, "openlabstats_x 1\n")
-	if err := stampServerLabels(good, "H", nil); err != nil {
-		t.Fatal(err)
+	if n := stampServerLabels(good, "H", nil); n != 0 {
+		t.Fatalf("dropped %d", n)
 	}
 	ms.Set("a1", good)
 	// The handler parses before touching the store; a parse failure returns early.
@@ -137,8 +147,8 @@ func TestApplyMappingsToFamiliesDropsEmptyFamilies(t *testing.T) {
 func TestServeAgentMetricsMergesFamiliesWithSingleHelpType(t *testing.T) {
 	mk := func(host string) map[string]*dto.MetricFamily {
 		f := mustParse(t, "# HELP openlabstats_x Test metric.\n# TYPE openlabstats_x counter\nopenlabstats_x{app=\"a\"} 1\n")
-		if err := stampServerLabels(f, host, nil); err != nil {
-			t.Fatal(err)
+		if n := stampServerLabels(f, host, nil); n != 0 {
+			t.Fatalf("dropped %d", n)
 		}
 		return f
 	}
