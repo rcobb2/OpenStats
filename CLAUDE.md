@@ -86,7 +86,9 @@ Production runs on **podman02**. Deploys go through the **GitHub Action in the p
 
 ## Key Design Decisions & Behaviors
 
-- **No auth** — CORS is open; designed for internal campus networks only.
+- **No auth** — designed for internal campus networks only. CORS is off by default (the SPA is same-origin; `cors.allowedOrigins` opts origins in), and `crossSiteGuard` rejects cross-site browser POST/PUT/PATCH/DELETE (`Sec-Fetch-Site`/`Origin`) so a page on another site can't drive the API from a staff browser. Agents, curl and openstatsctl send neither header and pass.
+- **Metrics push is parsed, not passed through** — `POST /api/v1/agents/metrics` is parsed with expfmt (`metrics_ingest.go`); only `openlabstats_*` families are kept, `hostname` is forced to the registered agent's and agent-supplied `lab`/`building`/`room` are replaced by the server's. A malformed push is rejected (400) and the previous snapshot kept, so one bad agent can't break the single `/metrics/agents` scrape for the fleet. `/metrics/agents` merges families across agents with one HELP/TYPE each.
+- **Agent hardening** — PE metadata is read only from local fixed drives (a UNC path would make SYSTEM authenticate to the host); macOS `Info.plist` reads refuse symlinks, FIFOs and files over 1 MiB. Self-update fails closed without `updateChecksum` and requires the server URL's scheme, host and port (redirects included). The checkpoint loop reconciles tracked PIDs against a live process list every tick so a lost exit event can't leave a group accruing usage forever.
 - **Agent startup behavior**: `ScanExistingProcesses()` (in `wmi.go` on Windows, `proc_darwin.go` on macOS) runs at startup to register already-running processes — critical so the foreground poller can attribute time to processes launched before the agent started.
 - **Two-tier name normalization** in the agent: (1) server-managed `software-map.json` looked up by exe name, (2) PE metadata (`FileDescription`) extracted from the executable. See `agent/internal/normalizer/`.
 - **Prometheus service discovery**: The server writes a `file_sd` JSON file to `fileSD.outputPath` (configured in `server.yaml`). This file is auto-refreshed whenever lab/agent assignments change — no manual Prometheus config needed per agent.
@@ -104,7 +106,7 @@ Production runs on **podman02**. Deploys go through the **GitHub Action in the p
 
 | Path | Purpose |
 |------|---------|
-| `agent/cmd/agent/main.go` | Entry point, CLI subcommands, version const (`v0.1.3`) |
+| `agent/cmd/agent/main.go` | Entry point, CLI subcommands (version from `enrollment.AgentVersion`) |
 | `agent/cmd/agent/agent_windows.go` | Windows agent runner (WMI-based) |
 | `agent/cmd/agent/agent_darwin.go` | macOS agent runner (poll-based) |
 | `agent/internal/monitor/watcher.go` | Cross-platform watcher interface (`WMIWatcherConfig`) |

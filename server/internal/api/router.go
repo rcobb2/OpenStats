@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -248,13 +249,19 @@ func NewRouter(st *store.Store, cfg *config.Config, disc *discovery.FileSD, logg
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
+	// No wildcard CORS: the SPA is served same-origin. Cross-origin browser
+	// access is opt-in via cors.allowedOrigins, and unsafe methods from other
+	// sites are refused by crossSiteGuard (CSRF defence).
+	if len(cfg.CORS.AllowedOrigins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   cfg.CORS.AllowedOrigins,
+			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+			AllowCredentials: false,
+			MaxAge:           300,
+		}))
+	}
+	r.Use(crossSiteGuard(cfg.CORS.AllowedOrigins))
 
 	// Health check.
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -401,4 +408,37 @@ func readJSON(r *http.Request, v interface{}) error {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// crossSiteGuard rejects browser-initiated cross-site unsafe requests. Requests
+// carrying neither Sec-Fetch-Site nor Origin (agents, curl, openstatsctl) pass.
+func crossSiteGuard(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		allowed[strings.ToLower(strings.TrimRight(o, "/"))] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			default:
+				next.ServeHTTP(w, r)
+				return
+			}
+			origin := r.Header.Get("Origin")
+			originAllowed := origin != "" && allowed[strings.ToLower(strings.TrimRight(origin, "/"))]
+			if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" {
+				if sfs != "same-origin" && sfs != "none" && !originAllowed {
+					writeError(w, http.StatusForbidden, "cross-site request blocked")
+					return
+				}
+			} else if origin != "" && !originAllowed {
+				if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) {
+					writeError(w, http.StatusForbidden, "cross-site request blocked")
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

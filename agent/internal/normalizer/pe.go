@@ -7,13 +7,15 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
-	modVersion              = syscall.NewLazyDLL("version.dll")
-	procGetFileVersionInfoW = modVersion.NewProc("GetFileVersionInfoW")
+	modVersion                  = windows.NewLazySystemDLL("version.dll")
+	procGetFileVersionInfoW     = modVersion.NewProc("GetFileVersionInfoW")
 	procGetFileVersionInfoSizeW = modVersion.NewProc("GetFileVersionInfoSizeW")
-	procVerQueryValueW      = modVersion.NewProc("VerQueryValueW")
+	procVerQueryValueW          = modVersion.NewProc("VerQueryValueW")
 )
 
 // PEReader extracts version info metadata from Windows PE executables.
@@ -27,7 +29,27 @@ func NewPEReader(logger *slog.Logger) *PEReader {
 }
 
 // Extract reads the FileDescription and CompanyName from an executable's version resource.
-func (p *PEReader) Extract(exePath string) *AppInfo {
+func (p *PEReader) Extract(exePath string) (result *AppInfo) {
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Warn("recovered from panic reading PE metadata", "path", exePath, "panic", r)
+			result = nil
+		}
+	}()
+
+	// Only read from local fixed drives: UNC/WebDAV/device paths would make
+	// the SYSTEM account authenticate to (or stall on) an attacker host.
+	root, ok := isLocalDrivePath(exePath)
+	if !ok {
+		p.logger.Debug("skipping PE metadata for non-local path", "path", exePath)
+		return nil
+	}
+	rootPtr, err := syscall.UTF16PtrFromString(root)
+	if err != nil || windows.GetDriveType(rootPtr) != windows.DRIVE_FIXED {
+		p.logger.Debug("skipping PE metadata for non-fixed drive", "path", exePath)
+		return nil
+	}
+
 	pathPtr, err := syscall.UTF16PtrFromString(exePath)
 	if err != nil {
 		return nil
@@ -70,8 +92,10 @@ func (p *PEReader) Extract(exePath string) *AppInfo {
 	// Default to English US / Unicode code page.
 	langCodePage := "040904B0"
 	if ret != 0 && transLen >= 4 {
-		trans := (*[2]uint16)(unsafe.Pointer(transPtr))
-		langCodePage = sprintf04x(trans[0]) + sprintf04x(trans[1])
+		if b := bytesInBuf(buf, unsafe.Pointer(transPtr), uintptr(transLen)); b >= 4 {
+			trans := unsafe.Slice((*uint16)(unsafe.Pointer(transPtr)), 2)
+			langCodePage = sprintf04x(trans[0]) + sprintf04x(trans[1])
+		}
 	}
 
 	description := queryStringValue(buf, langCodePage, "FileDescription")
@@ -182,8 +206,32 @@ func queryStringValue(buf []byte, langCodePage, key string) string {
 		return ""
 	}
 
-	// Convert the UTF-16 string to Go string.
-	return syscall.UTF16ToString((*[1 << 15]uint16)(unsafe.Pointer(valuePtr))[:valueLen:valueLen])
+	// valueLen is in characters; the pointer must lie inside buf and the
+	// value must fit in what remains (clamped, never read past the buffer).
+	avail := bytesInBuf(buf, unsafe.Pointer(valuePtr), uintptr(valueLen)*2)
+	n := int(avail / 2)
+	if n <= 0 {
+		return ""
+	}
+	return syscall.UTF16ToString(unsafe.Slice(valuePtr, n))
+}
+
+// bytesInBuf returns how many of the want bytes starting at ptr lie inside
+// buf, or 0 if ptr is outside [&buf[0], &buf[len(buf)]).
+func bytesInBuf(buf []byte, ptr unsafe.Pointer, want uintptr) uintptr {
+	if len(buf) == 0 || ptr == nil {
+		return 0
+	}
+	start := uintptr(unsafe.Pointer(&buf[0]))
+	end := start + uintptr(len(buf))
+	p := uintptr(ptr)
+	if p < start || p >= end {
+		return 0
+	}
+	if rem := end - p; want > rem {
+		return rem
+	}
+	return want
 }
 
 // sprintf04x formats a uint16 as a zero-padded 4-digit hex string.

@@ -363,9 +363,10 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// Reject pushes from unregistered agents so arbitrary callers cannot inject
 	// data into the aggregated metrics endpoint.
-	if _, err := s.store.GetAgent(r.Context(), agentID); err != nil {
+	agent, err := s.store.GetAgent(r.Context(), agentID)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusForbidden, "agent not registered")
+			writeError(w, http.StatusNotFound, "agent not registered")
 		} else {
 			s.logger.Error("failed to verify agent for metrics push", "id", agentID, "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to verify agent")
@@ -380,11 +381,20 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse into a validated model; a malformed push is rejected and the
+	// previous snapshot stays in place so one bad agent cannot break the
+	// fleet-wide scrape page.
+	fams, err := parseAgentMetrics(body)
+	if err != nil {
+		s.logger.Warn("rejected agent metrics push", "id", agentID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Apply server-side mapping rewrite: rename app/category labels for manually-reviewed
-	// entries, drop ignored exe lines, and auto-insert unknown exe names for admin review.
+	// entries, drop ignored exe samples, and auto-insert unknown exe names for admin review.
 	if mappings, err := s.store.GetMappingsMap(r.Context()); err == nil {
-		var unknown map[string]store.DiscoveredApp
-		body, unknown = applyServerMappings(body, mappings)
+		unknown := applyMappingsToFamilies(fams, mappings)
 		if err := s.store.BatchAutoInsertMappings(r.Context(), unknown); err != nil {
 			s.logger.Warn("failed to auto-insert mappings", "count", len(unknown), "error", err)
 		}
@@ -392,11 +402,10 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("failed to load mappings for label rewrite", "error", err)
 	}
 
-	// Inject lab/building/room labels so ReportUsageByLab works correctly.
-	// In the pull model these came from file_sd target labels; in the push model
-	// we must enrich the metrics server-side since agents don't know their lab.
+	// Lab/building/room labels so ReportUsageByLab works correctly. In the push
+	// model the server enriches metrics since agents don't know their lab.
+	extra := map[string]string{}
 	if labName, building, room, err := s.store.GetAgentLabInfo(r.Context(), agentID); err == nil {
-		extra := map[string]string{}
 		if labName != "" {
 			extra["lab"] = labName
 		}
@@ -406,81 +415,15 @@ func (s *Server) PushAgentMetrics(w http.ResponseWriter, r *http.Request) {
 		if room != "" {
 			extra["room"] = room
 		}
-		if len(extra) > 0 {
-			body = injectPromLabels(body, extra)
-		}
+	}
+	if err := stampServerLabels(fams, agent.Hostname, extra); err != nil {
+		s.logger.Warn("rejected agent metrics push", "id", agentID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	s.metricsStore.Set(agentID, body)
+	s.metricsStore.Set(agentID, fams)
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// injectPromLabels adds extra key="value" pairs to every metric line in a
-// Prometheus text-format body. Comment and empty lines are left unchanged.
-func injectPromLabels(body []byte, extras map[string]string) []byte {
-	if len(extras) == 0 {
-		return body
-	}
-
-	// Build the extra label fragment.
-	var sb strings.Builder
-	first := true
-	for k, v := range extras {
-		if !first {
-			sb.WriteByte(',')
-		}
-		sb.WriteString(k)
-		sb.WriteString(`="`)
-		sb.WriteString(promLabelEscape(v))
-		sb.WriteByte('"')
-		first = false
-	}
-	extra := sb.String()
-
-	lines := bytes.Split(body, []byte("\n"))
-	for i, line := range lines {
-		if len(line) == 0 || line[0] == '#' {
-			continue
-		}
-		// Prometheus text format: metric_name{labels} value [timestamp]
-		// Label values can contain spaces (e.g. app="Acrobat Update Helper"), so we
-		// cannot use the first space as the label-set boundary. Instead, find the
-		// last '}' which is the unambiguous end of the label set.
-		var newLine []byte
-		closeIdx := bytes.LastIndexByte(line, '}')
-		if closeIdx >= 0 {
-			// Has label set: insert extra labels before the closing }.
-			newLine = make([]byte, 0, len(line)+len(extra)+1)
-			newLine = append(newLine, line[:closeIdx]...)
-			newLine = append(newLine, ',')
-			newLine = append(newLine, extra...)
-			newLine = append(newLine, '}')
-			newLine = append(newLine, line[closeIdx+1:]...)
-		} else {
-			// No label set: separate metric name from value at the first space,
-			// then insert a label set.
-			spaceIdx := bytes.IndexByte(line, ' ')
-			if spaceIdx <= 0 {
-				continue
-			}
-			newLine = make([]byte, 0, len(line)+len(extra)+2)
-			newLine = append(newLine, line[:spaceIdx]...)
-			newLine = append(newLine, '{')
-			newLine = append(newLine, extra...)
-			newLine = append(newLine, '}')
-			newLine = append(newLine, line[spaceIdx:]...)
-		}
-		lines[i] = newLine
-	}
-	return bytes.Join(lines, []byte("\n"))
-}
-
-// promLabelEscape escapes a string for use as a Prometheus label value.
-func promLabelEscape(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	return s
 }
 
 // builtInIgnoreExeSuffixes matches ephemeral, per-version temp executables
@@ -506,169 +449,19 @@ func isBuiltInIgnoredExe(exeNameLower string) bool {
 	return false
 }
 
-// applyServerMappings rewrites app/category labels using DB mappings, drops
-// ignored exe lines, and returns exe names not yet in the DB along with the
-// app/category labels the agent already attached to them — the agent has
-// already run its own software-map.json/PE-metadata resolution, so an unknown
-// exe is rarely actually blank; seeding the auto-inserted row from that
-// instead of a placeholder is what lets a recognized app land pre-categorized
-// instead of starting every host's review queue from scratch.
-// Only source="manual" mappings trigger rewrites; source="auto" entries are
-// tracked for admin review without altering metric values.
-func applyServerMappings(body []byte, mappings map[string]*store.SoftwareMapping) ([]byte, map[string]store.DiscoveredApp) {
-	unknown := make(map[string]store.DiscoveredApp)
-	var out bytes.Buffer
-	out.Grow(len(body))
-
-	lines := bytes.Split(body, []byte("\n"))
-	for _, line := range lines {
-		if len(line) == 0 || line[0] == '#' {
-			out.Write(line)
-			out.WriteByte('\n')
-			continue
-		}
-
-		openIdx := bytes.IndexByte(line, '{')
-		closeIdx := bytes.LastIndexByte(line, '}')
-		if openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx {
-			out.Write(line)
-			out.WriteByte('\n')
-			continue
-		}
-
-		labelSet := line[openIdx+1 : closeIdx]
-		exeName := extractPromLabelValue(labelSet, "exe")
-		if exeName == "" {
-			out.Write(line)
-			out.WriteByte('\n')
-			continue
-		}
-
-		key := strings.ToLower(exeName)
-		m, found := mappings[key]
-		if !found {
-			if isBuiltInIgnoredExe(key) {
-				continue // drop line — never even auto-insert a mapping row
-			}
-			// Keyed case-insensitively, matching the lookup above and
-			// GetMappingsMap: two case variants of the same exe reported in
-			// one push (or across pushes before either is catalogued) must
-			// resolve to one auto-insert, not two rows that silently collide
-			// later at case-insensitive match time.
-			if _, seen := unknown[key]; !seen {
-				unknown[key] = store.DiscoveredApp{
-					DisplayName: extractPromLabelValue(labelSet, "app"),
-					Category:    extractPromLabelValue(labelSet, "category"),
-				}
-			}
-			out.Write(line)
-			out.WriteByte('\n')
-			continue
-		}
-
-		if m.Ignored {
-			continue // drop line
-		}
-
-		// Only rewrite for manually-reviewed entries; auto-discovered pass through unchanged.
-		if m.Source == "auto" {
-			out.Write(line)
-			out.WriteByte('\n')
-			continue
-		}
-
-		newLabelSet := rewritePromLabelValue(labelSet, "app", m.DisplayName)
-		if m.Category != "" {
-			newLabelSet = rewritePromLabelValue(newLabelSet, "category", m.Category)
-		}
-		out.Write(line[:openIdx+1])
-		out.Write(newLabelSet)
-		out.Write(line[closeIdx:])
-		out.WriteByte('\n')
-	}
-	return out.Bytes(), unknown
-}
-
-// extractPromLabelValue extracts a label value from a Prometheus label set
-// (the bytes between { and }). Returns "" if the label is not present.
-func extractPromLabelValue(labelSet []byte, name string) string {
-	prefix := []byte(name + `="`)
-	idx := 0
-	for {
-		pos := bytes.Index(labelSet[idx:], prefix)
-		if pos < 0 {
-			break
-		}
-		pos += idx
-		// Must be preceded by start-of-set or comma to match whole label name.
-		if pos == 0 || labelSet[pos-1] == ',' {
-			start := pos + len(prefix)
-			for i := start; i < len(labelSet); i++ {
-				if labelSet[i] == '\\' {
-					i++
-					continue
-				}
-				if labelSet[i] == '"' {
-					return string(labelSet[start:i])
-				}
-			}
-		}
-		idx = pos + 1
-	}
-	return ""
-}
-
-// rewritePromLabelValue replaces the value of a named label in a Prometheus
-// label set, returning the modified bytes.
-func rewritePromLabelValue(labelSet []byte, name, newValue string) []byte {
-	prefix := []byte(name + `="`)
-	idx := 0
-	for {
-		pos := bytes.Index(labelSet[idx:], prefix)
-		if pos < 0 {
-			break
-		}
-		pos += idx
-		if pos == 0 || labelSet[pos-1] == ',' {
-			valStart := pos + len(prefix)
-			valEnd := valStart
-			for valEnd < len(labelSet) {
-				if labelSet[valEnd] == '\\' {
-					valEnd++
-					if valEnd < len(labelSet) {
-						valEnd++
-					}
-					continue
-				}
-				if labelSet[valEnd] == '"' {
-					break
-				}
-				valEnd++
-			}
-			escaped := []byte(promLabelEscape(newValue))
-			result := make([]byte, 0, len(labelSet)-(valEnd-valStart)+len(escaped))
-			result = append(result, labelSet[:valStart]...)
-			result = append(result, escaped...)
-			result = append(result, labelSet[valEnd:]...)
-			return result
-		}
-		idx = pos + 1
-	}
-	return labelSet
-}
-
-// ServeAgentMetrics returns all non-stale agent metric snapshots concatenated
-// in Prometheus text format. Prometheus scrapes this endpoint instead of each
+// ServeAgentMetrics returns all non-stale agent metric snapshots merged (one
+// HELP/TYPE per family) in Prometheus text format. Prometheus scrapes this endpoint instead of each
 // agent directly, eliminating the need for inbound access to port 9183.
 func (s *Server) ServeAgentMetrics(w http.ResponseWriter, r *http.Request) {
-	snapshots := s.metricsStore.GetAll()
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	for _, body := range snapshots {
-		w.Write(body)
-		if len(body) > 0 && body[len(body)-1] != '\n' {
-			w.Write([]byte("\n"))
-		}
+	merged := mergeAgentFamilies(s.metricsStore.GetAll(), s.logger)
+	var buf bytes.Buffer
+	if err := encodeFamilies(&buf, merged); err != nil {
+		s.logger.Error("failed to encode agent metrics", "error", err)
+		http.Error(w, "failed to encode metrics", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.Write(buf.Bytes())
 }
 
 func isVersionBelow(current, target string) bool {

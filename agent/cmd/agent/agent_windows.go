@@ -67,6 +67,9 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Initialize process tracker.
 		tracker := monitor.NewTracker(logger)
 
+		// Credits stopped sessions; shared with the checkpoint loop's ghost reaper.
+		onStop := newOnStop(norm, m)
+
 		// Set up WMI watcher first so its FilterProcesses can be used on the
 		// startup scan below.
 		watcher, err := monitor.NewWMIWatcher(tracker, logger, monitor.WMIWatcherConfig{
@@ -80,19 +83,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				}
 				logger.Info("privilege elevation detected", "pid", pid, "exe", exeName, "user", rawUser)
 			},
-			OnStop: func(session *monitor.ProcessSession) {
-				// Resolve the friendly name and record the session.
-				info := norm.Resolve(session.ExeName, session.ExePath)
-				hostname := metrics.Hostname()
-
-				// Update Prometheus metrics only if this is a valid user session.
-				if user, ok := resolveUser(session.User); ok {
-					labels := []string{info.DisplayName, session.ExeName, info.Category, user, hostname}
-					m.AppUsageSeconds.Add(session.CheckpointDelta.Seconds(), labels...)
-					m.AppForegroundSeconds.Add(session.ForegroundDelta.Seconds(), labels...)
-					m.AppLaunches.Inc(labels...)
-				}
-			},
+			OnStop: onStop,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create WMI watcher: %w", err)
@@ -115,7 +106,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}()
 
 		// Start periodic checkpoint loop for active process groups.
-		go runCheckpointLoop(ctx, tracker, norm, m, cfg.Monitor.ReconcileInterval, logger)
+		go runCheckpointLoop(ctx, tracker, norm, m, onStop, cfg.Monitor.ReconcileInterval, logger)
 
 		// Start the OS logon session poller. User sessions come from the OS
 		// (WTS/utmpx), not from process refcounts; 15s keeps sign-in and sign-out

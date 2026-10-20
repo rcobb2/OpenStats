@@ -65,6 +65,9 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		// Initialize process tracker.
 		tracker := monitor.NewTracker(logger)
 
+		// Credits stopped sessions; shared with the checkpoint loop's ghost reaper.
+		onStop := newOnStop(norm, m)
+
 		// Set up macOS process watcher first so its FilterProcesses can be used
 		// to apply the same exclusion rules to the startup scan below.
 		watcher, err := monitor.NewPollWatcher(tracker, logger, monitor.WMIWatcherConfig{
@@ -78,17 +81,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 				}
 				logger.Info("privilege elevation detected", "pid", pid, "exe", exeName, "user", rawUser)
 			},
-			OnStop: func(session *monitor.ProcessSession) {
-				info := norm.Resolve(session.ExeName, session.ExePath)
-				hostname := metrics.Hostname()
-
-				if user, ok := resolveUser(session.User); ok {
-					labels := []string{info.DisplayName, session.ExeName, info.Category, user, hostname}
-					m.AppUsageSeconds.Add(session.CheckpointDelta.Seconds(), labels...)
-					m.AppForegroundSeconds.Add(session.ForegroundDelta.Seconds(), labels...)
-					m.AppLaunches.Inc(labels...)
-				}
-			},
+			OnStop: onStop,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create process watcher: %w", err)
@@ -111,7 +104,7 @@ func runAgent(cfg *config.Config, logger *slog.Logger) service.AgentRunner {
 		}()
 
 		// Start periodic checkpoint loop for active process groups.
-		go runCheckpointLoop(ctx, tracker, norm, m, cfg.Monitor.ReconcileInterval, logger)
+		go runCheckpointLoop(ctx, tracker, norm, m, onStop, cfg.Monitor.ReconcileInterval, logger)
 
 		// Start the OS logon session poller. User sessions come from the OS
 		// (WTS/utmpx), not from process refcounts; 15s keeps sign-in and sign-out

@@ -16,7 +16,48 @@ import (
 	"github.com/rcobb/openlabstats-agent/internal/userid"
 )
 
-func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *normalizer.Normalizer, m *metrics.Metrics, interval time.Duration, logger *slog.Logger) {
+// newOnStop returns the callback that credits a finished process session to the
+// metrics. It is shared by the watcher (real stop events) and the checkpoint
+// loop (ghost groups reaped by reconciliation) so both credit identically.
+func newOnStop(norm *normalizer.Normalizer, m *metrics.Metrics) func(*monitor.ProcessSession) {
+	return func(session *monitor.ProcessSession) {
+		info := norm.Resolve(session.ExeName, session.ExePath)
+		hostname := metrics.Hostname()
+
+		if user, ok := resolveUser(session.User); ok {
+			labels := []string{info.DisplayName, session.ExeName, info.Category, user, hostname}
+			m.AppUsageSeconds.Add(session.CheckpointDelta.Seconds(), labels...)
+			m.AppForegroundSeconds.Add(session.ForegroundDelta.Seconds(), labels...)
+			m.AppLaunches.Inc(labels...)
+		}
+	}
+}
+
+// runningPIDsFn is swapped by tests.
+var runningPIDsFn = monitor.RunningPIDs
+
+// reconcileGhosts drops tracked groups whose processes no longer exist (a lost
+// exit event would otherwise keep them accruing usage forever) and credits them
+// via onStop. The clock is read before enumeration so PIDs registered during or
+// after the enumeration are never reaped. On enumeration failure it skips.
+func reconcileGhosts(tracker *monitor.Tracker, onStop func(*monitor.ProcessSession), logger *slog.Logger) int {
+	snapshotAt := time.Now()
+	running, err := runningPIDsFn()
+	if err != nil {
+		logger.Warn("process enumeration failed; skipping ghost reconcile", "error", err)
+		return 0
+	}
+	ghosts := tracker.Reconcile(running, snapshotAt)
+	for _, g := range ghosts {
+		onStop(g)
+	}
+	if len(ghosts) > 0 {
+		logger.Info("reaped ghost process groups", "count", len(ghosts))
+	}
+	return len(ghosts)
+}
+
+func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *normalizer.Normalizer, m *metrics.Metrics, onStop func(*monitor.ProcessSession), interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -25,6 +66,7 @@ func runCheckpointLoop(ctx context.Context, tracker *monitor.Tracker, norm *norm
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			reconcileGhosts(tracker, onStop, logger)
 			snapshots := tracker.CheckpointActive()
 			hostname := metrics.Hostname()
 

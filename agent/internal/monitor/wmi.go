@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-ole/go-ole"
@@ -71,80 +74,158 @@ func (w *WMIWatcher) FilterProcesses(procs []RunningProcess) []RunningProcess {
 	return filtered
 }
 
-// Run starts WMI event subscriptions. Blocks until ctx is cancelled.
-func (w *WMIWatcher) Run(ctx context.Context) error {
-	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
-		// Already initialized is OK.
-		oleerr, ok := err.(*ole.OleError)
-		if !ok || oleerr.Code() != 0x00000001 { // S_FALSE = already initialized
-			return fmt.Errorf("COM init failed: %w", err)
+// wmiSubscription owns the COM objects behind one pair of event subscriptions.
+type wmiSubscription struct {
+	locator                           *ole.IUnknown
+	wmi, service, startSink, stopSink *ole.IDispatch
+}
+
+// close releases everything in reverse order of creation. It must only be
+// called once no goroutine is still using the sinks.
+func (s *wmiSubscription) close() {
+	for _, d := range []*ole.IDispatch{s.stopSink, s.startSink, s.service, s.wmi} {
+		if d != nil {
+			d.Release()
 		}
 	}
-	defer ole.CoUninitialize()
-
-	locator, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
-	if err != nil {
-		return fmt.Errorf("failed to create WMI locator: %w", err)
+	if s.locator != nil {
+		s.locator.Release()
 	}
-	defer locator.Release()
+}
 
-	wmi, err := locator.QueryInterface(ole.IID_IDispatch)
-	if err != nil {
-		return fmt.Errorf("failed to get WMI dispatch: %w", err)
+// subscribe connects to WMI and subscribes to process start and stop traces.
+// On error nothing is leaked.
+func (w *WMIWatcher) subscribe() (*wmiSubscription, error) {
+	s := &wmiSubscription{}
+	fail := func(format string, err error) (*wmiSubscription, error) {
+		s.close()
+		return nil, fmt.Errorf(format+": %w", err)
 	}
-	defer wmi.Release()
 
-	serviceRaw, err := oleutil.CallMethod(wmi, "ConnectServer")
+	var err error
+	s.locator, err = oleutil.CreateObject("WbemScripting.SWbemLocator")
 	if err != nil {
-		return fmt.Errorf("failed to connect to WMI: %w", err)
+		return fail("failed to create WMI locator", err)
 	}
-	service := serviceRaw.ToIDispatch()
-	defer service.Release()
-
-	// Subscribe to process start events.
-	startQuery := "SELECT * FROM Win32_ProcessStartTrace"
-	startSinkRaw, err := oleutil.CallMethod(service, "ExecNotificationQuery", startQuery)
+	s.wmi, err = s.locator.QueryInterface(ole.IID_IDispatch)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to process start events: %w", err)
+		return fail("failed to get WMI dispatch", err)
 	}
-	startSink := startSinkRaw.ToIDispatch()
-	defer startSink.Release()
-
-	// Subscribe to process stop events.
-	stopQuery := "SELECT * FROM Win32_ProcessStopTrace"
-	stopSinkRaw, err := oleutil.CallMethod(service, "ExecNotificationQuery", stopQuery)
+	serviceRaw, err := oleutil.CallMethod(s.wmi, "ConnectServer")
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to process stop events: %w", err)
+		return fail("failed to connect to WMI", err)
 	}
-	stopSink := stopSinkRaw.ToIDispatch()
-	defer stopSink.Release()
+	s.service = serviceRaw.ToIDispatch()
 
-	w.logger.Info("WMI event subscriptions active")
+	startSinkRaw, err := oleutil.CallMethod(s.service, "ExecNotificationQuery", "SELECT * FROM Win32_ProcessStartTrace")
+	if err != nil {
+		return fail("failed to subscribe to process start events", err)
+	}
+	s.startSink = startSinkRaw.ToIDispatch()
 
-	// Process events in separate goroutines.
-	// Pass the shared service connection so per-event helpers don't open new connections.
-	go w.processStartEvents(ctx, startSink, service)
-	go w.processStopEvents(ctx, stopSink)
+	stopSinkRaw, err := oleutil.CallMethod(s.service, "ExecNotificationQuery", "SELECT * FROM Win32_ProcessStopTrace")
+	if err != nil {
+		return fail("failed to subscribe to process stop events", err)
+	}
+	s.stopSink = stopSinkRaw.ToIDispatch()
+	return s, nil
+}
 
-	<-ctx.Done()
+// initCOM initializes COM for this goroutine; S_FALSE (already initialized) is fine.
+func initCOM() (uninit bool, err error) {
+	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
+		oleerr, ok := err.(*ole.OleError)
+		if !ok || oleerr.Code() != 0x00000001 { // S_FALSE = already initialized
+			return false, fmt.Errorf("COM init failed: %w", err)
+		}
+	}
+	return true, nil
+}
+
+// Run keeps WMI event subscriptions alive until ctx is cancelled. A failure to
+// initialize COM or subscribe, or an event loop failing with anything other
+// than a NextEvent timeout, tears the subscription down and retries with a
+// 1s..30s doubling backoff, so process tracking never silently stops.
+func (w *WMIWatcher) Run(ctx context.Context) error {
+	bo := newBackoff(retryBackoffMin, retryBackoffMax)
+
+	for ctx.Err() == nil {
+		gotEvent, err := w.runSubscription(ctx)
+		if ctx.Err() != nil {
+			break
+		}
+		if gotEvent {
+			bo.Reset()
+		}
+		delay := bo.Next()
+		w.logger.Warn("WMI subscription failed; will re-subscribe", "error", err, "retryIn", delay)
+		if !sleepCtx(ctx, delay) {
+			break
+		}
+	}
 	w.logger.Info("WMI watcher shutting down")
 	return nil
 }
 
-func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch, svc *ole.IDispatch) {
+// runSubscription performs one COM init + subscribe + event-processing cycle.
+// It returns when ctx is done or either event loop fails; gotEvent reports
+// whether at least one event was delivered (used to reset the backoff).
+func (w *WMIWatcher) runSubscription(ctx context.Context) (gotEvent bool, err error) {
+	// COM init/uninit must happen on the same OS thread.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	uninit, err := initCOM()
+	if err != nil {
+		return false, err
+	}
+	if uninit {
+		defer ole.CoUninitialize()
+	}
+
+	sub, err := w.subscribe()
+	if err != nil {
+		return false, err
+	}
+	defer sub.close()
+
+	w.logger.Info("WMI event subscriptions active")
+
+	loopCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var seen atomic.Bool
+	errc := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	// Pass the shared service connection so per-event helpers don't open new connections.
+	go func() { defer wg.Done(); errc <- w.processStartEvents(loopCtx, sub.startSink, sub.service, &seen) }()
+	go func() { defer wg.Done(); errc <- w.processStopEvents(loopCtx, sub.stopSink, &seen) }()
+
+	// First loop to end (error or ctx) stops the other; wait for both before
+	// the deferred close releases the COM objects they use.
+	first := <-errc
+	cancel()
+	wg.Wait()
+	return seen.Load(), first
+}
+
+func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch, svc *ole.IDispatch, seen *atomic.Bool) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 		}
 
-		// NextEvent with 1 second timeout so we can check ctx cancellation.
-		eventRaw, err := oleutil.CallMethod(sink, "NextEvent", 1000)
+		// NextEvent with a 1 second timeout so we can check ctx cancellation.
+		eventRaw, timedOut, err := nextEvent(sink)
 		if err != nil {
-			// Timeout (no event in window) is expected, just retry.
-			continue
+			if timedOut {
+				continue // no event in window; expected
+			}
+			return fmt.Errorf("WMI start event wait failed: %w", err)
 		}
+		seen.Store(true)
 		event := eventRaw.ToIDispatch()
 		if event == nil {
 			continue
@@ -228,19 +309,22 @@ func (w *WMIWatcher) processStartEvents(ctx context.Context, sink *ole.IDispatch
 	}
 }
 
-func (w *WMIWatcher) processStopEvents(ctx context.Context, sink *ole.IDispatch) {
+func (w *WMIWatcher) processStopEvents(ctx context.Context, sink *ole.IDispatch, seen *atomic.Bool) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 		}
 
-		eventRaw, err := oleutil.CallMethod(sink, "NextEvent", 1000)
+		eventRaw, timedOut, err := nextEvent(sink)
 		if err != nil {
-			w.logger.Debug("WMI stop event wait returned error (likely timeout)", "error", err)
-			continue
+			if timedOut {
+				continue
+			}
+			return fmt.Errorf("WMI stop event wait failed: %w", err)
 		}
+		seen.Store(true)
 		event := eventRaw.ToIDispatch()
 		if event == nil {
 			continue
@@ -452,4 +536,22 @@ func getProcessUser(svc *ole.IDispatch, pid uint32) string {
 		return domain + "\\" + user
 	}
 	return user
+}
+
+// nextEventTimeoutMs is the NextEvent wait window.
+const nextEventTimeoutMs = 1000
+
+// nextEvent waits up to nextEventTimeoutMs for one event. timedOut is true for
+// the benign "no event in the window" result: either the error classifies as a
+// WMI timeout, or the call blocked for (nearly) the whole window, which a
+// broken sink never does — it fails immediately. The second test keeps an
+// unexpected timeout encoding from being mistaken for a dead subscription,
+// which would otherwise tear down and resubscribe every second and drop events.
+func nextEvent(sink *ole.IDispatch) (raw *ole.VARIANT, timedOut bool, err error) {
+	start := time.Now()
+	raw, err = oleutil.CallMethod(sink, "NextEvent", nextEventTimeoutMs)
+	if err != nil {
+		timedOut = isWMITimeout(err) || time.Since(start) >= nextEventTimeoutMs*9/10*time.Millisecond
+	}
+	return raw, timedOut, err
 }

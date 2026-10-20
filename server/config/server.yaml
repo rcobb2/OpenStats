@@ -21,3 +21,9 @@ prometheus:
 # Prometheus watches it via file_sd_configs.
 fileSD:
   outputPath: /etc/prometheus/file_sd/openlabstats.json
+
+# Browser origins allowed to call the API cross-origin (default: none, same-origin only).
+# The bundled portal is same-origin and needs nothing here.
+# cors:
+#   allowedOrigins:
+#     - https://portal.example.edu

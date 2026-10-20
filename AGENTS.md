@@ -71,7 +71,7 @@ WindowsLabStats/
 
 ### Frontend → Server
 - **Base**: `/api/v1/*`
-- **All endpoints**: JSON, no auth (CORS open for dev)
+- **All endpoints**: JSON, no auth. CORS is off by default (`cors.allowedOrigins` opts in); cross-site browser writes are rejected with 403
 
 ## Change Checklists
 

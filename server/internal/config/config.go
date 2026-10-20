@@ -14,6 +14,14 @@ type Config struct {
 	Prom          PromConfig          `yaml:"prometheus"`
 	FileSD        FileSDConfig        `yaml:"fileSD"`
 	InstallerSync InstallerSyncConfig `yaml:"installerSync"`
+	CORS          CORSConfig          `yaml:"cors"`
+}
+
+// CORSConfig lists browser origins (e.g. "https://portal.example.edu") allowed
+// to call the API cross-origin. Empty (the default) means same-origin only:
+// the bundled SPA needs no CORS, and agents/openstatsctl send no Origin.
+type CORSConfig struct {
+	AllowedOrigins []string `yaml:"allowedOrigins"`
 }
 
 // InstallerSyncConfig controls the background poller that keeps the local

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -185,35 +186,63 @@ func findAppBundle(path string) string {
 	return ""
 }
 
-// readPlistDict opens path and returns the top-level dict as a flat string map.
+// maxPlistSize bounds Info.plist reads; real ones are a few KiB.
+const maxPlistSize = 1 << 20
+
+// readPlistFile safely reads a user-controlled path as root: it must be a
+// regular file (not a symlink, FIFO or device) no larger than maxPlistSize.
+func readPlistFile(path string) ([]byte, error) {
+	li, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !li.Mode().IsRegular() || li.Size() > maxPlistSize {
+		return nil, fmt.Errorf("plist %s is not a small regular file", path)
+	}
+	f, err := os.OpenFile(path, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() || !os.SameFile(li, fi) || fi.Size() > maxPlistSize {
+		return nil, fmt.Errorf("plist %s changed or is not a regular file", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxPlistSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxPlistSize {
+		return nil, fmt.Errorf("plist %s too large", path)
+	}
+	return data, nil
+}
+
+// readPlistDict safely reads path and returns the top-level dict as a flat string map.
 func readPlistDict(path string) (map[string]string, error) {
-	f, err := os.Open(path)
+	data, err := readPlistFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var magic [6]byte
-	n, _ := f.Read(magic[:])
-	f.Close()
-
-	if n >= 6 && string(magic[:6]) == "bplist" {
-		// Convert binary plist to XML using plutil (ships with macOS).
+	if bytes.HasPrefix(data, []byte("bplist")) {
+		// Convert binary plist to XML using plutil (ships with macOS), feeding
+		// the already-validated bytes via stdin rather than re-opening the path.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "plutil", "-convert", "xml1", "-o", "-", path).Output()
+		cmd := exec.CommandContext(ctx, "plutil", "-convert", "xml1", "-o", "-", "-")
+		cmd.Stdin = bytes.NewReader(data)
+		out, err := cmd.Output()
 		if err != nil {
 			return nil, fmt.Errorf("binary plist conversion failed: %w", err)
 		}
-		return parsePlistDict(bytes.NewReader(out))
+		return parsePlistDict(io.LimitReader(bytes.NewReader(out), 4*maxPlistSize))
 	}
 
-	// Re-open for XML parsing since we consumed the magic bytes.
-	f2, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f2.Close()
-	return parsePlistDict(f2)
+	return parsePlistDict(bytes.NewReader(data))
 }
 
 // parsePlistDict parses the top-level <dict> of an Apple XML plist,
